@@ -1,0 +1,27 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: my-knowledge-assistant-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: my-knowledge-assistant-postgres
+    environment:
+      POSTGRES_DB: workbench
+      POSTGRES_USER: workbench
+      POSTGRES_PASSWORD: workbench
+    ports:
+      - "5432:5432"
+    volumes:
+      - workbench-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  chroma-data:
+  workbench-postgres-data:

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+    <Properties>
+        <Property name="LOG_PATH">logs</Property>
+        <Property name="APP_NAME">my-knowledge-assistant</Property>
+        <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{36} - %msg%n%throwable</Property>
+        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{80} - %msg%n%throwable</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${CONSOLE_PATTERN}" charset="UTF-8"/>
+        </Console>
+
+        <RollingFile
+                name="ApplicationFile"
+                fileName="${LOG_PATH}/${APP_NAME}.log"
+                filePattern="${LOG_PATH}/archive/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_PATTERN}" charset="UTF-8"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="14"/>
+        </RollingFile>
+
+        <RollingFile
+                name="ErrorFile"
+                fileName="${LOG_PATH}/${APP_NAME}-error.log"
+                filePattern="${LOG_PATH}/archive/${APP_NAME}-error-%d{yyyy-MM-dd}-%i.log.gz">
+            <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="${FILE_PATTERN}" charset="UTF-8"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="14"/>
+        </RollingFile>
+
+        <Routing name="ApiRouting">
+            <Routes pattern="$${ctx:apiLogFile}">
+                <Route>
+                    <RollingFile
+                            name="ApiFile-${ctx:apiLogFile}"
+                            fileName="${LOG_PATH}/${ctx:apiLogFile}"
+                            filePattern="${LOG_PATH}/${ctx:apiLogArchiveFile}">
+                        <PatternLayout pattern="${FILE_PATTERN}" charset="UTF-8"/>
+                        <Policies>
+                            <SizeBasedTriggeringPolicy size="10 MB"/>
+                        </Policies>
+                        <DefaultRolloverStrategy max="10"/>
+                    </RollingFile>
+                </Route>
+            </Routes>
+        </Routing>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.example.workbench.config.HttpRequestLoggingFilter" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="ApplicationFile"/>
+            <AppenderRef ref="ErrorFile"/>
+            <AppenderRef ref="ApiRouting"/>
+        </Logger>
+
+        <Logger name="com.example.workbench" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="ApplicationFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </Logger>
+
+        <Logger name="org.springframework.ai" level="WARN"/>
+        <Logger name="org.springframework.web" level="INFO"/>
+        <Logger name="org.apache.catalina" level="INFO"/>
+
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="ApplicationFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </Root>
+    </Loggers>
+</Configuration>

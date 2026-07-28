@@ -1,0 +1,354 @@
+package com.example.workbench.rag;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.example.workbench.advisor.AnswerJudge;
+import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.tools.WebSearchService;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+class RagServiceLearningRecordTest {
+
+    @Test
+    void answersLearningAssistantIntroductionWithoutModelOrRetrieval() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "你是干嘛的？"));
+
+        assertThat(response.answer())
+                .contains("您好，我是您的 AI 学习助理。")
+                .contains("理解和梳理学习中的知识点")
+                .contains("协助回顾和复习已学内容");
+        assertThat(response.sources()).isEmpty();
+        verify(vectorStore, never()).similaritySearch(Mockito.anyString(), Mockito.anyInt());
+        verify(chatClient, never()).generate(Mockito.anyString());
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
+    void answersPlainGreetingWithTheFixedAssistantIntroduction() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "你好！"));
+
+        assertThat(response.answer()).isEqualTo("""
+                您好，我是您的 AI 学习助理。
+
+                我可以帮助您：
+                - 理解和梳理学习中的知识点
+                - 基于已导入资料进行知识库问答
+                - 在资料不足时提供明确标注的通用知识补充
+                - 自动沉淀每日学习记录
+                - 协助回顾和复习已学内容
+                """);
+        verify(vectorStore, never()).similaritySearch(Mockito.anyString(), Mockito.anyInt());
+        verify(chatClient, never()).generate(Mockito.anyString());
+    }
+
+    @Test
+    void answersPinyinGreetingWithTheFixedAssistantIntroduction() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse compact = service.chat(new RagChatRequest("conversation-1", "nihao"));
+        RagChatResponse spaced = service.chat(new RagChatRequest("conversation-2", "nin hao!"));
+
+        assertThat(compact.answer()).contains("您好，我是您的 AI 学习助理。");
+        assertThat(spaced.answer()).contains("您好，我是您的 AI 学习助理。");
+        verify(vectorStore, never()).similaritySearch(Mockito.anyString(), Mockito.anyInt());
+        verify(chatClient, never()).generate(Mockito.anyString());
+    }
+
+    @Test
+    void doesNotTreatGreetingWithARealQuestionAsIntroductionOnly() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(vectorStore.similaritySearch("你好，RAG 是什么？", 5)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString())).thenReturn("RAG 是一种结合信息检索与模型生成的技术。 ");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "你好，RAG 是什么？"));
+
+        assertThat(response.answer()).contains("通用大模型知识").contains("信息检索");
+        verify(vectorStore).similaritySearch("你好，RAG 是什么？", 5);
+    }
+
+    @Test
+    void excludesAutomaticLearningRecordsFromNormalQuestions() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument learningRecord = new SourceDocument(
+                "record-1",
+                "你好",
+                "2026-07-26 学习记录",
+                "2026-07-26.md",
+                "docs/learning-records/user-alice/2026-07-26.md",
+                0
+        ).withScore(0.1);
+        when(vectorStore.similaritySearch("今天适合学习什么？", 5)).thenReturn(List.of(learningRecord));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("我是个人学习知识库助手。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
+
+        assertThat(response.answer()).contains("通用大模型知识");
+        assertThat(response.sources()).isEmpty();
+    }
+
+    @Test
+    void retriesModelFallbackOnceWhenTheFirstAnswerContainsGibberish() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(vectorStore.similaritySearch("今天适合学习什么？", 5)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString()))
+                .thenReturn("我是你的学习助理 kukuiukuiu")
+                .thenReturn("建议先选择一个明确主题，安排短时间的阅读和练习。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
+
+        assertThat(response.answer()).contains("通用大模型知识").contains("建议先选择一个明确主题");
+        verify(chatClient, times(2)).generate(Mockito.anyString());
+    }
+
+    @Test
+    void acceptsNormalLongTechnicalTermsInModelFallbackAnswers() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(vectorStore.similaritySearch("Spring AI 如何实现 RAG？", 5)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString())).thenReturn(
+                "Spring AI 可以通过 QuestionAnswerAdvisor 和 RetrievalAugmentationAdvisor 组合向量检索与模型生成。"
+        );
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "Spring AI 如何实现 RAG？"));
+
+        assertThat(response.answer())
+                .contains("通用大模型知识")
+                .contains("RetrievalAugmentationAdvisor");
+        verify(chatClient, times(1)).generate(Mockito.anyString());
+    }
+
+    @Test
+    void returnsSafetyAnswerWhenBothModelFallbackAnswersAreInvalid() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(vectorStore.similaritySearch("今天适合学习什么？", 5)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString())).thenReturn("kukuiukuiu");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
+
+        assertThat(response.answer()).isEqualTo("当前无法生成可靠的通用知识回答。请稍后重试，或导入相关资料后再问。");
+        verify(chatClient, times(2)).generate(Mockito.anyString());
+    }
+
+    @Test
+    void doesNotRetryModelFallbackWhenProviderReturnsNoContent() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(vectorStore.similaritySearch("今天适合学习什么？", 5)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString())).thenReturn(null);
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
+
+        assertThat(response.answer()).isEqualTo("当前无法生成可靠的通用知识回答。请稍后重试，或导入相关资料后再问。");
+        verify(chatClient, times(1)).generate(Mockito.anyString());
+    }
+
+    @Test
+    void ignoresHeadingOnlySourcesAndFallsBackToTheModel() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument headingOnly = new SourceDocument(
+                "rag-heading",
+                "# RAG",
+                "RAG",
+                "rag.md",
+                "docs/rag.md",
+                0
+        ).withScore(0.29);
+        when(vectorStore.similaritySearch("RAG是什么？", 5)).thenReturn(List.of(headingOnly));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("RAG 是一种先检索相关资料，再结合资料生成回答的技术。它可以让模型回答更有依据。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "RAG是什么？"));
+
+        assertThat(response.answer())
+                .contains("通用大模型知识")
+                .contains("先检索相关资料");
+        assertThat(response.sources()).isEmpty();
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
+    void doesNotUseAnUnrelatedRagNoteToAnswerAnEmbeddingQuestion() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument unrelatedNote = new SourceDocument(
+                "note-1",
+                "RAG 是一种先检索相关资料，再结合资料生成回答的技术。",
+                "2026-07-27 正式笔记",
+                "2026-07-27-learning-note.md",
+                "docs/manual-notes/user-1/2026-07-27-learning-note.md",
+                7,
+                "note-document-1",
+                "2026-07-27-learning-note.md",
+                "hash",
+                0.1,
+                "2026-07-27 学习记录 > 回答",
+                2,
+                0,
+                30,
+                "markdown-section",
+                "FORMAL_NOTE",
+                "1"
+        );
+        String retrievalQuery = "embedding是什么？\nEmbedding 向量表示 语义表示";
+        when(vectorStore.similaritySearch(retrievalQuery, 20)).thenReturn(List.of(unrelatedNote));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("Embedding 是将文本等对象映射为数值向量的表示方法。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("user-1:conversation-1", "embedding是什么？"));
+
+        assertThat(response.answer()).contains("Embedding 是").doesNotContain("RAG 是一种先检索");
+        assertThat(response.sources()).isEmpty();
+        verify(vectorStore).similaritySearch(retrievalQuery, 20);
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
+    void usesTheModelWhenTheOnlyMcpMatchIsAnOldModelGeneratedAnswer() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument oldModelAnswer = new SourceDocument(
+                "mcp-note-1",
+                "MCP 是模型上下文协议。\n\n以上回答基于通用大模型知识，不是当前知识库内容。",
+                "MCP 学习笔记",
+                "mcp-learning-note.md",
+                "docs/manual-notes/user-1/mcp-learning-note.md",
+                0
+        ).withScore(0.1);
+        String retrievalQuery = "MCP是什么？\nMCP Model Context Protocol 基本概念 标准协议 外部工具 数据源 资源服务";
+        when(vectorStore.similaritySearch(retrievalQuery, 20)).thenReturn(List.of(oldModelAnswer));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("MCP 是 Model Context Protocol，用于让 AI 应用以统一方式连接外部工具和数据源。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("user-1:conversation-1", "MCP是什么？"));
+
+        assertThat(response.answer()).contains("Model Context Protocol").contains("通用大模型知识");
+        assertThat(response.sources()).isEmpty();
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+        verify(chatClient).generate(Mockito.anyString());
+    }
+
+    @Test
+    void fallsBackToGeneralKnowledgeInsteadOfEchoingContextWhenGroundingFails() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        AnswerJudge answerJudge = Mockito.mock(AnswerJudge.class);
+        SourceDocument source = new SourceDocument(
+                "embedding-1",
+                "Embedding 用数值向量表示文本的语义。",
+                "Embedding",
+                "embedding.md",
+                "docs/embedding.md",
+                0
+        ).withScore(0.1);
+        String retrievalQuery = "embedding是什么？\nEmbedding 向量表示 语义表示";
+        when(vectorStore.similaritySearch(retrievalQuery, 5)).thenReturn(List.of(source));
+        when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("这是一段没有依据的回答。");
+        when(answerJudge.isGrounded(Mockito.anyString(), Mockito.anyList())).thenReturn(false);
+        when(chatClient.generate(Mockito.anyString())).thenReturn("Embedding 是将对象映射为数值向量的技术。");
+        RagService service = service(vectorStore, chatClient, answerJudge);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "embedding是什么？"));
+
+        assertThat(response.answer()).contains("Embedding 是将对象映射").contains("通用大模型知识");
+        assertThat(response.sources()).isEmpty();
+        assertThat(response.answer()).doesNotContain("Embedding 用数值向量表示文本的语义");
+    }
+
+    @Test
+    void excludesLearningRecordsEvenForExplicitReviewQuestions() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument learningRecord = new SourceDocument(
+                "record-1",
+                "RAG 先检索再生成。",
+                "2026-07-26 学习记录",
+                "2026-07-26.md",
+                "docs/learning-records/user-alice/2026-07-26.md",
+                0
+        ).withScore(0.1);
+        when(vectorStore.similaritySearch("我之前学过什么？", 5)).thenReturn(List.of(learningRecord));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("你可以在学习记录页面查看尚未整理的每日记录。 ");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "我之前学过什么？"));
+
+        assertThat(response.sources()).isEmpty();
+        assertThat(response.answer()).contains("通用大模型知识");
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
+    void excludesAnotherUsersLearningRecordsFromReviewQuestions() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument anotherUsersRecord = new SourceDocument(
+                "record-2",
+                "Bob 学习了数据库索引。",
+                "2026-07-26 学习记录",
+                "2026-07-26.md",
+                "docs/learning-records/user-2/2026-07-26.md",
+                0
+        ).withScore(0.1);
+        when(vectorStore.similaritySearch("我之前学过什么？", 20)).thenReturn(List.of(anotherUsersRecord));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("暂时没有找到你自己的学习记录，可以先完成一次学习问答。 ");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("user-1:conversation-1", "我之前学过什么？"));
+
+        assertThat(response.sources()).isEmpty();
+        assertThat(response.answer()).contains("通用大模型知识");
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    private RagService service(VectorStore vectorStore, LocalChatClient chatClient) {
+        return service(vectorStore, chatClient, Mockito.mock(AnswerJudge.class));
+    }
+
+    private RagService service(VectorStore vectorStore, LocalChatClient chatClient, AnswerJudge answerJudge) {
+        return new RagService(
+                Mockito.mock(DocumentIngestionService.class),
+                vectorStore,
+                chatClient,
+                new ConversationMemory(),
+                Mockito.mock(WebSearchService.class),
+                answerJudge,
+                false,
+                5,
+                0.45,
+                "distance",
+                false,
+                false,
+                4,
+                true,
+                false
+        );
+    }
+}
