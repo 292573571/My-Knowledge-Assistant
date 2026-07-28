@@ -33,8 +33,8 @@ export function apiErrorFromException(error, fallbackMessage = '请求失败，�
 
   if (error?.name === 'AbortError') {
     return new ApiError({
-      message: '请求超时，请稍后重试或检查模型服务是否响应。',
-      details: '前端等待后端响应超时。',
+      message: '模型服务响应超时，请稍后重试。',
+      details: '前端在限定时间内未收到后端的完整回答。',
       retryable: true,
       cause: error
     })

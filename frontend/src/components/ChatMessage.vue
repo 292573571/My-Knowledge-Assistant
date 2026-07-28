@@ -1,7 +1,6 @@
 <script setup>
 import { computed } from 'vue'
 import LoadingDots from './LoadingDots.vue'
-import ToolCallPanel from './ToolCallPanel.vue'
 import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps({
@@ -37,15 +36,15 @@ const timeLabel = computed(() => {
 </script>
 
 <template>
-  <article v-if="message.role === 'user' || message.role === 'assistant'" class="message" :class="`message-${message.role}`">
+  <article v-if="message.role === 'user' || (message.role === 'assistant' && (message.streaming || message.content || message.error))" class="message" :class="`message-${message.role}`">
     <div class="avatar">{{ roleLabel }}</div>
     <div class="message-body">
       <div class="message-meta">
         <strong>{{ roleLabel }}</strong>
         <time v-if="timeLabel" :datetime="message.createdAt">{{ timeLabel }}</time>
       </div>
-      <LoadingDots v-if="streaming" />
-      <div v-if="!streaming" class="markdown-body" v-html="html"></div>
+      <LoadingDots v-if="streaming && !message.content" />
+      <div v-if="message.content" class="markdown-body" v-html="html"></div>
       <div v-if="isAssistant && message.error" class="message-alert error">
         <strong>模型或后端调用失败</strong>
         <span>{{ message.error }}</span>
@@ -54,12 +53,7 @@ const timeLabel = computed(() => {
         <strong>RAG 未命中</strong>
         <span>当前知识库没有找到足够依据，已尝试使用通用大模型知识补充回答。</span>
       </div>
-      <div v-else-if="isAssistant && message.noSources && !isModelSupplement" class="message-alert info">
-        <strong>未返回引用来源</strong>
-        <span>本次回答没有使用本地知识库来源，可能基于通用大模型知识生成。</span>
-      </div>
       <div v-if="!streaming && isModelSupplement" class="model-supplement-label"><strong>模型补充</strong><span>不含本地资料依据，请对关键事实进行核实。</span></div>
-      <ToolCallPanel v-if="isAssistant && message.toolCalls?.length" :tool-calls="message.toolCalls" />
       <div v-if="isAssistant && message.sources?.length" class="source-chips">
         <span v-for="source in message.sources" :key="`${sourceLabel(source)}-${source.chunkIndex ?? ''}`">
           {{ sourceLabel(source) }}

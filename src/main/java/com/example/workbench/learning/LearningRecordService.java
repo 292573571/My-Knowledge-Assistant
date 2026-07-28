@@ -165,11 +165,15 @@ public class LearningRecordService {
         try {
             Files.createDirectories(note.getParent());
             String recordContent = editedContent == null ? Files.readString(record, StandardCharsets.UTF_8) : validateContent(editedContent);
-            String noteContent = "# " + date + " 正式笔记\n\n" + recordContent.strip() + "\n";
+            String body = withoutGeneratedTitle(date, recordContent);
+            String noteContent = "# " + date + " 正式笔记\n\n" + body.strip() + "\n";
+            String learningRecordContent = "# " + date + " 学习记录\n\n" + body.strip() + "\n";
             Files.writeString(note, noteContent, StandardCharsets.UTF_8);
+            // 同一学习日期反复提升只更新同一份正式笔记，先清理历史索引避免旧版本重复显示。
+            documentIngestionService.deleteIndexedPath(workspacePath(note));
             documentIngestionService.ingestDocument(note.toString(), true);
-            // 学习记录保留在记录栏目，但与正式笔记使用同一份整理后内容且不参与知识库索引。
-            Files.writeString(record, noteContent, StandardCharsets.UTF_8);
+            // 两类文档共享正文，但保留各自的标题与语义，学习记录不参与知识库索引。
+            Files.writeString(record, learningRecordContent, StandardCharsets.UTF_8);
             documentIngestionService.deleteIndexedPath(workspacePath(record));
             return new FormalNoteResult(note.getFileName().toString(), workspacePath(note));
         } catch (IOException exception) {
@@ -185,6 +189,19 @@ public class LearningRecordService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习记录内容过长");
         }
         return content;
+    }
+
+    private String withoutGeneratedTitle(String date, String content) {
+        String formalHeader = "# " + date + " 正式笔记";
+        String learningHeader = "# " + date + " 学习记录";
+        String normalized = content.stripLeading();
+
+        while (normalized.startsWith(formalHeader) || normalized.startsWith(learningHeader)) {
+            String header = normalized.startsWith(formalHeader) ? formalHeader : learningHeader;
+            normalized = normalized.substring(header.length()).stripLeading();
+        }
+
+        return normalized;
     }
 
     private Path recordPath(AppUser user) {

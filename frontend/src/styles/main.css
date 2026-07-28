@@ -271,11 +271,26 @@ button:disabled {
 }
 
 .conversation-delete {
-  margin-right: 4px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 6px;
   border-radius: 8px;
-  padding: 6px 8px;
-  color: #9ca3af;
-  font-size: 12px;
+  padding: 0;
+  color: #98a2b3;
+  opacity: 0;
+  transition: opacity 140ms ease, color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.conversation-delete svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .conversation-item.active,
@@ -290,13 +305,26 @@ button:disabled {
   color: #202123;
 }
 
-.conversation-item:hover .conversation-delete {
-  color: #8e8ea0;
+.conversation-item:hover .conversation-delete,
+.conversation-item.active .conversation-delete,
+.conversation-delete:focus-visible {
+  opacity: 1;
 }
 
 .conversation-delete:hover {
-  color: #ef4444 !important;
-  background: #ffffff;
+  color: #dc4c4c !important;
+  background: #fff0f0;
+  transform: scale(1.04);
+}
+
+.conversation-delete:focus-visible {
+  outline: 2px solid #a9bbff;
+  outline-offset: 1px;
+}
+
+.conversation-delete:disabled {
+  cursor: not-allowed;
+  opacity: .35;
 }
 
 .brand-card {
@@ -1628,6 +1656,17 @@ button:disabled {
   box-shadow: 0 5px 16px rgba(50, 72, 140, 0.1);
 }
 
+.tool-call {
+  cursor: default;
+}
+
+.tool-call:hover,
+.tool-call:focus-visible {
+  border-color: #bac7ef;
+  box-shadow: 0 5px 16px rgba(50, 72, 140, 0.1);
+  outline: none;
+}
+
 .source-hover-tooltip {
   position: fixed;
   z-index: 50;
@@ -1641,6 +1680,69 @@ button:disabled {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 14px 35px rgba(31, 43, 79, 0.18);
   pointer-events: none;
+}
+
+.tool-call-tooltip {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  width: min(360px, calc(100vw - 28px));
+  gap: 8px;
+  max-height: min(340px, calc(100vh - 28px));
+  overflow-y: auto;
+  border: 1px solid #cfd8f2;
+  border-radius: 10px;
+  padding: 12px;
+  color: #35405a;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 14px 35px rgba(31, 43, 79, 0.18);
+  pointer-events: none;
+}
+
+.tool-call-tooltip label,
+.tool-call-tooltip dt {
+  color: #8e8ea0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.tool-call-tooltip pre {
+  overflow-x: auto;
+  max-height: 116px;
+  margin: -2px 0 0;
+  border-radius: 7px;
+  padding: 8px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.tool-call-tooltip p {
+  max-height: 78px;
+  overflow-y: auto;
+  margin: -2px 0 0;
+  color: #68758c;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.tool-call-tooltip dl {
+  margin: 0;
+}
+
+.tool-call-tooltip dl div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.tool-call-tooltip dd {
+  margin: 0;
+  color: #202123;
+  font-size: 12px;
 }
 
 .source-hover-tooltip strong {

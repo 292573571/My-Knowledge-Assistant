@@ -8,13 +8,17 @@ import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.learning.LearningRecordService;
 import com.example.workbench.rag.RagChatRequest;
-import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagService;
+import com.example.workbench.rag.RagStreamResponse;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +33,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class WorkbenchStreamController {
 
     private static final long TIMEOUT_MS = 120_000L;
+    private static final Logger log = LoggerFactory.getLogger(WorkbenchStreamController.class);
 
     private final RagService ragService;
     private final WorkbenchChatService workbenchChatService;
@@ -63,9 +68,14 @@ public class WorkbenchStreamController {
             @RequestParam(defaultValue = "default") String conversationId,
             @RequestParam(defaultValue = "rag") String mode,
             @RequestParam String message,
-            HttpServletRequest httpRequest
+            HttpServletRequest httpRequest,
+            jakarta.servlet.http.HttpServletResponse httpResponse
     ) {
         AppUser user = user(httpRequest);
+        // 显式禁止代理、网关或压缩层缓冲 SSE，确保每个 token 抵达后立即交给浏览器。
+        httpResponse.setHeader("Cache-Control", "no-cache, no-transform");
+        httpResponse.setHeader("X-Accel-Buffering", "no");
+        httpResponse.setCharacterEncoding("UTF-8");
         // SSE 连接只负责事件传输；实际 RAG 和消息持久化在异步任务中执行。
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
         String normalizedConversationId = conversationId.isBlank() ? "default" : conversationId;
@@ -98,7 +108,7 @@ public class WorkbenchStreamController {
                         "status", "running"
                 ));
 
-                WorkbenchAnswer answer = answer(UserConversationScope.id(user, normalizedConversationId), normalizedMode, message);
+                RagStreamResponse answer = ragService.stream(new RagChatRequest(scopedConversationId, message));
                 if (execution.isCancelled()) {
                     // 在检索或模型生成期间取消时，直接结束 SSE，且不发送/保存迟到结果。
                     emitter.complete();
@@ -112,20 +122,36 @@ public class WorkbenchStreamController {
                         "success", true,
                         "status", "success",
                         "durationMs", durationMs,
-                        "resultPreview", preview(answer.answer())
+                        "resultPreview", "正在生成回答"
                 ));
 
                 for (Object source : answer.sources()) {
                     send(emitter, "source", source);
                 }
 
-                // 当前按字符模拟推送完整回答；后续可替换为模型原生 token 流而不改变事件协议。
-                streamTokens(emitter, answer.answer());
+                StringBuilder content = new StringBuilder();
+                AtomicBoolean firstTokenSent = new AtomicBoolean(false);
+                answer.tokens().doOnNext(token -> {
+                            if (!execution.isCancelled()) {
+                                content.append(token);
+                                if (firstTokenSent.compareAndSet(false, true)) {
+                                    log.info("Workbench stream first token forwarded conversationId={} latencyMs={}", scopedConversationId, System.currentTimeMillis() - startedAt);
+                                }
+                                try {
+                                    send(emitter, "token", Map.of("text", token));
+                                } catch (IOException exception) {
+                                    throw new IllegalStateException("Failed to send stream token", exception);
+                                }
+                            }
+                        })
+                        .blockLast();
                 if (!execution.isCancelled()) {
-                    boolean recorded = conversationService.recordAssistantMessage(user, normalizedConversationId, normalizedMode, answer.answer(), answer.sources(), java.util.List.of());
+                    String answerContent = content.toString();
+                    ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
+                    boolean recorded = conversationService.recordAssistantMessage(user, normalizedConversationId, normalizedMode, answerContent, answer.sources(), List.of());
                     if (recorded) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
-                        learningRecordService.record(user, message, answer.answer(), answer.sources());
+                        learningRecordService.record(user, message, answerContent, answer.sources());
                     }
                 }
                 send(emitter, "done", Map.of());
@@ -147,27 +173,6 @@ public class WorkbenchStreamController {
         });
 
         return emitter;
-    }
-
-    private WorkbenchAnswer answer(String conversationId, String mode, String message) {
-        // mode 目前固定为 rag；保留参数是为了不破坏现有流式调用边界。
-        RagChatResponse response = ragService.chat(new RagChatRequest(conversationId, message));
-        return new WorkbenchAnswer(response.answer(), response.sources());
-    }
-
-    private void streamTokens(SseEmitter emitter, String answer) throws IOException, InterruptedException {
-        for (int index = 0; index < answer.length(); index++) {
-            send(emitter, "token", Map.of("text", String.valueOf(answer.charAt(index))));
-            Thread.sleep(8L);
-        }
-    }
-
-    private String preview(String answer) {
-        if (answer == null || answer.length() <= 120) {
-            return answer == null ? "" : answer;
-        }
-
-        return answer.substring(0, 120) + "...";
     }
 
     private void send(SseEmitter emitter, String eventName, Object data) throws IOException {

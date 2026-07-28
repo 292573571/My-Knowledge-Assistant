@@ -1,6 +1,5 @@
 package com.example.workbench.rag;
 
-import com.example.workbench.advisor.AnswerJudge;
 import com.example.workbench.config.AssistantPrompts;
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.memory.ConversationMemory;
@@ -29,6 +28,7 @@ public class RagService {
     private static final Pattern REPEATED_SEQUENCE = Pattern.compile("(?s).*(.{2,4})\\1{2,}.*");
     private static final Pattern SUSPICIOUS_LATIN_TOKEN = Pattern.compile("(?i)(?<![a-z])[a-z]{8,}(?![a-z])");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
+    private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
             您好，我是您的 AI 学习助理。
 
@@ -45,7 +45,7 @@ public class RagService {
     private final LocalChatClient chatClient;
     private final ConversationMemory conversationMemory;
     private final WebSearchService webSearchService;
-    private final AnswerJudge answerJudge;
+    private final RagQualityGate qualityGate;
     private final boolean retrievalDebugEnabled;
     private final int topK;
     private final double similarityThreshold;
@@ -62,7 +62,7 @@ public class RagService {
             LocalChatClient chatClient,
             ConversationMemory conversationMemory,
             WebSearchService webSearchService,
-            AnswerJudge answerJudge,
+            RagQualityGate qualityGate,
             @Value("${workbench.rag.debug:false}") boolean retrievalDebugEnabled,
             @Value("${workbench.rag.top-k:5}") int topK,
             @Value("${workbench.rag.similarity-threshold:0.45}") double similarityThreshold,
@@ -78,7 +78,7 @@ public class RagService {
         this.chatClient = chatClient;
         this.conversationMemory = conversationMemory;
         this.webSearchService = webSearchService;
-        this.answerJudge = answerJudge;
+        this.qualityGate = qualityGate;
         this.retrievalDebugEnabled = retrievalDebugEnabled;
         this.topK = topK;
         this.similarityThreshold = similarityThreshold;
@@ -195,9 +195,7 @@ public class RagService {
                 history,
                 Map.of(ConversationMemory.CONVERSATION_ID, conversationId)
         );
-        List<String> contexts = sources.stream().map(SourceDocument::content).toList();
-
-        if (!answerJudge.isGrounded(answer, contexts)) {
+        if (!qualityGate.approvesAnswer(question, answer, sources)) {
             // 依据校验失败通常意味着召回内容或生成答案偏离了当前问题，不能再把候选原文当作答案。
             log.info(
                     "RAG answer grounding failed conversationId={} action=model_fallback sources={}",
@@ -233,6 +231,45 @@ public class RagService {
         List<SourceDocument> sources = vectorStore.similaritySearch(query, topK);
         log.info("RAG retrieve API completed topK={} retrieved={} bestScore={} durationMs={}", topK, sources.size(), bestScore(sources), System.currentTimeMillis() - startedAt);
         return sources;
+    }
+
+    public RagStreamResponse stream(RagChatRequest request) {
+        String conversationId = request.normalizedConversationId();
+        String question = request.message();
+        List<ChatMessage> history = conversationMemory.get(conversationId);
+
+        if (isLearningAssistantIntroductionQuestion(question)) {
+            return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION), List.of());
+        }
+        if (shouldAnswerNoKnowledge(question)) {
+            return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER), List.of());
+        }
+
+        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId));
+        List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
+        if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
+            String prompt = buildModelFallbackPrompt(formatHistory(history), question);
+            return new RagStreamResponse(
+                    chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
+                            .concatWithValues("\n\n" + MODEL_KNOWLEDGE_DISCLAIMER),
+                    List.of()
+            );
+        }
+
+        String context = sources.stream().map(this::formatContext).collect(Collectors.joining("\n\n"));
+        List<RagSource> ragSources = toRagSources(sources);
+        String prompt = buildPrompt(context, formatHistory(history), question);
+        String references = appendReferenceSources("", ragSources);
+        return new RagStreamResponse(
+                chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
+                        .concatWithValues(references),
+                ragSources
+        );
+    }
+
+    public void rememberStreamedAnswer(String conversationId, String question, String answer) {
+        conversationMemory.addUserMessage(conversationId, question);
+        conversationMemory.addAssistantMessage(conversationId, answer);
     }
 
     private String buildPrompt(String context, String history, String question) {
@@ -275,7 +312,10 @@ public class RagService {
                 Map.of(ConversationMemory.CONVERSATION_ID, conversationId)
         );
 
-        if (!answerJudge.isGrounded(answer, webResults.stream().map(WebSearchResult::snippet).toList())) {
+        List<SourceDocument> webSources = webResults.stream()
+                .map(result -> new SourceDocument(result.url(), result.snippet(), result.title(), result.url(), result.url(), 0))
+                .toList();
+        if (!qualityGate.approvesAnswer(question, answer, webSources)) {
             log.info("RAG web answer grounding failed conversationId={} action=use_web_snippets", conversationId);
             answer = "知识库没有足够信息，我将使用搜索工具...\n\n"
                     + webResults.stream()
@@ -369,7 +409,8 @@ public class RagService {
         return """
                 %s
                 当前知识库没有足够信息回答该问题。请基于你的通用知识直接回答，保持准确、简洁；
-                不要声称信息来自知识库或联网搜索。对于不确定、时效性强或需要核实的事实，请明确说明不确定性。
+                不要声称信息来自知识库或联网搜索，也不要输出任何“基于通用大模型知识”或“不是当前知识库内容”的来源声明；
+                系统会在回答完成后统一添加一次来源标记。对于不确定、时效性强或需要核实的事实，请明确说明不确定性。
 
                 对话历史：
                 %s
@@ -489,6 +530,7 @@ public class RagService {
         // AI 学习记录仅用于学习记录页面，不属于知识库事实来源。
         List<SourceDocument> eligibleSources = sources.stream()
                 .filter(source -> !isLearningRecord(source))
+                .filter(source -> !isPromotedLearningNote(source))
                 .filter(source -> !containsModelKnowledgeDisclaimer(source))
                 .filter(source -> matchesExplicitTechnicalTerm(question, source))
                 .toList();
@@ -497,10 +539,11 @@ public class RagService {
         }
 
         // 先按距离/相似度阈值去掉低质量候选，再执行项目中的轻量规则重排。
-        return rerankSources(question, eligibleSources.stream()
+        List<SourceDocument> thresholdSources = rerankSources(question, eligibleSources.stream()
                 .filter(this::hasSubstantiveContent)
                 .filter(this::passesThreshold)
                 .toList());
+        return qualityGate.relevantSources(question, thresholdSources);
     }
 
     private boolean hasSubstantiveContent(SourceDocument source) {
@@ -518,6 +561,11 @@ public class RagService {
     private boolean isLearningRecord(SourceDocument source) {
         return "LEARNING_RECORD".equals(source.category())
                 || source.path() != null && source.path().replace('\\', '/').startsWith("docs/learning-records/");
+    }
+
+    private boolean isPromotedLearningNote(SourceDocument source) {
+        String path = source.path() == null ? "" : source.path().replace('\\', '/');
+        return "FORMAL_NOTE".equals(source.category()) && path.matches(".*/\\d{4}-\\d{2}-\\d{2}-learning-note\\.md$");
     }
 
     private boolean matchesExplicitTechnicalTerm(String question, SourceDocument source) {
@@ -869,8 +917,24 @@ public class RagService {
         // 只保留最近六条，控制 Prompt 长度和上下文成本。
         return history.stream()
                 .skip(Math.max(0, history.size() - 6))
-                .map(message -> message.role() + ": " + message.content())
+                // 历史只用于理解指代，过长的旧答案会拖慢后续模型请求且容易干扰当前问题。
+                .map(message -> message.role() + ": " + truncateHistoryMessage(withoutModelKnowledgeDisclaimer(message.content())))
                 .collect(Collectors.joining("\n"));
+    }
+
+    private String withoutModelKnowledgeDisclaimer(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+
+        return MODEL_KNOWLEDGE_DISCLAIMER_LINE.matcher(content).replaceAll("").strip();
+    }
+
+    private String truncateHistoryMessage(String content) {
+        if (content == null || content.length() <= 600) {
+            return content == null ? "" : content;
+        }
+        return content.substring(0, 600) + "...";
     }
 
     private String formatContext(SourceDocument document) {

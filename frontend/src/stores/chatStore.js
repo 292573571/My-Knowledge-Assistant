@@ -226,21 +226,6 @@ function failStreaming(assistantMessage, error = null) {
   assistantMessage.retryable = apiError.retryable
   assistantMessage.streaming = false
   finishStreaming()
-  if (!assistantMessage.content) {
-    assistantMessage.content = modelFailureMessage(apiError)
-  }
-}
-
-function modelFailureMessage(error) {
-  if (!error.status) {
-    return '后端暂时不可用，我没有拿到回答。请确认后端服务已启动后重试。'
-  }
-
-  if (error.status >= 500) {
-    return '后端处理失败，可能是模型调用、知识库检索或服务内部异常。请稍后重试，或用 requestId 到后端日志定位。'
-  }
-
-  return error.message
 }
 
 function applyRagEmptyState(assistantMessage, mode) {
@@ -270,7 +255,7 @@ export function useChatStore() {
     syncActiveMessages()
     state.error = ''
     state.lastFailedMessage = text
-    // 先乐观显示用户消息和空的助手气泡，网络返回后再填充助手结果。
+    // 先插入助手占位消息；首个 token 到达前仅显示生成指示器。
     state.messages.push(createUserMessage(text))
     upsertConversationTitle(text)
 
@@ -280,21 +265,42 @@ export function useChatStore() {
     state.isStreaming = true
 
     try {
-      const response = await sendChatMessage({
-        conversationId: state.activeConversationId,
-        message: text,
-        mode: 'rag',
-        // chatApi 创建 AbortController 后回传取消函数，stop() 可立即终止浏览器请求。
-        onAbortReady: (abort) => {
-          state.abortStream = abort
-        }
+      await new Promise((resolve, reject) => {
+        let settled = false
+        const close = streamChat({
+          conversationId: state.activeConversationId,
+          message: text,
+          mode: 'rag',
+          onEvent: (type, data) => {
+            if (settled) return
+            if (type === 'token') {
+              assistantMessage.content += data.text || ''
+              return
+            }
+            if (type === 'source') {
+              assistantMessage.sources.push(data)
+              return
+            }
+            if (type === 'tool_call_start' || type === 'tool_call_result') {
+              upsertToolCall(assistantMessage.toolCalls, data)
+              return
+            }
+            if (type === 'done') {
+              settled = true
+              close()
+              resolve()
+              return
+            }
+            if (type === 'error') {
+              settled = true
+              close()
+              reject(new Error(data.message || '模型流式回答中断，请稍后重试。'))
+            }
+          }
+        })
+        state.abortStream = close
       })
 
-      assistantMessage.id = response.messageId || assistantMessage.id
-      assistantMessage.content = response.answer || ''
-      assistantMessage.sources = response.sources || []
-      assistantMessage.toolCalls = response.toolCalls || response.tool_calls || []
-      assistantMessage.requestId = response.requestId || ''
       assistantMessage.streaming = false
       applyRagEmptyState(assistantMessage, 'rag')
 
@@ -307,6 +313,8 @@ export function useChatStore() {
       }
 
       finishStreaming()
+      // 重试成功后必须清除上一轮失败状态，避免正确回答下方仍显示过期错误提示。
+      state.error = ''
       state.lastFailedMessage = ''
     } catch (error) {
       failStreaming(assistantMessage, error)
@@ -328,6 +336,11 @@ export function useChatStore() {
     const streamingMessage = [...state.messages].reverse().find((message) => message.streaming)
     if (streamingMessage) {
       streamingMessage.streaming = false
+      // 用户在首个 token 前停止时，这只是本地占位，不应留下空白回答框。
+      if (!streamingMessage.content && !streamingMessage.error) {
+        const index = state.messages.indexOf(streamingMessage)
+        if (index >= 0) state.messages.splice(index, 1)
+      }
     }
     touchActiveConversation()
     if (conversationId && conversation?.persisted) {

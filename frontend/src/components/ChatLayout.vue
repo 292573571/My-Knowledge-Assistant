@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ChatInput from './ChatInput.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationSidebar from './ConversationSidebar.vue'
@@ -39,6 +39,24 @@ const latestInfo = computed(() => {
 const activeConversation = computed(() => {
   return state.conversations.find((item) => item.id === state.activeConversationId)
 })
+
+async function scrollToLatestMessage() {
+  await nextTick()
+  if (messagesEl.value) {
+    messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  }
+}
+
+onMounted(scrollToLatestMessage)
+
+watch(
+  () => state.activeConversationId,
+  () => {
+    // 登录恢复或切换会话时，始终从最近一条记录开始阅读。
+    shouldAutoScroll.value = true
+    scrollToLatestMessage()
+  }
+)
 
 watch(
   () => state.messages.map((message) => `${message.content}:${message.sources?.length || 0}:${message.toolCalls?.length || 0}`).join('|'),
@@ -97,11 +115,11 @@ function handleMessagesScroll() {
             v-for="message in state.messages"
             :key="message.id"
             :message="message"
-            :streaming="message.streaming && !message.content"
+            :streaming="message.streaming"
           />
         </section>
 
-        <div v-if="state.error" class="error-text">
+        <div v-if="state.error && !state.lastFailedMessage" class="error-text">
           <strong>请求失败</strong>
           <span>{{ state.error }}</span>
           <button v-if="state.lastFailedMessage && !state.isStreaming" type="button" @click="retryLast">重试上一条</button>

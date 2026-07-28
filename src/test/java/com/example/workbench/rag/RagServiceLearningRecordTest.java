@@ -6,7 +6,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.example.workbench.advisor.AnswerJudge;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.tools.WebSearchService;
 import java.util.List;
@@ -255,10 +254,45 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void usesTheModelWhenTheOnlyMcpMatchIsAPromotedLearningNoteQuestion() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument promotedLearningQuestion = new SourceDocument(
+                "mcp-question-1",
+                "MCP是什么？",
+                "2026-07-28 正式笔记",
+                "2026-07-28-learning-note.md",
+                "docs/manual-notes/user-1/2026-07-28-learning-note.md",
+                1,
+                "mcp-note-1",
+                "2026-07-28-learning-note.md",
+                "hash",
+                0.1,
+                "2026-07-28 学习记录 > 问题",
+                2,
+                0,
+                8,
+                "markdown-section",
+                "FORMAL_NOTE",
+                "1"
+        );
+        String retrievalQuery = "MCP是什么？\nMCP Model Context Protocol 基本概念 标准协议 外部工具 数据源 资源服务";
+        when(vectorStore.similaritySearch(retrievalQuery, 20)).thenReturn(List.of(promotedLearningQuestion));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("MCP 是 Model Context Protocol，用于让 AI 应用以统一方式连接外部工具和数据源。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("user-1:conversation-1", "MCP是什么？"));
+
+        assertThat(response.answer()).contains("Model Context Protocol").contains("通用大模型知识");
+        assertThat(response.sources()).isEmpty();
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
     void fallsBackToGeneralKnowledgeInsteadOfEchoingContextWhenGroundingFails() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
-        AnswerJudge answerJudge = Mockito.mock(AnswerJudge.class);
+        RagQualityGate qualityGate = Mockito.mock(RagQualityGate.class);
         SourceDocument source = new SourceDocument(
                 "embedding-1",
                 "Embedding 用数值向量表示文本的语义。",
@@ -271,9 +305,9 @@ class RagServiceLearningRecordTest {
         when(vectorStore.similaritySearch(retrievalQuery, 5)).thenReturn(List.of(source));
         when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
                 .thenReturn("这是一段没有依据的回答。");
-        when(answerJudge.isGrounded(Mockito.anyString(), Mockito.anyList())).thenReturn(false);
+        when(qualityGate.approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList())).thenReturn(false);
         when(chatClient.generate(Mockito.anyString())).thenReturn("Embedding 是将对象映射为数值向量的技术。");
-        RagService service = service(vectorStore, chatClient, answerJudge);
+        RagService service = service(vectorStore, chatClient, qualityGate);
 
         RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "embedding是什么？"));
 
@@ -329,17 +363,17 @@ class RagServiceLearningRecordTest {
     }
 
     private RagService service(VectorStore vectorStore, LocalChatClient chatClient) {
-        return service(vectorStore, chatClient, Mockito.mock(AnswerJudge.class));
+        return service(vectorStore, chatClient, new RagQualityGate(chatClient, false));
     }
 
-    private RagService service(VectorStore vectorStore, LocalChatClient chatClient, AnswerJudge answerJudge) {
+    private RagService service(VectorStore vectorStore, LocalChatClient chatClient, RagQualityGate qualityGate) {
         return new RagService(
                 Mockito.mock(DocumentIngestionService.class),
                 vectorStore,
                 chatClient,
                 new ConversationMemory(),
                 Mockito.mock(WebSearchService.class),
-                answerJudge,
+                qualityGate,
                 false,
                 5,
                 0.45,

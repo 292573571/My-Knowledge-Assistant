@@ -113,8 +113,31 @@ class LearningRecordServiceTest {
                 .contains("# 2026-07-26 正式笔记")
                 .contains("提升时尚未单独保存的编辑内容");
         assertThat(Files.readString(records.resolve("user-alice/2026-07-26.md")))
-                .isEqualTo(Files.readString(notes.resolve("user-alice/2026-07-26-learning-note.md")));
-        verify(ingestionService).deleteIndexedPath(Mockito.anyString());
+                .contains("# 2026-07-26 学习记录")
+                .contains("提升时尚未单独保存的编辑内容")
+                .doesNotContain("# 2026-07-26 正式笔记");
+        verify(ingestionService).deleteIndexedPath(notes.resolve("user-alice/2026-07-26-learning-note.md").toString());
+        verify(ingestionService).deleteIndexedPath(records.resolve("user-alice/2026-07-26.md").toString());
         verify(ingestionService, times(1)).ingestDocument(eq(notes.resolve("user-alice/2026-07-26-learning-note.md").toString()), eq(true));
+    }
+
+    @Test
+    void promotesTheSameRecordWithoutNestingFormalNoteHeaders() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        Path records = tempDir.resolve("docs/learning-records");
+        Path notes = tempDir.resolve("docs/manual-notes");
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, records, notes);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        service.record(user, "RAG 是什么？", "RAG 会先检索资料再生成回答。", List.of());
+
+        service.promote(user, "2026-07-26");
+        service.promote(user, "2026-07-26");
+
+        String content = Files.readString(notes.resolve("user-alice/2026-07-26-learning-note.md"));
+        assertThat(content).containsOnlyOnce("# 2026-07-26 正式笔记");
+        assertThat(Files.readString(records.resolve("user-alice/2026-07-26.md")))
+                .containsOnlyOnce("# 2026-07-26 学习记录")
+                .doesNotContain("# 2026-07-26 正式笔记");
     }
 }

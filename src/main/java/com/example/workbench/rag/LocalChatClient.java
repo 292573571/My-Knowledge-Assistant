@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +27,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
+import reactor.core.publisher.Flux;
 
 @Component
 public class LocalChatClient {
@@ -39,6 +41,7 @@ public class LocalChatClient {
     private final int maxAttempts;
     private final Duration retryBackoff;
     private final Duration requestTimeout;
+    private final Duration fallbackRequestTimeout;
     private final String fallbackStrategy;
     private final double temperature;
 
@@ -49,7 +52,8 @@ public class LocalChatClient {
             @Value("${app.ai.fallback-models:}") String fallbackModels,
             @Value("${app.ai.retry.max-attempts:2}") int maxAttempts,
             @Value("${app.ai.retry.backoff-ms:500}") long retryBackoffMs,
-            @Value("${app.ai.request-timeout-ms:30000}") long requestTimeoutMs,
+            @Value("${app.ai.request-timeout-ms:20000}") long requestTimeoutMs,
+            @Value("${app.ai.fallback-request-timeout-ms:45000}") long fallbackRequestTimeoutMs,
             @Value("${app.ai.fallback-strategy:local-answer}") String fallbackStrategy,
             @Value("${app.ai.temperature:0.3}") double temperature
     ) {
@@ -60,15 +64,17 @@ public class LocalChatClient {
         this.maxAttempts = Math.max(1, maxAttempts);
         this.retryBackoff = Duration.ofMillis(Math.max(0, retryBackoffMs));
         this.requestTimeout = Duration.ofMillis(Math.max(1, requestTimeoutMs));
+        this.fallbackRequestTimeout = Duration.ofMillis(Math.max(1, fallbackRequestTimeoutMs));
         this.fallbackStrategy = fallbackStrategy == null || fallbackStrategy.isBlank() ? "local-answer" : fallbackStrategy;
         this.temperature = Math.max(0.0, Math.min(1.0, temperature));
 
         log.info(
-                "AI client policy configured provider=openai-compatible primaryModel={} fallbackModels={} temperature={} requestTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={}",
+                "AI client policy configured provider=openai-compatible primaryModel={} fallbackModels={} temperature={} primaryTimeoutMs={} fallbackTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={}",
                 this.chatModel,
                 this.fallbackModels,
                 this.temperature,
                 this.requestTimeout.toMillis(),
+                this.fallbackRequestTimeout.toMillis(),
                 this.maxAttempts,
                 this.retryBackoff.toMillis(),
                 this.fallbackStrategy
@@ -120,6 +126,33 @@ public class LocalChatClient {
         return callSpringAi(prompt, Map.of());
     }
 
+    public Flux<String> stream(String prompt, Map<String, String> options) {
+        if (chatClient == null) {
+            return Flux.error(new IllegalStateException("ChatClient is not available"));
+        }
+
+        String conversationId = options.getOrDefault("conversationId", "default");
+        AtomicBoolean receivedToken = new AtomicBoolean(false);
+        return streamModel(prompt, conversationId, chatModel, requestTimeout)
+                .doOnNext(token -> receivedToken.set(true))
+                .onErrorResume(error -> !receivedToken.get() && !fallbackModels.isEmpty()
+                        ? streamModel(prompt, conversationId, fallbackModels.get(0), fallbackRequestTimeout)
+                        : Flux.error(error));
+    }
+
+    private Flux<String> streamModel(String prompt, String conversationId, String model, Duration timeout) {
+        log.info("AI model stream started provider=openai-compatible model={} conversationId={} requestTimeoutMs={} promptLength={}",
+                model, conversationId, timeout.toMillis(), prompt == null ? 0 : prompt.length());
+        return chatClient.prompt()
+                .user(prompt)
+                .options(OpenAiChatOptions.builder().model(model).temperature(temperature).build())
+                .advisors(advisorSpec -> advisorSpec.param("conversationId", conversationId))
+                .stream()
+                .content()
+                .timeout(timeout)
+                .doOnError(error -> log.warn("AI model stream failed model={} conversationId={} error={}", model, conversationId, error.getMessage()));
+    }
+
     private String callSpringAi(String prompt, Map<String, String> options) {
         if (chatClient == null) {
             log.warn("AI model skipped reason=chatClient_not_available model={} baseUrl={}", chatModel, chatBaseUrl);
@@ -129,13 +162,14 @@ public class LocalChatClient {
         String conversationId = options.getOrDefault("conversationId", "default");
         List<String> models = modelsToTry();
         log.info(
-                "AI model call policy provider=openai-compatible primaryModel={} fallbackModels={} baseUrl={} conversationId={} temperature={} requestTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={} promptLength={}",
+                "AI model call policy provider=openai-compatible primaryModel={} fallbackModels={} baseUrl={} conversationId={} temperature={} primaryTimeoutMs={} fallbackTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={} promptLength={}",
                 chatModel,
                 fallbackModels,
                 chatBaseUrl,
                 conversationId,
                 temperature,
                 requestTimeout.toMillis(),
+                fallbackRequestTimeout.toMillis(),
                 maxAttempts,
                 retryBackoff.toMillis(),
                 fallbackStrategy,
@@ -144,6 +178,7 @@ public class LocalChatClient {
 
         for (int modelIndex = 0; modelIndex < models.size(); modelIndex++) {
             String model = models.get(modelIndex);
+            Duration timeout = modelIndex == 0 ? requestTimeout : fallbackRequestTimeout;
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 long startedAt = System.currentTimeMillis();
@@ -155,12 +190,12 @@ public class LocalChatClient {
                         conversationId,
                         attempt,
                         maxAttempts,
-                        requestTimeout.toMillis(),
+                        timeout.toMillis(),
                         prompt == null ? 0 : prompt.length()
                 );
 
                 try {
-                    ChatResponse response = callChatResponse(prompt, conversationId, model);
+                    ChatResponse response = callChatResponse(prompt, conversationId, model, timeout);
                     String content = content(response);
                     logModelResponse(response, model, conversationId, attempt, startedAt, content);
                     return content;
@@ -186,7 +221,7 @@ public class LocalChatClient {
         return null;
     }
 
-    private ChatResponse callChatResponse(String prompt, String conversationId, String model) {
+    private ChatResponse callChatResponse(String prompt, String conversationId, String model, Duration timeout) {
         CompletableFuture<ChatResponse> future = CompletableFuture.supplyAsync(() -> chatClient.prompt()
                 .user(prompt)
                 .options(OpenAiChatOptions.builder().model(model).temperature(temperature).build())
@@ -198,10 +233,10 @@ public class LocalChatClient {
                 .chatResponse());
 
         try {
-            return future.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
             future.cancel(true);
-            throw new AiModelCallException("AI model request timed out after " + requestTimeout.toMillis() + "ms", exception);
+            throw new AiModelCallException("AI model request timed out after " + timeout.toMillis() + "ms", exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new AiModelCallException("AI model request interrupted", exception);

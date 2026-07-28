@@ -168,8 +168,16 @@ public class DocumentIngestionService {
     }
 
     public List<DocumentIndexEntry> listIndexedDocuments() {
-        return documentIndexStore.list().stream()
+        // 旧版本可能留下同一路径的重复索引；列表只展示该路径最新的有效版本。
+        Map<String, DocumentIndexEntry> latestByPath = new HashMap<>();
+        documentIndexStore.list().forEach(entry -> latestByPath.merge(
+                entry.path().replace('\\', '/'),
+                entry,
+                (current, candidate) -> current.ingestedAt() >= candidate.ingestedAt() ? current : candidate
+        ));
+        return latestByPath.values().stream()
                 .filter(entry -> !isLearningRecordEntry(entry))
+                .sorted(java.util.Comparator.comparing(DocumentIndexEntry::fileName))
                 .toList();
     }
 
@@ -223,8 +231,8 @@ public class DocumentIngestionService {
         String normalizedPath = path.replace('\\', '/');
         documentIndexStore.list().stream()
                 .filter(entry -> entry.path().replace('\\', '/').equals(normalizedPath))
-                .findFirst()
-                .ifPresent(this::removeIndexedDocument);
+                .toList()
+                .forEach(this::removeIndexedDocument);
     }
 
     public synchronized RebuildResult rebuildDocuments() throws IOException {

@@ -1,7 +1,8 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
 
-const REQUEST_TIMEOUT_MS = 30000
+// 一次 RAG 问答可能包含召回质量评估、回答生成和答案评估，需与 SSE 请求预算保持一致。
+const REQUEST_TIMEOUT_MS = 120000
 const REQUEST_ERROR_MESSAGE = '请求失败，请检查后端服务是否启动。'
 
 export async function sendChatMessage({ conversationId, mode, message, onAbortReady }) {

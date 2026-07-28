@@ -40,7 +40,7 @@ export function streamChat({ conversationId, mode, message, onEvent }) {
       durationMs: Math.round(performance.now() - startedAt),
       error: e
     })
-    onEvent('error', e)
+    onEvent('error', e?.data ? parseEventData(e.data) : {})
     es.close()
   })
 
