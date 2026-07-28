@@ -38,6 +38,11 @@ public class RuleBasedEvaluator {
         boolean headingPathMatched = anyContains(actualHeadingPaths, nullSafe(evalCase.expectedHeadingPaths()));
         boolean keywordMatched = matchedKeywords.size() >= Math.ceil(nullSafe(evalCase.expectedKeywords()).size() / 2.0);
         boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream().anyMatch(answer::contains);
+        boolean modelFallbackUsed = usesModelFallback(answer);
+        boolean localEvidenceSatisfied = sourceMatched
+                && (nullSafe(evalCase.expectedHeadingPaths()).isEmpty() || headingPathMatched);
+        boolean evidenceRequiredButMissing = evalCase.requireLocalEvidence() && !localEvidenceSatisfied;
+        boolean disallowedModelFallback = modelFallbackUsed && !evalCase.allowModelFallback();
 
         double score = 0;
         score += hasAnswer ? 0.2 : 0;
@@ -49,8 +54,9 @@ public class RuleBasedEvaluator {
             score = Math.max(0, score - 0.3);
         }
 
-        boolean passed = score >= 0.7 && !forbiddenMatched;
-        String reason = reason(sourceMatched, headingPathMatched, keywordMatched, forbiddenMatched);
+        boolean passed = score >= 0.7 && !forbiddenMatched && !evidenceRequiredButMissing && !disallowedModelFallback;
+        String reason = reason(sourceMatched, headingPathMatched, keywordMatched, forbiddenMatched,
+                evidenceRequiredButMissing, disallowedModelFallback);
 
         return new EvalResult(
                 evalCase.id(),
@@ -58,6 +64,8 @@ public class RuleBasedEvaluator {
                 evalCase.type(),
                 evalCase.question(),
                 evalCase.expectNoAnswer(),
+                evalCase.requireLocalEvidence(),
+                evalCase.allowModelFallback(),
                 passed,
                 score,
                 null,
@@ -72,6 +80,12 @@ public class RuleBasedEvaluator {
                 actualHeadingPaths,
                 matchedKeywords,
                 missingKeywords,
+                sourceMatched,
+                !actualSources.isEmpty() && localEvidenceSatisfied,
+                keyPointCoverage(matchedKeywords, nullSafe(evalCase.expectedKeywords())),
+                hasAnswer && !localEvidenceSatisfied && !modelFallbackUsed,
+                modelFallbackUsed,
+                false,
                 response.retrievalDebug()
         );
     }
@@ -88,6 +102,8 @@ public class RuleBasedEvaluator {
         boolean hasAnswer = !answer.isBlank();
         boolean noAnswerMatched = expressesNoAnswer(answer);
         boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream().anyMatch(answer::contains);
+        boolean modelFallbackUsed = usesModelFallback(answer);
+        boolean disallowedModelFallback = modelFallbackUsed && !evalCase.allowModelFallback();
 
         double score = 0;
         score += hasAnswer ? 0.3 : 0;
@@ -97,8 +113,8 @@ public class RuleBasedEvaluator {
             score = Math.max(0, score - 0.5);
         }
 
-        boolean passed = score >= 0.7 && !forbiddenMatched;
-        String reason = noAnswerReason(hasAnswer, noAnswerMatched, forbiddenMatched);
+        boolean passed = score >= 0.7 && !forbiddenMatched && !disallowedModelFallback;
+        String reason = noAnswerReason(hasAnswer, noAnswerMatched, forbiddenMatched, disallowedModelFallback);
 
         return new EvalResult(
                 evalCase.id(),
@@ -106,6 +122,8 @@ public class RuleBasedEvaluator {
                 evalCase.type(),
                 evalCase.question(),
                 evalCase.expectNoAnswer(),
+                evalCase.requireLocalEvidence(),
+                evalCase.allowModelFallback(),
                 passed,
                 score,
                 null,
@@ -120,6 +138,12 @@ public class RuleBasedEvaluator {
                 actualHeadingPaths,
                 matchedKeywords,
                 missingKeywords,
+                false,
+                false,
+                keyPointCoverage(matchedKeywords, nullSafe(evalCase.expectedKeywords())),
+                false,
+                modelFallbackUsed,
+                passed,
                 retrievalDebug
         );
     }
@@ -158,7 +182,8 @@ public class RuleBasedEvaluator {
         return values == null ? List.of() : values;
     }
 
-    private String reason(boolean sourceMatched, boolean headingPathMatched, boolean keywordMatched, boolean forbiddenMatched) {
+    private String reason(boolean sourceMatched, boolean headingPathMatched, boolean keywordMatched,
+                          boolean forbiddenMatched, boolean evidenceRequiredButMissing, boolean disallowedModelFallback) {
         List<String> parts = new ArrayList<>();
 
         if (sourceMatched) {
@@ -176,6 +201,12 @@ public class RuleBasedEvaluator {
         if (forbiddenMatched) {
             parts.add("forbidden keywords");
         }
+        if (evidenceRequiredButMissing) {
+            parts.add("required local evidence missing");
+        }
+        if (disallowedModelFallback) {
+            parts.add("model fallback not allowed");
+        }
 
         if (parts.isEmpty()) {
             return "No rule matched";
@@ -190,7 +221,8 @@ public class RuleBasedEvaluator {
                 + parts.get(parts.size() - 1);
     }
 
-    private String noAnswerReason(boolean hasAnswer, boolean noAnswerMatched, boolean forbiddenMatched) {
+    private String noAnswerReason(boolean hasAnswer, boolean noAnswerMatched, boolean forbiddenMatched,
+                                  boolean disallowedModelFallback) {
         List<String> parts = new ArrayList<>();
 
         if (hasAnswer) {
@@ -204,6 +236,9 @@ public class RuleBasedEvaluator {
         if (forbiddenMatched) {
             parts.add("forbidden keywords");
         }
+        if (disallowedModelFallback) {
+            parts.add("model fallback not allowed");
+        }
 
         if (parts.isEmpty()) {
             return "No rule matched";
@@ -216,5 +251,13 @@ public class RuleBasedEvaluator {
         return "Matched " + String.join(", ", parts.subList(0, parts.size() - 1))
                 + " and "
                 + parts.get(parts.size() - 1);
+    }
+
+    private double keyPointCoverage(List<String> matchedKeywords, List<String> expectedKeywords) {
+        return expectedKeywords.isEmpty() ? 1.0 : (double) matchedKeywords.size() / expectedKeywords.size();
+    }
+
+    private boolean usesModelFallback(String answer) {
+        return answer.contains("以上回答基于通用大模型知识，不是当前知识库内容。");
     }
 }

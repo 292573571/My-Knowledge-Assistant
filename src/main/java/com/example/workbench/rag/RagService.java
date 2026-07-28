@@ -91,6 +91,10 @@ public class RagService {
     }
 
     public RagChatResponse chat(RagChatRequest request) {
+        return chat(request, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
+
+    public RagChatResponse chat(RagChatRequest request, RagChatOptions options) {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
         String question = request.message();
@@ -129,7 +133,7 @@ public class RagService {
 
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId));
+        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), options);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
@@ -231,6 +235,21 @@ public class RagService {
         List<SourceDocument> sources = vectorStore.similaritySearch(query, topK);
         log.info("RAG retrieve API completed topK={} retrieved={} bestScore={} durationMs={}", topK, sources.size(), bestScore(sources), System.currentTimeMillis() - startedAt);
         return sources;
+    }
+
+    public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId) {
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("message cannot be empty");
+        }
+
+        List<String> queries = retrievalQueries(question.strip());
+        List<SourceDocument> candidates = retrieveCandidates(question.strip(), ownerUserId);
+        List<SourceDocument> usedSources = filterByThreshold(question.strip(), candidates);
+        return new RetrievalDebugResponse(
+                question.strip(),
+                queries,
+                retrievalDebug(question.strip(), candidates, usedSources)
+        );
     }
 
     public RagStreamResponse stream(RagChatRequest request) {
@@ -421,12 +440,20 @@ public class RagService {
     }
 
     private String buildRetrievalQuery(String question) {
-        return expandRetrievalQuery(rewriteQuery(question));
+        return buildRetrievalQuery(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
+
+    private String buildRetrievalQuery(String question, RagChatOptions options) {
+        return expandRetrievalQuery(rewriteQuery(question, options));
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId) {
+        return retrieveCandidates(question, ownerUserId, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
+
+    private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, RagChatOptions options) {
         // 多个查询命中同一分块时累计命中次数，并合并为一个候选，避免重复上下文。
-        List<String> queries = retrievalQueries(question);
+        List<String> queries = retrievalQueries(question, options);
         LinkedHashMap<String, ScoredCandidate> candidates = new LinkedHashMap<>();
 
         for (String query : queries) {
@@ -456,10 +483,14 @@ public class RagService {
     }
 
     private List<String> retrievalQueries(String question) {
-        List<String> queries = new ArrayList<>();
-        queries.add(buildRetrievalQuery(question));
+        return retrievalQueries(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
 
-        if (!multiQueryEnabled) {
+    private List<String> retrievalQueries(String question, RagChatOptions options) {
+        List<String> queries = new ArrayList<>();
+        queries.add(buildRetrievalQuery(question, options));
+
+        if (!options.multiQueryEnabled()) {
             return queries;
         }
 
@@ -490,7 +521,11 @@ public class RagService {
     }
 
     private String rewriteQuery(String question) {
-        if (!queryRewriteEnabled) {
+        return rewriteQuery(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
+
+    private String rewriteQuery(String question, RagChatOptions options) {
+        if (!options.queryRewriteEnabled()) {
             return question;
         }
 

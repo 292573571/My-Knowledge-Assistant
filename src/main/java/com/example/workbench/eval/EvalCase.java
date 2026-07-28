@@ -8,6 +8,8 @@ public record EvalCase(
         String type,
         String question,
         boolean expectNoAnswer,
+        boolean requireLocalEvidence,
+        boolean allowModelFallback,
         List<String> expectedSources,
         List<String> expectedHeadingPaths,
         List<String> expectedKeywords,

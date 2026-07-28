@@ -1,0 +1,26 @@
+[
+  {
+    "mode": "rag",
+    "type": "fact",
+    "question": "普通问答前端调用哪个接口发起请求？",
+    "expectNoAnswer": false,
+    "requireLocalEvidence": true,
+    "allowModelFallback": false,
+    "expectedSources": ["normal-chat-data-flow.md"],
+    "expectedHeadingPaths": ["普通问答数据流"],
+    "expectedKeywords": ["POST /api/workbench/chat", "conversationId", "message"],
+    "forbiddenKeywords": []
+  },
+  {
+    "mode": "rag",
+    "type": "refusal",
+    "question": "当前知识库是否说明了生产数据库密码的具体值？",
+    "expectNoAnswer": true,
+    "requireLocalEvidence": true,
+    "allowModelFallback": false,
+    "expectedSources": [],
+    "expectedHeadingPaths": [],
+    "expectedKeywords": [],
+    "forbiddenKeywords": ["密码", "具体值"]
+  }
+]

@@ -1,81 +1,76 @@
 package com.example.workbench.rag;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class DocumentIndexStore {
 
-    private static final Path DEFAULT_INDEX_PATH = Path.of("data", "document-index.json");
-
-    private final ObjectMapper objectMapper;
-    private final Path indexPath;
+    private final DocumentIndexRepository repository;
+    private List<DocumentIndexEntry> testEntries;
 
     @Autowired
-    public DocumentIndexStore(ObjectMapper objectMapper) {
-        this(objectMapper, DEFAULT_INDEX_PATH);
+    public DocumentIndexStore(DocumentIndexRepository repository) {
+        this.repository = repository;
     }
 
+    // 仅供既有轻量单测使用；生产代码始终通过 repository 读写 PostgreSQL。
     DocumentIndexStore(ObjectMapper objectMapper, Path indexPath) {
-        this.objectMapper = objectMapper;
-        this.indexPath = indexPath;
+        this.repository = null;
+        this.testEntries = new ArrayList<>();
     }
 
+    @Transactional(readOnly = true)
     public synchronized List<DocumentIndexEntry> list() {
-        if (!Files.exists(indexPath)) {
-            return List.of();
-        }
-
-        try {
-            return objectMapper.readValue(indexPath.toFile(), new TypeReference<>() {});
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to read document index", exception);
-        }
+        if (repository == null) return List.copyOf(testEntries);
+        return repository.findAllByOrderByFileNameAsc().stream().map(DocumentIndexEntity::toEntry).toList();
     }
 
+    @Transactional
     public synchronized void replaceAll(List<DocumentIndexEntry> entries) {
-        try {
-            Files.createDirectories(indexPath.getParent());
-            List<DocumentIndexEntry> sortedEntries = new ArrayList<>(entries);
-            sortedEntries.sort(Comparator.comparing(DocumentIndexEntry::fileName));
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(indexPath.toFile(), sortedEntries);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to write document index", exception);
+        List<DocumentIndexEntry> sortedEntries = new ArrayList<>(entries);
+        sortedEntries.sort(Comparator.comparing(DocumentIndexEntry::fileName));
+        if (repository == null) {
+            testEntries = sortedEntries;
+            return;
         }
+        repository.deleteAllInBatch();
+        repository.saveAll(sortedEntries.stream().map(DocumentIndexEntity::new).toList());
     }
 
+    @Transactional
     public synchronized void upsertAll(List<DocumentIndexEntry> entries) {
-        List<DocumentIndexEntry> nextEntries = new ArrayList<>(list());
-
+        if (repository == null) {
+            List<DocumentIndexEntry> nextEntries = new ArrayList<>(list());
+            for (DocumentIndexEntry entry : entries) {
+                nextEntries.removeIf(existing -> existing.documentId().equals(entry.documentId()) || existing.path().equals(entry.path()) || existing.contentHash().equals(entry.contentHash()));
+                nextEntries.add(entry);
+            }
+            replaceAll(nextEntries);
+            return;
+        }
         for (DocumentIndexEntry entry : entries) {
-            nextEntries.removeIf(existing -> existing.documentId().equals(entry.documentId())
-                    || existing.path().equals(entry.path())
-                    || existing.contentHash().equals(entry.contentHash()));
-            nextEntries.add(entry);
+            repository.deleteByDocumentId(entry.documentId());
+            repository.deleteByPathOrContentHash(entry.path(), entry.contentHash());
+            repository.save(new DocumentIndexEntity(entry));
         }
-
-        replaceAll(nextEntries);
     }
 
+    @Transactional
     public synchronized void delete(String documentId) {
-        replaceAll(list().stream()
-                .filter(entry -> !entry.documentId().equals(documentId))
-                .toList());
+        if (repository == null) replaceAll(list().stream().filter(entry -> !entry.documentId().equals(documentId)).toList());
+        else repository.deleteByDocumentId(documentId);
     }
 
+    @Transactional
     public synchronized void clear() {
-        try {
-            Files.deleteIfExists(indexPath);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to clear document index", exception);
-        }
+        if (repository == null) testEntries = new ArrayList<>();
+        else repository.deleteAllInBatch();
     }
 }

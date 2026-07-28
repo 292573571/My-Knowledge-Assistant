@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import java.util.Map;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.ai.chat.client.ChatClient;
@@ -116,5 +117,12 @@ public class RagController {
     public RagChatResponse chat(@Valid @RequestBody RagChatRequest request, HttpServletRequest httpRequest) {
         AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
         return ragService.chat(new RagChatRequest(UserConversationScope.id(user, request.normalizedConversationId()), request.message()));
+    }
+
+    @PostMapping("/rag/debug")
+    public RetrievalDebugResponse debugRetrieval(@RequestBody Map<String, String> body, HttpServletRequest httpRequest) {
+        AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+        String ownerUserId = user.getId() == null ? user.getAccount() : user.getId().toString();
+        return ragService.debugRetrieval(body == null ? null : body.get("message"), ownerUserId);
     }
 }

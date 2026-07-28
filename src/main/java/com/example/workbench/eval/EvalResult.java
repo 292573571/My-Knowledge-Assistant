@@ -9,6 +9,8 @@ public record EvalResult(
         String type,
         String question,
         boolean expectNoAnswer,
+        boolean requireLocalEvidence,
+        boolean allowModelFallback,
         boolean passed,
         double ruleScore,
         Integer judgeScore,
@@ -23,6 +25,12 @@ public record EvalResult(
         List<String> actualHeadingPaths,
         List<String> matchedKeywords,
         List<String> missingKeywords,
+        boolean retrievalHit,
+        boolean citationCorrect,
+        double keyPointCoverage,
+        boolean unsupportedAnswer,
+        boolean modelFallbackUsed,
+        boolean refusalCorrect,
         List<RetrievalDebug> retrievalDebug
 ) {
 }

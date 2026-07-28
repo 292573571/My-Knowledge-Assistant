@@ -5,6 +5,7 @@ import AuthPage from './components/AuthPage.vue'
 import ChatLayout from './components/ChatLayout.vue'
 import LearningRecords from './components/LearningRecords.vue'
 import KnowledgeBase from './components/KnowledgeBase.vue'
+import RetrievalDebug from './components/RetrievalDebug.vue'
 import UserProfile from './components/UserProfile.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useChatStore } from './stores/chatStore'
@@ -131,6 +132,10 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
             <span>知识库管理</span>
           </button>
+          <button :class="{ active: activeSection === 'retrieval-debug' }" type="button" @click="activeSection = 'retrieval-debug'">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M7.5 10.5h6M10.5 7.5v6"/></svg>
+            <span>检索调试</span>
+          </button>
         </nav>
         <div class="portal-account-menu" @mouseenter="accountMenuOpen = true" @mouseleave="accountMenuOpen = false">
         <button type="button" class="portal-avatar-button" aria-label="打开个人资料" :aria-expanded="accountMenuOpen" @click="openProfile">
@@ -155,7 +160,8 @@ async function submitPasswordChange() {
         </div>
       </header>
       <LearningRecords v-if="activeSection === 'records'" />
-      <KnowledgeBase v-else-if="activeSection === 'knowledge'" />
+       <KnowledgeBase v-else-if="activeSection === 'knowledge'" />
+       <RetrievalDebug v-else-if="activeSection === 'retrieval-debug'" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ChatLayout v-else :user-name="currentUser.userName" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />

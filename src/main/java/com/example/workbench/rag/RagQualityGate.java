@@ -86,6 +86,10 @@ public class RagQualityGate {
         return !verdict.strip().toUpperCase().startsWith("FAIL");
     }
 
+    public boolean isEnabled() {
+        return enabled;
+    }
+
     private List<Integer> parseKeptIndexes(String verdict, int candidateCount) {
         if (verdict == null || verdict.isBlank()) {
             return null;

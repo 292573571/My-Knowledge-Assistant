@@ -10,6 +10,7 @@ import com.example.workbench.learning.LearningRecordService;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
+import com.example.workbench.rag.RagQualityAuditService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -41,6 +42,7 @@ public class WorkbenchStreamController {
     private final ConversationExecutionRegistry executionRegistry;
     private final ConversationMemory conversationMemory;
     private final LearningRecordService learningRecordService;
+    private final RagQualityAuditService ragQualityAuditService;
 
     public WorkbenchStreamController(
             RagService ragService,
@@ -48,7 +50,8 @@ public class WorkbenchStreamController {
             ConversationService conversationService,
             ConversationExecutionRegistry executionRegistry,
             ConversationMemory conversationMemory,
-            LearningRecordService learningRecordService
+            LearningRecordService learningRecordService,
+            RagQualityAuditService ragQualityAuditService
     ) {
         this.ragService = ragService;
         this.workbenchChatService = workbenchChatService;
@@ -56,6 +59,7 @@ public class WorkbenchStreamController {
         this.executionRegistry = executionRegistry;
         this.conversationMemory = conversationMemory;
         this.learningRecordService = learningRecordService;
+        this.ragQualityAuditService = ragQualityAuditService;
     }
 
     @PostMapping
@@ -149,9 +153,10 @@ public class WorkbenchStreamController {
                     String answerContent = content.toString();
                     ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
                     boolean recorded = conversationService.recordAssistantMessage(user, normalizedConversationId, normalizedMode, answerContent, answer.sources(), List.of());
-                    if (recorded) {
+                        if (recorded) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
-                        learningRecordService.record(user, message, answerContent, answer.sources());
+                            learningRecordService.record(user, message, answerContent, answer.sources());
+                            ragQualityAuditService.audit(scopedConversationId, message, answerContent, answer.sources());
                     }
                 }
                 send(emitter, "done", Map.of());

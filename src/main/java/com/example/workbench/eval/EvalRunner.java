@@ -1,14 +1,19 @@
 package com.example.workbench.eval;
 
+import com.example.workbench.auth.AppUser;
 import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
+import com.example.workbench.rag.RagChatOptions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,14 +26,18 @@ import org.springframework.stereotype.Service;
 public class EvalRunner {
 
     private static final Path QUESTIONS_PATH = Path.of("eval", "questions.jsonl");
+    // 兼容保留旧报告渲染代码；在线和命令行评测均不再调用这些文件路径。
     private static final Path RESULTS_PATH = Path.of("eval", "results", "latest.json");
     private static final Path REPORT_PATH = Path.of("eval", "reports", "latest.md");
+    private static final DateTimeFormatter RUN_ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")
+            .withZone(ZoneOffset.UTC);
 
     private final RagService ragService;
     private final DocumentIngestionService documentIngestionService;
     private final RuleBasedEvaluator evaluator;
     private final LlmJudgeEvaluator llmJudgeEvaluator;
     private final ObjectMapper objectMapper;
+    private final EvalRunStorage evalRunStorage;
     private final boolean judgeEnabled;
     private final Set<String> caseIds;
     private final int ragTopK;
@@ -44,6 +53,7 @@ public class EvalRunner {
             RuleBasedEvaluator evaluator,
             LlmJudgeEvaluator llmJudgeEvaluator,
             ObjectMapper objectMapper,
+            EvalRunStorage evalRunStorage,
             @Value("${workbench.eval.judge.enabled:false}") boolean judgeEnabled,
             @Value("${workbench.eval.case-ids:}") String caseIds,
             @Value("${workbench.rag.top-k:5}") int ragTopK,
@@ -58,6 +68,7 @@ public class EvalRunner {
         this.evaluator = evaluator;
         this.llmJudgeEvaluator = llmJudgeEvaluator;
         this.objectMapper = objectMapper;
+        this.evalRunStorage = evalRunStorage;
         this.judgeEnabled = judgeEnabled;
         this.caseIds = parseCaseIds(caseIds);
         this.ragTopK = ragTopK;
@@ -69,25 +80,32 @@ public class EvalRunner {
     }
 
     public EvalSummary run() throws IOException {
+        return run(readCases().stream().filter(this::shouldRun).toList(), false, null);
+    }
+
+    public EvalSummary run(List<EvalCase> cases, boolean enhanced, AppUser owner) throws IOException {
+        String runId = RUN_ID_FORMAT.format(Instant.now());
         documentIngestionService.rebuildDocuments();
-        List<EvalCase> cases = readCases().stream()
-                .filter(this::shouldRun)
-                .toList();
         List<EvalResult> results = cases.stream()
-                .map(this::runCase)
+                .map(evalCase -> runCase(evalCase, enhanced, owner == null ? "" : owner.getId().toString()))
                 .toList();
         int passed = (int) results.stream().filter(EvalResult::passed).count();
         EvalSummary summary = new EvalSummary(
+                runId,
                 results.size(),
                 passed,
                 results.size() - passed,
                 results.isEmpty() ? 0 : (double) passed / results.size(),
+                rate(results, EvalResult::retrievalHit),
+                rate(results, EvalResult::citationCorrect),
+                average(results, EvalResult::keyPointCoverage),
+                rate(results, EvalResult::unsupportedAnswer),
+                rate(results, EvalResult::modelFallbackUsed),
+                refusalCorrectnessRate(results),
                 results
         );
 
-        writeJson(summary);
-        writeReport(summary);
-        return summary;
+        return evalRunStorage.save(owner, summary, enhanced, judgeEnabled);
     }
 
     private List<EvalCase> readCases() throws IOException {
@@ -105,8 +123,12 @@ public class EvalRunner {
         }
     }
 
-    private EvalResult runCase(EvalCase evalCase) {
-        RagChatResponse response = ragService.chat(new RagChatRequest("eval-" + evalCase.id(), evalCase.question()));
+    private EvalResult runCase(EvalCase evalCase, boolean enhanced, String ownerUserId) {
+        String conversationId = ownerUserId == null || ownerUserId.isBlank()
+                ? "eval-" + evalCase.id()
+                : "user-" + ownerUserId + ":eval-" + evalCase.id();
+        RagChatResponse response = ragService.chat(new RagChatRequest(conversationId, evalCase.question()),
+                new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled));
         EvalResult ruleResult = evaluator.evaluate(evalCase, response);
 
         if (!judgeEnabled) {
@@ -137,6 +159,8 @@ public class EvalRunner {
                 ruleResult.type(),
                 ruleResult.question(),
                 ruleResult.expectNoAnswer(),
+                ruleResult.requireLocalEvidence(),
+                ruleResult.allowModelFallback(),
                 passed,
                 ruleResult.ruleScore(),
                 judgeResult.score(),
@@ -151,6 +175,12 @@ public class EvalRunner {
                 ruleResult.actualHeadingPaths(),
                 ruleResult.matchedKeywords(),
                 ruleResult.missingKeywords(),
+                ruleResult.retrievalHit(),
+                ruleResult.citationCorrect(),
+                ruleResult.keyPointCoverage(),
+                ruleResult.unsupportedAnswer(),
+                ruleResult.modelFallbackUsed(),
+                ruleResult.refusalCorrect(),
                 ruleResult.retrievalDebug()
         );
     }
@@ -162,6 +192,8 @@ public class EvalRunner {
                 ruleResult.type(),
                 ruleResult.question(),
                 ruleResult.expectNoAnswer(),
+                ruleResult.requireLocalEvidence(),
+                ruleResult.allowModelFallback(),
                 ruleResult.passed(),
                 ruleResult.ruleScore(),
                 null,
@@ -176,6 +208,12 @@ public class EvalRunner {
                 ruleResult.actualHeadingPaths(),
                 ruleResult.matchedKeywords(),
                 ruleResult.missingKeywords(),
+                ruleResult.retrievalHit(),
+                ruleResult.citationCorrect(),
+                ruleResult.keyPointCoverage(),
+                ruleResult.unsupportedAnswer(),
+                ruleResult.modelFallbackUsed(),
+                ruleResult.refusalCorrect(),
                 ruleResult.retrievalDebug()
         );
     }
@@ -183,21 +221,32 @@ public class EvalRunner {
     private void writeJson(EvalSummary summary) throws IOException {
         Files.createDirectories(RESULTS_PATH.getParent());
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(RESULTS_PATH.toFile(), summary);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(historyPath(RESULTS_PATH, summary.runId()).toFile(), summary);
     }
 
     private void writeReport(EvalSummary summary) throws IOException {
         Files.createDirectories(REPORT_PATH.getParent());
-        Files.writeString(REPORT_PATH, markdownReport(summary), StandardCharsets.UTF_8);
+        String report = markdownReport(summary);
+        Files.writeString(REPORT_PATH, report, StandardCharsets.UTF_8);
+        Files.writeString(historyPath(REPORT_PATH, summary.runId()), report, StandardCharsets.UTF_8);
     }
 
     private String markdownReport(EvalSummary summary) {
         StringBuilder builder = new StringBuilder();
         builder.append("# Eval Report\n\n");
+        builder.append("Run ID: ").append(summary.runId()).append("\n");
         builder.append("Total: ").append(summary.total()).append("\n");
         builder.append("Passed: ").append(summary.passed()).append("\n");
         builder.append("Failed: ").append(summary.failed()).append("\n");
         builder.append("Pass Rate: ").append(String.format("%.0f%%", summary.passRate() * 100)).append("\n\n");
         builder.append("Judge Enabled: ").append(judgeEnabled).append("\n\n");
+        builder.append("## Quality Metrics\n\n");
+        builder.append("Retrieval Hit Rate: ").append(percent(summary.retrievalHitRate())).append("\n");
+        builder.append("Citation Correctness Rate: ").append(percent(summary.citationCorrectnessRate())).append("\n");
+        builder.append("Key Point Coverage Rate: ").append(percent(summary.keyPointCoverageRate())).append("\n");
+        builder.append("Unsupported Answer Rate: ").append(percent(summary.unsupportedAnswerRate())).append("\n");
+        builder.append("Model Fallback Rate: ").append(percent(summary.modelFallbackRate())).append("\n");
+        builder.append("Refusal Correctness Rate: ").append(percent(summary.refusalCorrectnessRate())).append("\n\n");
         appendConfigSnapshot(builder);
         builder.append("## Results By Type\n\n");
         builder.append("| Type | Total | Passed | Pass Rate |\n");
@@ -276,7 +325,7 @@ public class EvalRunner {
         builder.append("scoreDirection: ").append(scoreDirection).append("\n");
         builder.append("queryRewrite: ").append(queryRewriteEnabled).append("\n");
         builder.append("multiQuery: ").append(multiQueryEnabled).append("\n");
-        builder.append("rerank: false\n");
+        builder.append("rerank: enabled (规则重排：阈值过滤后，按文档类别、标题路径和关键词匹配提升候选排序；不使用通用 reranker)\n");
         builder.append("retrievalDebug: ").append(retrievalDebugEnabled).append("\n\n");
     }
 
@@ -349,6 +398,29 @@ public class EvalRunner {
         }
 
         builder.append(String.join(", ", values)).append("\n\n");
+    }
+
+    private Path historyPath(Path latestPath, String runId) {
+        String fileName = latestPath.getFileName().toString();
+        String extension = fileName.substring(fileName.lastIndexOf('.'));
+        return latestPath.resolveSibling(runId + extension);
+    }
+
+    private double rate(List<EvalResult> results, java.util.function.Predicate<EvalResult> predicate) {
+        return results.isEmpty() ? 0 : (double) results.stream().filter(predicate).count() / results.size();
+    }
+
+    private double average(List<EvalResult> results, java.util.function.ToDoubleFunction<EvalResult> value) {
+        return results.isEmpty() ? 0 : results.stream().mapToDouble(value).average().orElse(0);
+    }
+
+    private double refusalCorrectnessRate(List<EvalResult> results) {
+        List<EvalResult> refusalCases = results.stream().filter(EvalResult::expectNoAnswer).toList();
+        return rate(refusalCases, EvalResult::refusalCorrect);
+    }
+
+    private String percent(double value) {
+        return String.format("%.0f%%", value * 100);
     }
 
     private record TypeStats(String type, int total, int passed, double passRate) {

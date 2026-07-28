@@ -170,8 +170,7 @@ npm run build
 脚本会读取 `src/main/resources/application.properties`，并以 `app.mode=eval` 启动 Spring Boot，执行 `eval/questions.jsonl` 中的用例，输出到：
 
 ```text
-eval/results/latest.json
-eval/reports/latest.md
+PostgreSQL: eval_runs、eval_run_results
 ```
 
 只跑少量样例：

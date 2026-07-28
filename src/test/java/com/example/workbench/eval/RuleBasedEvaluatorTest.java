@@ -19,6 +19,8 @@ class RuleBasedEvaluatorTest {
                 "fact",
                 "RAG 是什么？",
                 false,
+                true,
+                false,
                 List.of("rag-notes.md"),
                 List.of("RAG > Overview"),
                 List.of("检索", "生成"),
@@ -44,6 +46,8 @@ class RuleBasedEvaluatorTest {
                 "fact",
                 "RAG 是什么？",
                 false,
+                true,
+                false,
                 List.of("rag-notes.md"),
                 List.of("RAG"),
                 List.of("检索"),
@@ -68,6 +72,8 @@ class RuleBasedEvaluatorTest {
                 "no_answer",
                 "知识库没有的问题",
                 true,
+                false,
+                false,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -89,6 +95,8 @@ class RuleBasedEvaluatorTest {
                 "no_answer",
                 "知识库没有的问题",
                 true,
+                false,
+                false,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -103,5 +111,34 @@ class RuleBasedEvaluatorTest {
 
         assertThat(result.passed()).isTrue();
         assertThat(result.reason()).contains("no-answer expression");
+    }
+
+    @Test
+    void failsWhenRequiredLocalEvidenceIsMissing() {
+        EvalCase evalCase = new EvalCase(
+                "rag-005", "rag", "fact", "需要本地证据的问题", false, true, false,
+                List.of("flow.md"), List.of("数据流"), List.of("答案"), List.of()
+        );
+
+        EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse("这是答案。", List.of()));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.reason()).contains("required local evidence missing");
+        assertThat(result.unsupportedAnswer()).isTrue();
+    }
+
+    @Test
+    void failsWhenModelFallbackIsNotAllowed() {
+        EvalCase evalCase = new EvalCase(
+                "rag-006", "rag", "fact", "不允许模型补充的问题", false, false, false,
+                List.of(), List.of(), List.of("答案"), List.of()
+        );
+        String fallbackAnswer = "这是答案。\n\n以上回答基于通用大模型知识，不是当前知识库内容。";
+
+        EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse(fallbackAnswer, List.of()));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.reason()).contains("model fallback not allowed");
+        assertThat(result.modelFallbackUsed()).isTrue();
     }
 }
