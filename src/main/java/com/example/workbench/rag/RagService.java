@@ -679,8 +679,8 @@ public class RagService {
         }
 
         log.info(
-                "RAG retrieval question='{}', topK={}, threshold={}, scoreDirection={}, retrieved={}, usedInContext={}",
-                question,
+                "RAG retrieval questionLength={} topK={} threshold={} scoreDirection={} retrieved={} usedInContext={}",
+                question == null ? 0 : question.length(),
                 topK,
                 similarityThreshold,
                 scoreDirection,
@@ -690,12 +690,10 @@ public class RagService {
 
         for (SourceDocument source : retrievedSources) {
             log.info(
-                    "RAG chunk used={}, fileName={}, headingPath={}, score={}, preview={}",
+                    "RAG chunk used={} documentId={} score={}",
                     containsSource(contextSources, source),
-                    source.fileName(),
-                    source.headingPath(),
-                    source.score(),
-                    snippet(source.content()).replace('\n', ' ')
+                    source.documentId(),
+                    source.score()
             );
         }
     }

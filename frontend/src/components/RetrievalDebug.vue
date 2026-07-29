@@ -23,6 +23,7 @@ const importOpen = ref(false)
 const importFile = ref(null)
 const importInput = ref(null)
 const importLoading = ref(false)
+const importDragActive = ref(false)
 const importsOpen = ref(false)
 const evalImports = ref([])
 const importsLoading = ref(false)
@@ -114,7 +115,8 @@ function clearCaseSelection() { selectedCaseIds.value = [] }
 function beginCreateCase() { editingCaseId.value = null; caseForm.value = newCaseForm(); caseFormOpen.value = true }
 function beginImportCases() { importFile.value = null; importOpen.value = true }
 function chooseImportFile(event) { importFile.value = event.target.files?.[0] || null }
-function cancelImportCases() { if (importLoading.value) return; importFile.value = null; importOpen.value = false; if (importInput.value) importInput.value.value = '' }
+function dropImportFile(event) { importDragActive.value = false; importFile.value = event.dataTransfer?.files?.[0] || null }
+function cancelImportCases() { if (importLoading.value) return; importDragActive.value = false; importFile.value = null; importOpen.value = false; if (importInput.value) importInput.value.value = '' }
 function beginEditCase(caseItem) { editingCaseId.value = caseItem.id; caseForm.value = newCaseForm(caseItem); caseFormOpen.value = true }
 function cancelCaseEdit() { editingCaseId.value = null; caseForm.value = newCaseForm(); caseFormOpen.value = false }
 
@@ -315,7 +317,7 @@ onMounted(loadEvalCases)
 
     <Teleport to="body">
       <div v-if="importOpen" class="retrieval-eval-modal-backdrop" @click.self="cancelImportCases">
-        <form class="retrieval-eval-form retrieval-eval-modal retrieval-eval-import-modal" @submit.prevent="submitImportCases"><header><h3>导入评测题</h3><button type="button" class="retrieval-eval-secondary" :disabled="importLoading" @click="cancelImportCases">关闭</button></header><label class="retrieval-eval-file-picker">选择文件<input ref="importInput" type="file" accept=".xlsx,.md,.json" @change="chooseImportFile"><strong>{{ importFile ? importFile.name : '支持 .xlsx、.md、.json，最大 5 MB' }}</strong></label><details><summary>导入格式说明</summary><p>Excel 和 Markdown 使用首行表头；至少填写“问题”。支持字段：Case ID、模式、类型、问题、期望来源、期望标题路径、期望关键词、禁用关键词、期望无回答、要求本地证据、允许模型兜底。</p><p>JSON 支持对象数组或 JSONL，每项字段与新增接口一致。列表字段可使用数组；表格中的列表字段使用逗号、顿号或换行分隔。</p></details><div class="retrieval-eval-modal-actions"><button type="button" class="retrieval-eval-secondary" :disabled="importLoading" @click="cancelImportCases">取消</button><button type="submit" class="retrieval-eval-primary" :disabled="importLoading || !importFile">{{ importLoading ? '导入中...' : '开始导入' }}</button></div></form>
+        <form class="retrieval-eval-form retrieval-eval-modal retrieval-eval-import-modal" @submit.prevent="submitImportCases"><header><div><h3>导入评测题</h3><span>选择文件并批量新增题目，原始文件会自动保留。</span></div></header><label :class="['retrieval-eval-file-picker', { dragging: importDragActive, selected: importFile }]" @dragenter.prevent="importDragActive = true" @dragover.prevent="importDragActive = true" @dragleave.prevent="importDragActive = false" @drop.prevent="dropImportFile"><input ref="importInput" type="file" accept=".xlsx,.md,.json" @change="chooseImportFile"><span class="retrieval-eval-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><span class="retrieval-eval-file-picker-action">{{ importFile ? '重新选择' : '选择文件' }}</span><strong>{{ importFile ? importFile.name : '也可以将文件拖放到这里' }}</strong><span class="retrieval-eval-file-types"><i>XLSX</i><i>MD</i><i>JSON</i><small>最大 5 MB</small></span></label><section class="retrieval-eval-import-guide"><header><h4>格式说明</h4><span>“问题”为必填项</span></header><div><article><strong>表格文件</strong><p>Excel 和 Markdown 第一行为表头，支持模式、类型、问题、期望规则和判定开关。</p></article><article><strong>JSON 文件</strong><p>支持对象数组或 JSONL，字段与新增评测题保持一致。</p></article><article><strong>填写规则</strong><p>列表用逗号、顿号或换行分隔；布尔值可用 是/否、true/false、1/0。</p></article></div><footer>Case ID 由系统自动生成，导入文件中的编号不会保留。</footer></section><div class="retrieval-eval-modal-actions"><button type="button" class="retrieval-eval-secondary" :disabled="importLoading" @click="cancelImportCases">取消</button><button type="submit" class="retrieval-eval-primary" :disabled="importLoading || !importFile">{{ importLoading ? '导入中...' : '开始导入' }}</button></div></form>
       </div>
     </Teleport>
 

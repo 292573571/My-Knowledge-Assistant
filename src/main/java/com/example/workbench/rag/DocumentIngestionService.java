@@ -56,11 +56,11 @@ public class DocumentIngestionService {
     public IngestResult ingestDocsDirectory() throws IOException {
         long startedAt = System.currentTimeMillis();
         if (!Files.exists(docsDirectory)) {
-            log.info("Document ingest docs directory skipped reason=directory_not_found path={}", docsDirectory);
+            log.info("Document ingest docs directory skipped reason=directory_not_found");
             return new IngestResult(0, 0);
         }
 
-        log.info("Document ingest docs directory started path={}", docsDirectory);
+        log.info("Document ingest docs directory started");
         // 全量导入以磁盘 docs/ 为唯一事实来源，先重建进程内列表再整体替换向量库与索引。
         documents.clear();
         List<DocumentIndexEntry> indexEntries = new ArrayList<>();
@@ -99,7 +99,7 @@ public class DocumentIngestionService {
 
     public IngestResponse ingestDocument(String path, boolean force) {
         long startedAt = System.currentTimeMillis();
-        log.info("Document ingest file request started path={} force={}", path, force);
+        log.info("Document ingest file request started force={}", force);
         // 所有外部传入路径都限制在 docs/ 内，防止 API 被用于读取工作区任意文件。
         Path documentPath = resolveAllowedPath(path);
         if (!Files.isRegularFile(documentPath)) {
@@ -108,8 +108,7 @@ public class DocumentIngestionService {
 
         IngestDocumentResult result = ingestPath(documentPath, force);
         log.info(
-                "Document ingest file request completed path={} status={} chunks={} durationMs={}",
-                result.path(),
+                "Document ingest file request completed status={} chunks={} durationMs={}",
                 result.status(),
                 result.chunks(),
                 System.currentTimeMillis() - startedAt
@@ -122,10 +121,10 @@ public class DocumentIngestionService {
         Path directoryPath = path == null || path.isBlank()
                 ? docsDirectory
                 : resolveAllowedPath(path);
-        log.info("Document ingest directory request started path={} force={}", directoryPath, force);
+        log.info("Document ingest directory request started force={}", force);
 
         if (!Files.exists(directoryPath)) {
-            log.info("Document ingest directory request skipped reason=directory_not_found path={}", directoryPath);
+            log.info("Document ingest directory request skipped reason=directory_not_found");
             return responseFrom(List.of());
         }
 
@@ -147,8 +146,7 @@ public class DocumentIngestionService {
 
         IngestResponse response = responseFrom(results);
         log.info(
-                "Document ingest directory request completed path={} files={} imported={} skipped={} failed={} chunks={} durationMs={}",
-                directoryPath,
+                "Document ingest directory request completed files={} imported={} skipped={} failed={} chunks={} durationMs={}",
                 response.files(),
                 response.imported(),
                 response.skipped(),
@@ -243,10 +241,9 @@ public class DocumentIngestionService {
                 .flatMap(entry -> chunkIds(entry).stream())
                 .toList();
         log.info(
-                "Document rebuild started stage=prepare_clear indexedDocuments={} indexedChunks={} docsPath={}",
+                "Document rebuild started stage=prepare_clear indexedDocuments={} indexedChunks={}",
                 indexedDocuments.size(),
-                indexedChunkIds.size(),
-                docsDirectory
+                indexedChunkIds.size()
         );
 
         try {
@@ -257,7 +254,7 @@ public class DocumentIngestionService {
             documentIndexStore.clear();
             log.info("Document rebuild stage=clear_completed clearedDocuments={} clearedChunks={}", indexedDocuments.size(), indexedChunkIds.size());
 
-            log.info("Document rebuild stage=ingest_started path={}", docsDirectory);
+            log.info("Document rebuild stage=ingest_started");
             IngestResult result = ingestDocsDirectory();
             long durationMs = System.currentTimeMillis() - startedAt;
             log.info(
@@ -278,13 +275,11 @@ public class DocumentIngestionService {
             );
         } catch (RuntimeException exception) {
             log.error(
-                    "Document rebuild failed status=failed clearedDocuments={} clearedChunks={} durationMs={} errorType={} error={}",
+                    "Document rebuild failed status=failed clearedDocuments={} clearedChunks={} durationMs={} errorType={}",
                     indexedDocuments.size(),
                     indexedChunkIds.size(),
                     System.currentTimeMillis() - startedAt,
-                    exception.getClass().getSimpleName(),
-                    exception.getMessage(),
-                    exception
+                    exception.getClass().getSimpleName()
             );
             throw exception;
         }
@@ -309,10 +304,9 @@ public class DocumentIngestionService {
         int deletedChunks = 0;
 
         log.info(
-                "Document sync started stage=scan indexedDocuments={} scannedFiles={} docsPath={}",
+                "Document sync started stage=scan indexedDocuments={} scannedFiles={}",
                 existingEntries.size(),
-                files.size(),
-                docsDirectory
+                files.size()
         );
 
         try {
@@ -326,7 +320,7 @@ public class DocumentIngestionService {
                         int removedChunks = removeIndexedDocument(existingEntry);
                         deletedFiles++;
                         deletedChunks += removedChunks;
-                        log.info("Document sync removed empty file path={} deletedChunks={}", relativePath, removedChunks);
+                        log.info("Document sync removed empty file deletedChunks={}", removedChunks);
                     }
                     continue;
                 }
@@ -342,9 +336,7 @@ public class DocumentIngestionService {
                         processedExistingDocumentIds.add(existingEntry.documentId());
                         updatedFiles++;
                         log.info(
-                                "Document sync moved path={} previousPath={} documentId={}",
-                                candidate.path(),
-                                existingEntry.path(),
+                                "Document sync moved documentId={}",
                                 candidate.documentId()
                         );
                     } else {
@@ -360,8 +352,7 @@ public class DocumentIngestionService {
                     deletedChunks += removedChunks;
                     updatedFiles++;
                     log.info(
-                            "Document sync updating path={} oldDocumentId={} newDocumentId={} deletedChunks={} addedChunks={}",
-                            relativePath,
+                            "Document sync updating oldDocumentId={} newDocumentId={} deletedChunks={} addedChunks={}",
                             existingEntry.documentId(),
                             candidate.documentId(),
                             removedChunks,
@@ -369,7 +360,7 @@ public class DocumentIngestionService {
                     );
                 } else {
                     addedFiles++;
-                    log.info("Document sync adding path={} documentId={} addedChunks={}", relativePath, candidate.documentId(), ingestedFile.chunkCount());
+                    log.info("Document sync adding documentId={} addedChunks={}", candidate.documentId(), ingestedFile.chunkCount());
                 }
 
                 documents.removeIf(document -> document.documentId().equals(candidate.documentId()));
@@ -387,7 +378,7 @@ public class DocumentIngestionService {
                 int removedChunks = removeIndexedDocument(existingEntry);
                 deletedFiles++;
                 deletedChunks += removedChunks;
-                log.info("Document sync deleting missing file path={} documentId={} deletedChunks={}", existingEntry.path(), existingEntry.documentId(), removedChunks);
+                log.info("Document sync deleting missing file documentId={} deletedChunks={}", existingEntry.documentId(), removedChunks);
             }
 
             long durationMs = System.currentTimeMillis() - startedAt;
@@ -415,12 +406,10 @@ public class DocumentIngestionService {
             );
         } catch (RuntimeException exception) {
             log.error(
-                    "Document sync failed status=failed scannedFiles={} durationMs={} errorType={} error={}",
+                    "Document sync failed status=failed scannedFiles={} durationMs={} errorType={}",
                     files.size(),
                     System.currentTimeMillis() - startedAt,
-                    exception.getClass().getSimpleName(),
-                    exception.getMessage(),
-                    exception
+                    exception.getClass().getSimpleName()
             );
             throw exception;
         }
@@ -461,7 +450,7 @@ public class DocumentIngestionService {
     private IngestDocumentResult ingestPath(Path path, boolean force) {
         long startedAt = System.currentTimeMillis();
         if (!isIndexableDocument(path)) {
-            log.info("Document ingest skipped path={} reason=unsupported_document_type", workspaceRelativePath(path));
+            log.info("Document ingest skipped reason=unsupported_document_type");
             return new IngestDocumentResult(
                     path.getFileName().toString(),
                     workspaceRelativePath(path),
@@ -475,7 +464,7 @@ public class DocumentIngestionService {
         IngestedFile ingestedFile = ingestFile(path);
 
         if (ingestedFile.chunkCount() == 0 || ingestedFile.indexEntry() == null) {
-            log.info("Document ingest skipped path={} reason=empty_document", workspaceRelativePath(path));
+            log.info("Document ingest skipped reason=empty_document");
             return new IngestDocumentResult(
                     path.getFileName().toString(),
                     workspaceRelativePath(path),
@@ -490,8 +479,7 @@ public class DocumentIngestionService {
         if (!force && existingEntry != null && existingEntry.contentHash().equals(ingestedFile.indexEntry().contentHash())) {
             // 非强制导入遇到相同内容时跳过，避免重复分块和重复向量。
             log.info(
-                    "Document ingest skipped path={} reason=duplicate_document documentId={} chunks={}",
-                    ingestedFile.indexEntry().path(),
+                    "Document ingest skipped reason=duplicate_document documentId={} chunks={}",
                     existingEntry.documentId(),
                     existingEntry.chunkCount()
             );
@@ -508,10 +496,9 @@ public class DocumentIngestionService {
         if (existingEntry != null) {
             // 单文件更新按“删除旧版本，再导入新版本”处理。
             log.info(
-                    "Document ingest replacing existing document oldDocumentId={} newDocumentId={} path={}",
+                    "Document ingest replacing existing document oldDocumentId={} newDocumentId={}",
                     existingEntry.documentId(),
-                    ingestedFile.indexEntry().documentId(),
-                    ingestedFile.indexEntry().path()
+                    ingestedFile.indexEntry().documentId()
             );
             vectorStore.deleteByIds(chunkIds(existingEntry));
             documents.removeIf(document -> document.documentId().equals(existingEntry.documentId()));
@@ -524,8 +511,7 @@ public class DocumentIngestionService {
         documentIndexStore.upsertAll(List.of(ingestedFile.indexEntry()));
 
         log.info(
-                "Document ingest imported path={} documentId={} chunks={} force={} durationMs={}",
-                ingestedFile.indexEntry().path(),
+                "Document ingest imported documentId={} chunks={} force={} durationMs={}",
                 ingestedFile.indexEntry().documentId(),
                 ingestedFile.chunkCount(),
                 force,
@@ -581,12 +567,9 @@ public class DocumentIngestionService {
             String ownerUserId = ownerUserId(relativePath);
             List<DocumentChunk> chunks = documentChunkerRouter.select(fileName).chunk(normalizedContent);
             log.info(
-                    "Document chunking completed path={} fileName={} chunks={} contentLength={} contentHash={}",
-                    workspaceRelativePath(path),
-                    fileName,
+                    "Document chunking completed chunks={} contentLength={}",
                     chunks.size(),
-                    normalizedContent.length(),
-                    contentHash
+                    normalizedContent.length()
             );
             List<SourceDocument> sourceDocuments = new ArrayList<>();
 

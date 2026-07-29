@@ -5,7 +5,7 @@ export async function fetchWorkbenchStatus() {
   let response
 
   try {
-    response = await fetch('/api/health', { headers: authHeaders() })
+    response = await fetch('/api/health', { credentials: 'include', headers: authHeaders() })
   } catch (error) {
     throw apiErrorFromException(error, '无法连接后端服务，请确认 Spring Boot 已启动。')
   }

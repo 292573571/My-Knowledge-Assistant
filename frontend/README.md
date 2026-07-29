@@ -1,6 +1,6 @@
 # Personal AI Workbench Frontend
 
-Vue + Vite 实现的个人 AI 工作台前端，支持普通聊天、RAG 问答、SSE 流式输出、来源引用、工具调用面板、Markdown 渲染和本地会话历史。
+Vue + Vite 实现的个人 AI 工作台前端，支持普通聊天、RAG 问答、SSE 流式输出、来源引用、工具调用面板、Markdown 渲染和服务端会话历史。
 
 ## 截图
 
@@ -22,7 +22,8 @@ docs/screenshots/workbench.png
 - 中间白色聊天窗口
 - 右侧浅灰信息面板
 - 新建、切换、删除会话
-- 会话历史保存到 `localStorage`
+- 会话历史保存到 PostgreSQL
+- HttpOnly Cookie 会话认证，浏览器 JavaScript 不接触 Token
 - 普通非流式接口调用
 - SSE 流式 token 输出
 - Sources 逐步展示和点击展开
@@ -156,7 +157,10 @@ POST /api/rag/chat
 流式接口调用：
 
 ```http
-GET /api/workbench/chat/stream?conversationId=default&mode=rag&message=...
+POST /api/workbench/chat/stream
+Content-Type: application/json
+
+{"conversationId":"default","mode":"rag","message":"..."}
 ```
 
 前端监听事件：
@@ -206,29 +210,11 @@ event: done
 data: {}
 ```
 
+流式请求通过 `fetch` 读取 `text/event-stream`，身份由 HttpOnly Cookie 携带。Token 和完整问题不会出现在 URL 中。
+
 ## 前端状态持久化
 
-会话状态保存在浏览器 `localStorage`：
-
-```text
-personal-ai-workbench-state
-```
-
-保存内容：
-
-```json
-{
-  "conversations": [
-    {
-      "id": "default",
-      "title": "Spring AI 学习",
-      "messages": []
-    }
-  ],
-  "currentConversationId": "default",
-  "mode": "rag"
-}
-```
+会话和消息以 PostgreSQL 为唯一持久数据源；浏览器 `localStorage` 不保存 Token、聊天内容或知识库资料。
 
 ## 目录结构
 

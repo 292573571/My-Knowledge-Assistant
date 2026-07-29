@@ -89,7 +89,7 @@ public class ChromaVectorStoreAdapter implements VectorStore {
                     .map(this::toSpringAiDocument)
                     .toList());
         } catch (RuntimeException exception) {
-            log.warn("Failed to write documents to Chroma, using in-memory vector store fallback: {}", exception.getMessage());
+            log.warn("Failed to write documents to Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
         }
     }
 
@@ -120,7 +120,7 @@ public class ChromaVectorStoreAdapter implements VectorStore {
                     .map(this::toSourceDocument)
                     .toList();
         } catch (RuntimeException exception) {
-            log.warn("Failed to search Chroma, using in-memory vector store fallback: {}", exception.getMessage());
+            log.warn("Failed to search Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
             return fallbackVectorStore.similaritySearch(query, topK);
         }
     }

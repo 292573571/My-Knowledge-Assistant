@@ -36,14 +36,14 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
         String account = normalizeAccount(request.account());
         if (userRepository.findByAccount(account).isPresent()) {
-            log.warn("User registration rejected reason=account_already_registered account={}", account);
+            log.warn("User registration rejected reason=account_already_registered");
             throw new IllegalArgumentException("account is already registered");
         }
 
         AppUser user = new AppUser(account, account, passwordEncoder.encode(request.password()));
         initializeProfile(user);
         user = userRepository.save(user);
-        log.info("User registered account={} userName={}", user.getAccount(), user.getUserName());
+        log.info("User registered userId={}", user.getId());
         return createSession(user);
     }
 
@@ -53,10 +53,10 @@ public class AuthService {
         AppUser user = userRepository.findByAccount(account)
                 .filter(candidate -> passwordEncoder.matches(request.password(), candidate.getPasswordHash()))
                 .orElseThrow(() -> {
-                    log.warn("User login rejected reason=invalid_credentials account={}", account);
+                    log.warn("User login rejected reason=invalid_credentials");
                     return new InvalidCredentialsException("账号或密码错误");
                 });
-        log.info("User logged in account={} userName={}", user.getAccount(), user.getUserName());
+        log.info("User logged in userId={}", user.getId());
         return createSession(user);
     }
 
@@ -91,19 +91,19 @@ public class AuthService {
             throw new IllegalArgumentException("两次输入的新密码不一致");
         }
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
-            log.warn("Password change rejected reason=invalid_current_password account={}", user.getAccount());
+            log.warn("Password change rejected reason=invalid_current_password userId={}", user.getId());
             throw new InvalidCredentialsException("当前密码错误");
         }
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
         sessionRepository.deleteOtherSessions(user.getId(), currentToken);
-        log.info("Password changed account={} otherSessionsRevoked=true", user.getAccount());
+        log.info("Password changed userId={} otherSessionsRevoked=true", user.getId());
     }
 
     private AuthResponse createSession(AppUser user) {
         String token = newToken();
         sessionRepository.save(new UserSession(user, token, Instant.now().plus(sessionDuration)));
-        log.info("User session created account={} expiresInHours={}", user.getAccount(), sessionDuration.toHours());
+        log.info("User session created userId={} expiresInHours={}", user.getId(), sessionDuration.toHours());
         initializeProfile(user);
         return new AuthResponse(token, user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar", user.getCreatedAt());
     }

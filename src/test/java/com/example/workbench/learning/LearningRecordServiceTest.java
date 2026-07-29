@@ -66,6 +66,22 @@ class LearningRecordServiceTest {
     }
 
     @Test
+    void removesModelKnowledgeDisclaimerFromRecordedAnswers() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, tempDir.resolve("docs/learning-records"));
+
+        service.record(new AppUser("alice", "Alice", "hash"), "解释 RAG",
+                "RAG 会先检索资料再生成回答。\n\n以上回答基于通用大模型知识，不是当前知识库内容。", List.of());
+
+        String content = Files.readString(tempDir.resolve("docs/learning-records/user-alice/2026-07-26.md"));
+        assertThat(content)
+                .contains("RAG 会先检索资料再生成回答。")
+                .doesNotContain("以上回答基于通用大模型知识")
+                .doesNotContain("不是当前知识库内容");
+    }
+
+    @Test
     void doesNotRecordKnownNoAnswerResponses() {
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
@@ -75,6 +91,23 @@ class LearningRecordServiceTest {
                 new AppUser("alice", "Alice", "hash"),
                 "一个知识库里没有答案的问题",
                 "我在当前知识库中没有找到足够信息和依据来回答这个问题。你可以导入相关文档后再问。",
+                List.of()
+        );
+
+        assertThat(tempDir.resolve("docs/learning-records/user-alice/2026-07-26.md")).doesNotExist();
+        verify(ingestionService, never()).ingestDocument(Mockito.anyString(), eq(true));
+    }
+
+    @Test
+    void doesNotRecordEmptyKnowledgeBaseResponses() {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, tempDir.resolve("docs/learning-records"));
+
+        service.record(
+                new AppUser("alice", "Alice", "hash"),
+                "总结当前知识库的主要内容",
+                "当前知识库没有包含任何信息。",
                 List.of()
         );
 

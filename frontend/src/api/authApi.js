@@ -1,22 +1,11 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 
-const TOKEN_KEY = 'personal-ai-workbench-token'
-
-export function getAccessToken() {
-  return window.localStorage.getItem(TOKEN_KEY) || ''
-}
-
-export function saveAccessToken(token) {
-  window.localStorage.setItem(TOKEN_KEY, token)
-}
-
-export function clearAccessToken() {
-  window.localStorage.removeItem(TOKEN_KEY)
-}
-
 export function authHeaders(headers = {}) {
-  const token = getAccessToken()
-  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers
+  return headers
+}
+
+export function clearLegacyAccessToken() {
+  window.localStorage.removeItem('personal-ai-workbench-token')
 }
 
 export async function authenticate(path, credentials) {
@@ -24,6 +13,7 @@ export async function authenticate(path, credentials) {
   try {
     response = await fetch(path, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials)
     })
@@ -47,7 +37,7 @@ export function login(credentials) {
 }
 
 export async function fetchCurrentUser() {
-  const response = await fetch('/api/auth/me', { headers: authHeaders() })
+  const response = await fetch('/api/auth/me', { credentials: 'include', headers: authHeaders() })
   if (!response.ok) {
     throw await apiErrorFromResponse(response, '登录状态已失效。')
   }
@@ -55,8 +45,7 @@ export async function fetchCurrentUser() {
 }
 
 export async function logout() {
-  const response = await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() })
-  clearAccessToken()
+  const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include', headers: authHeaders() })
   if (!response.ok && response.status !== 401) {
     throw await apiErrorFromResponse(response, '退出登录失败。')
   }
@@ -65,6 +54,7 @@ export async function logout() {
 export async function changePassword(passwords) {
   const response = await fetch('/api/auth/change-password', {
     method: 'POST',
+    credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(passwords)
   })
@@ -76,6 +66,7 @@ export async function changePassword(passwords) {
 export async function updateProfile(profile) {
   const response = await fetch('/api/auth/profile', {
     method: 'PUT',
+    credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(profile)
   })
@@ -88,6 +79,7 @@ export async function uploadAvatar(file) {
   form.append('file', file)
   const response = await fetch('/api/auth/avatar', {
     method: 'POST',
+    credentials: 'include',
     headers: authHeaders(),
     body: form
   })
@@ -96,7 +88,7 @@ export async function uploadAvatar(file) {
 }
 
 export async function fetchAvatarUrl() {
-  const response = await fetch('/api/auth/avatar', { headers: authHeaders(), cache: 'no-store' })
+  const response = await fetch('/api/auth/avatar', { credentials: 'include', headers: authHeaders(), cache: 'no-store' })
   if (!response.ok) throw await apiErrorFromResponse(response, '头像加载失败。')
   return URL.createObjectURL(await response.blob())
 }

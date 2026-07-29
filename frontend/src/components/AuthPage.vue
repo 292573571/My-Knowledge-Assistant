@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { login, register, saveAccessToken } from '../api/authApi'
+import { login, register } from '../api/authApi'
 
 const emit = defineEmits(['authenticated'])
 const mode = ref('login')
@@ -17,7 +17,6 @@ async function submit() {
       account: account.value,
       password: password.value
     })
-    saveAccessToken(response.token)
     emit('authenticated', response)
   } catch (requestError) {
     error.value = requestError.message || '认证失败，请稍后重试。'

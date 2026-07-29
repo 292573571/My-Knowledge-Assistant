@@ -110,9 +110,7 @@ async function setUser(account) {
       const messages = await fetchConversationMessages(mostRecentConversation.id)
       if (loadingAccount !== account) return
       mostRecentConversation.messages = messages.map(normalizeMessage)
-    } catch (error) {
-      logMessageLoadError(mostRecentConversation.id, error)
-    }
+    } catch {}
 
     if (loadingAccount !== account) return
     state.conversations = conversations
@@ -122,12 +120,6 @@ async function setUser(account) {
   } catch (error) {
     const apiError = apiErrorFromException(error, '加载聊天记录失败。')
     state.error = formatApiError(apiError, '加载聊天记录失败。')
-    console.error('[conversation] load failed', {
-      account,
-      status: apiError.status,
-      details: apiError.details,
-      cause: apiError.cause
-    })
   } finally {
     if (loadingAccount === account) {
       loadingAccount = ''
@@ -383,18 +375,7 @@ export function useChatStore() {
       state.error = ''
     } catch (error) {
       state.error = formatApiError(apiErrorFromException(error, '加载该会话消息失败。'), '加载该会话消息失败。')
-      logMessageLoadError(id, error)
     }
-  }
-
-  function logMessageLoadError(conversationId, error) {
-    const apiError = apiErrorFromException(error, '加载该会话消息失败。')
-    console.error('[conversation] messages load failed', {
-      conversationId,
-      status: apiError.status,
-      details: apiError.details,
-      cause: apiError.cause
-    })
   }
 
   async function deleteConversation(id) {

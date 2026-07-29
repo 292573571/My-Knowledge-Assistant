@@ -4,7 +4,7 @@ import { authHeaders } from './authApi'
 async function request(path, options = {}) {
   let response
   try {
-    response = await fetch(path, { ...options, headers: authHeaders(options.headers) })
+    response = await fetch(path, { ...options, credentials: 'include', headers: authHeaders(options.headers) })
   } catch (error) {
     throw apiErrorFromException(error, '无法连接后端服务。')
   }

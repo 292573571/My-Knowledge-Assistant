@@ -150,7 +150,7 @@ public class LocalChatClient {
                 .stream()
                 .content()
                 .timeout(timeout)
-                .doOnError(error -> log.warn("AI model stream failed model={} conversationId={} error={}", model, conversationId, error.getMessage()));
+                .doOnError(error -> log.warn("AI model stream failed model={} conversationId={} errorType={}", model, conversationId, error.getClass().getSimpleName()));
     }
 
     private String callSpringAi(String prompt, Map<String, String> options) {
@@ -284,12 +284,11 @@ public class LocalChatClient {
         Throwable rootCause = rootCause(exception);
         HttpStatusCodeException statusException = findHttpStatusException(exception);
         Integer statusCode = statusException == null ? null : statusException.getStatusCode().value();
-        String responseBody = statusException == null ? "" : truncate(statusException.getResponseBodyAsString());
         String errorType = errorType(exception, rootCause, statusCode);
         boolean retryable = isRetryable(errorType, statusCode);
 
         log.warn(
-                "AI model call failed provider=openai-compatible model={} conversationId={} attempt={} maxAttempts={} durationMs={} errorType={} httpStatus={} exceptionClass={} rootCauseClass={} retryable={} willRetry={} willSwitchModel={} fallbackStrategy={} errorMessage={} responseBody={}",
+                "AI model call failed provider=openai-compatible model={} conversationId={} attempt={} maxAttempts={} durationMs={} errorType={} httpStatus={} exceptionClass={} rootCauseClass={} retryable={} willRetry={} willSwitchModel={} fallbackStrategy={}",
                 model,
                 conversationId,
                 attempt,
@@ -302,9 +301,7 @@ public class LocalChatClient {
                 retryable,
                 retryable && attempt < maxAttempts,
                 willSwitchModel && attempt == maxAttempts,
-                fallbackStrategy,
-                exception.getMessage(),
-                responseBody
+                fallbackStrategy
         );
         return retryable;
     }

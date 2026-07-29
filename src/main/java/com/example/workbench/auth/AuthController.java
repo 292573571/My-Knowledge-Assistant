@@ -1,11 +1,15 @@
 package com.example.workbench.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,21 +26,27 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserProfileService userProfileService;
+    private final boolean secureCookie;
+    private final Duration sessionDuration;
 
-    public AuthController(AuthService authService, UserProfileService userProfileService) {
+    public AuthController(AuthService authService, UserProfileService userProfileService,
+                          @Value("${app.auth.cookie-secure:false}") boolean secureCookie,
+                          @Value("${app.auth.session-hours:168}") long sessionHours) {
         this.authService = authService;
         this.userProfileService = userProfileService;
+        this.secureCookie = secureCookie;
+        this.sessionDuration = Duration.ofHours(sessionHours);
     }
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
-        return authService.register(request);
+    public CurrentUserResponse register(@Valid @RequestBody RegisterRequest request, HttpServletResponse response) {
+        return authenticated(authService.register(request), response);
     }
 
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public CurrentUserResponse login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
+        return authenticated(authService.login(request), response);
     }
 
     @GetMapping("/me")
@@ -47,8 +57,9 @@ public class AuthController {
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(HttpServletRequest request) {
+    public void logout(HttpServletRequest request, HttpServletResponse response) {
         authService.logout((String) request.getAttribute(AuthFilter.AUTH_TOKEN_ATTRIBUTE));
+        response.addHeader("Set-Cookie", sessionCookie("", Duration.ZERO).toString());
     }
 
     @PostMapping("/change-password")
@@ -82,6 +93,17 @@ public class AuthController {
 
     private CurrentUserResponse profile(AppUser user) {
         return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar", user.getCreatedAt());
+    }
+
+    private CurrentUserResponse authenticated(AuthResponse authentication, HttpServletResponse response) {
+        response.addHeader("Set-Cookie", sessionCookie(authentication.token(), sessionDuration).toString());
+        return new CurrentUserResponse(authentication.account(), authentication.userName(), authentication.publicId(),
+                authentication.avatarUrl(), authentication.createdAt());
+    }
+
+    private ResponseCookie sessionCookie(String value, Duration maxAge) {
+        return ResponseCookie.from(AuthFilter.SESSION_COOKIE, value).httpOnly(true).secure(secureCookie)
+                .sameSite("Strict").path("/").maxAge(maxAge).build();
     }
 
     private AppUser user(HttpServletRequest request) {

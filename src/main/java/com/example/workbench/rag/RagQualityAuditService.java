@@ -45,7 +45,7 @@ public class RagQualityAuditService {
             auditRepository.save(new RagQualityAuditEntity(
                     conversationId, answer.length(), sources == null ? 0 : sources.size(), status));
         } catch (RuntimeException exception) {
-            log.warn("RAG async quality audit could not be recorded: {}", exception.getMessage());
+            log.warn("RAG async quality audit could not be recorded errorType={}", exception.getClass().getSimpleName());
         }
     }
 

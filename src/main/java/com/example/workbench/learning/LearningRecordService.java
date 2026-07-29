@@ -35,6 +35,10 @@ public class LearningRecordService {
     private static final List<String> UNRELIABLE_ANSWER_MARKERS = List.of(
             "我在当前知识库中没有找到足够信息和依据来回答这个问题",
             "当前知识库没有足够信息回答该问题",
+            "当前知识库没有包含任何信息",
+            "当前知识库中没有包含任何信息",
+            "当前知识库没有任何信息",
+            "当前知识库为空",
             "当前无法生成可靠的通用知识回答",
             "请求失败，请稍后重试",
             "暂时无法回答",
@@ -86,7 +90,7 @@ public class LearningRecordService {
             }
         } catch (IOException exception) {
             // Learning notes must not make an otherwise successful chat request fail.
-            log.warn("Learning record could not be saved userId={} path={}", user.getId(), record, exception);
+            log.warn("Learning record could not be saved userId={} errorType={}", user.getId(), exception.getClass().getSimpleName());
         }
     }
 
@@ -272,6 +276,7 @@ public class LearningRecordService {
     private String withoutReferences(String answer) {
         return answer.strip()
                 .replaceFirst("(?ms)\\n+参考来源[：:]\\s*\\n.*$", "")
+                .replaceAll("(?m)^\\s*以上回答基于通用大模型知识，不是当前知识库内容。\\s*$\\R?", "")
                 .strip();
     }
 

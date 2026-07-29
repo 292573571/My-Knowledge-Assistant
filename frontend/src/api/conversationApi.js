@@ -7,6 +7,7 @@ async function request(path, options = {}) {
   try {
     const response = await fetch(path, {
       ...options,
+      credentials: 'include',
       headers: authHeaders(options.headers)
     })
 

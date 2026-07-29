@@ -6,6 +6,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Cookie;
 import java.io.IOException;
 import java.util.Set;
 import org.springframework.http.HttpHeaders;
@@ -18,6 +19,7 @@ public class AuthFilter extends OncePerRequestFilter {
 
     public static final String AUTHENTICATED_USER_ATTRIBUTE = "authenticatedUser";
     public static final String AUTH_TOKEN_ATTRIBUTE = "authToken";
+    public static final String SESSION_COOKIE = "workbench_session";
     private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/register", "/api/auth/login", "/api/health");
 
     private final AuthService authService;
@@ -50,10 +52,15 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     private String token(HttpServletRequest request) {
+        if (request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if (SESSION_COOKIE.equals(cookie.getName())) return cookie.getValue();
+            }
+        }
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authorization != null && authorization.startsWith("Bearer ")) {
             return authorization.substring("Bearer ".length()).trim();
         }
-        return request.getParameter("access_token");
+        return null;
     }
 }

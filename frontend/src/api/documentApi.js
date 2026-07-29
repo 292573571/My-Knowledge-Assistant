@@ -2,32 +2,16 @@ import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
 
 async function request(path, options = {}) {
-  const method = options.method || 'GET'
-  const startedAt = performance.now()
-
-  console.debug('[api] request', {
-    method,
-    path,
-    body: options.body ? safeJsonParse(options.body) : null
-  })
-
   let response
 
   try {
-    response = await fetch(path, { ...options, headers: authHeaders(options.headers) })
+    response = await fetch(path, { ...options, credentials: 'include', headers: authHeaders(options.headers) })
   } catch (error) {
     throw apiErrorFromException(error, '无法连接后端服务，请确认 Spring Boot 已启动。')
   }
 
   if (!response.ok) {
     const apiError = await apiErrorFromResponse(response, `请求失败: ${response.status}`)
-    console.error('[api] response error', {
-      method,
-      path,
-      status: response.status,
-      requestId: apiError.requestId,
-      durationMs: Math.round(performance.now() - startedAt)
-    })
     throw apiError
   }
 
@@ -35,39 +19,15 @@ async function request(path, options = {}) {
 
   const responseText = await response.text()
   if (response.status === 204 || !responseText.trim()) {
-    console.debug('[api] response', {
-      method,
-      path,
-      status: response.status,
-      requestId,
-      durationMs: Math.round(performance.now() - startedAt),
-      data: null
-    })
     return null
   }
 
   const data = JSON.parse(responseText)
-  console.debug('[api] response', {
-    method,
-    path,
-    status: response.status,
-    requestId,
-    durationMs: Math.round(performance.now() - startedAt),
-    data
-  })
   if (Array.isArray(data)) {
     return data
   }
 
   return data && typeof data === 'object' ? { ...data, requestId } : data
-}
-
-function safeJsonParse(value) {
-  try {
-    return JSON.parse(value)
-  } catch {
-    return value
-  }
 }
 
 export function fetchDocuments() {

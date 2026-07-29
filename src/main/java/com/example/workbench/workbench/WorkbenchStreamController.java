@@ -67,15 +67,16 @@ public class WorkbenchStreamController {
         return workbenchChatService.chat(user(httpRequest), request);
     }
 
-    @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(path = "/stream", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(
-            @RequestParam(defaultValue = "default") String conversationId,
-            @RequestParam(defaultValue = "rag") String mode,
-            @RequestParam String message,
+            @Valid @RequestBody WorkbenchChatRequest request,
             HttpServletRequest httpRequest,
             jakarta.servlet.http.HttpServletResponse httpResponse
     ) {
         AppUser user = user(httpRequest);
+        String conversationId = request.normalizedConversationId();
+        String mode = request.normalizedMode();
+        String message = request.message();
         // 显式禁止代理、网关或压缩层缓冲 SSE，确保每个 token 抵达后立即交给浏览器。
         httpResponse.setHeader("Cache-Control", "no-cache, no-transform");
         httpResponse.setHeader("X-Accel-Buffering", "no");

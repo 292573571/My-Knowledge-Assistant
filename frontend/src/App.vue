@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { changePassword, clearAccessToken, fetchAvatarUrl, fetchCurrentUser, getAccessToken, logout } from './api/authApi'
+import { changePassword, clearLegacyAccessToken, fetchAvatarUrl, fetchCurrentUser, logout } from './api/authApi'
 import AuthPage from './components/AuthPage.vue'
 import ChatLayout from './components/ChatLayout.vue'
 import LearningRecords from './components/LearningRecords.vue'
@@ -11,7 +11,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useChatStore } from './stores/chatStore'
 
 const currentUser = ref(null)
-const checkingSession = ref(Boolean(getAccessToken()))
+const checkingSession = ref(true)
 const restoringWorkspace = ref(false)
 const activeSection = ref('assistant')
 const accountMenuOpen = ref(false)
@@ -28,12 +28,12 @@ const loggingOut = ref(false)
 const { setUser } = useChatStore()
 
 onMounted(async () => {
-  if (!getAccessToken()) return
+  clearLegacyAccessToken()
   try {
     const user = await fetchCurrentUser()
     await restoreWorkspace(user)
   } catch {
-    clearAccessToken()
+    currentUser.value = null
   } finally {
     checkingSession.value = false
   }

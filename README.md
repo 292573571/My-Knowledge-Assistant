@@ -167,11 +167,13 @@ npm run build
 ./scripts/run-evals.sh
 ```
 
-脚本会读取 `src/main/resources/application.properties`，并以 `app.mode=eval` 启动 Spring Boot，执行 `eval/questions.jsonl` 中的用例，输出到：
+脚本会读取 `src/main/resources/application.properties`，并以 `app.mode=eval` 启动 Spring Boot，执行 `eval/questions.jsonl` 中的用例。运行汇总和每题完整检索结果会保存到：
 
 ```text
 PostgreSQL: eval_runs、eval_run_results
 ```
+
+命令行运行记录不绑定 Web 用户；在前端“检索记录”中查看的记录，来自当前登录用户通过评测页面发起的运行。
 
 只跑少量样例：
 
@@ -199,6 +201,70 @@ export OPENAI_EMBEDDING_API_KEY='你的 Embedding API Key'
 
 ```text
 Build -> Rebuild Project
+```
+
+## 检索评测与题目导入
+
+前端“检索评测”页面提供 Eval Case 题库管理、标准检索/增强检索对比和历史运行查看：
+
+- 评测题保存在 PostgreSQL 的 `eval_cases`，按登录用户隔离。
+- 标准检索使用当前全局检索配置；增强检索仅对本次运行开启查询改写和多查询，不修改全局配置。
+- 运行结果保存在 `eval_runs` 与 `eval_run_results`，可在“检索记录”中查看标准/增强模式、运行时间、通过率、检索命中率和每题明细。
+- 后端接口：
+
+```text
+GET  /api/eval/cases
+POST /api/eval/cases
+PUT  /api/eval/cases/{id}
+DELETE /api/eval/cases/{id}
+POST /api/eval/run
+GET  /api/eval/runs
+GET  /api/eval/runs/{runId}
+```
+
+### 导入评测题
+
+题库页面的“导入”支持以下格式：
+
+```text
+.xlsx
+.md
+.json
+```
+
+- 文件上限为 `5 MB`。
+- Excel 与 Markdown 使用首行表头；JSON 支持对象数组或 JSONL。
+- 每条题目至少需要“问题”；未填写“类型”时默认使用 `fact`。
+- 支持的字段：`模式`、`类型`、`问题`、`期望来源`、`期望标题路径`、`期望关键词`、`禁用关键词`、`期望无回答`、`要求本地证据`、`允许模型兜底`。
+- 列表字段可使用逗号、顿号或换行分隔；布尔值支持“是/否”、`true/false`、`1/0`。
+- Case ID 始终由服务端生成，导入文件中的 Case ID 不会保留。
+- 任一题目无效时，整批导入回滚，不会留下部分题目。
+
+可直接编辑并上传以下模板：
+
+```text
+eval/templates/eval-case-template.xlsx
+eval/templates/eval-case-template.md
+eval/templates/eval-case-template.json
+```
+
+每次成功导入都会保留原始文件。文件按用户隔离保存在：
+
+```text
+data/eval-imports/user-<用户ID>/<随机UUID>.<扩展名>
+```
+
+导入元数据保存在 PostgreSQL 的 `eval_imports`，包括原始文件名、类型、大小、导入题目数和时间。可在前端“导入记录”查看和下载自己的文件，或调用：
+
+```text
+GET /api/eval/imports
+GET /api/eval/imports/{id}/download
+```
+
+存储根目录可通过环境变量配置：
+
+```bash
+export EVAL_IMPORT_DIRECTORY='/path/to/eval-imports'
 ```
 
 健康检查可以访问：

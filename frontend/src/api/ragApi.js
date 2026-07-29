@@ -9,6 +9,7 @@ export async function debugRetrieval(message) {
   try {
     const response = await fetch('/api/rag/debug', {
       method: 'POST',
+      credentials: 'include',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body)
     })
@@ -31,6 +32,7 @@ async function evalRequest(path, options = {}, fallbackMessage) {
   try {
     const response = await fetch(path, {
       ...options,
+      credentials: 'include',
       headers: authHeaders(options.headers)
     })
 
@@ -83,7 +85,7 @@ export function fetchEvalImports() {
 }
 
 export async function downloadEvalImport(id) {
-  const response = await fetch(`/api/eval/imports/${encodeURIComponent(id)}/download`, { headers: authHeaders() })
+  const response = await fetch(`/api/eval/imports/${encodeURIComponent(id)}/download`, { credentials: 'include', headers: authHeaders() })
   if (!response.ok) throw await apiErrorFromResponse(response, '下载导入文件失败。')
   const disposition = response.headers.get('Content-Disposition') || ''
   const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)

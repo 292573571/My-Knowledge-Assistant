@@ -43,8 +43,8 @@ public class LlmJudgeEvaluator {
                     .content();
             return parse(output);
         } catch (RuntimeException exception) {
-            log.warn("LLM judge failed: {}", exception.getMessage());
-            return unavailable("Judge call failed: " + exception.getMessage());
+            log.warn("LLM judge failed errorType={}", exception.getClass().getSimpleName());
+            return unavailable("Judge call failed");
         }
     }
 

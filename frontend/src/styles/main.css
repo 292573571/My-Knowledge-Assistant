@@ -2028,12 +2028,31 @@ button:disabled {
 .retrieval-eval-search span { color: #8390a5; font-size: 12px; white-space: nowrap; }
 .retrieval-eval-search-actions { display: flex; gap: 12px; margin-left: auto; }
 .retrieval-eval-search-actions button { min-width: 58px; }
-.retrieval-eval-file-picker { display: grid; gap: 8px; color: #53647e; font-size: 12px; font-weight: 750; }
-.retrieval-eval-file-picker input { width: 100%; box-sizing: border-box; border: 1px dashed #aebde0; border-radius: 9px; padding: 10px; color: #53647e; background: #f8faff; }
-.retrieval-eval-file-picker strong { overflow: hidden; color: #718096; font-size: 11px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.retrieval-eval-import-modal details { border-top: 1px solid #e6ebf4; padding-top: 12px; color: #6d7d95; font-size: 11px; line-height: 1.65; }
-.retrieval-eval-import-modal summary { color: #4d6183; font-weight: 750; cursor: pointer; }
-.retrieval-eval-import-modal details p { margin: 8px 0 0; }
+.retrieval-eval-import-modal { width: min(620px, 100%); padding: 18px; }
+.retrieval-eval-import-modal > header > div { display: grid; gap: 4px; }
+.retrieval-eval-import-modal > header h3 { font-size: 18px; }
+.retrieval-eval-import-modal > header span { color: #8190a5; font-size: 11px; }
+.retrieval-eval-file-picker { display: flex; min-height: 108px; align-items: center; justify-content: center; flex-direction: column; gap: 6px; border: 1px dashed #b6c4df; border-radius: 10px; padding: 14px; color: #53647e; background: #f8faff; cursor: pointer; text-align: center; transition: border-color .14s ease, background .14s ease, box-shadow .14s ease; }
+.retrieval-eval-file-picker:hover, .retrieval-eval-file-picker.dragging { border-color: #6681df; background: #f2f5ff; box-shadow: inset 0 0 0 1px rgba(102, 129, 223, .12); }
+.retrieval-eval-file-picker.selected { border-style: solid; border-color: #9fb0e7; background: #f5f7ff; }
+.retrieval-eval-file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.retrieval-eval-file-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #4966c6; background: #e8eeff; }
+.retrieval-eval-file-icon svg { width: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.retrieval-eval-file-picker-action { color: #405aaf; font-size: 12px; font-weight: 800; }
+.retrieval-eval-file-picker strong { max-width: 100%; overflow: hidden; color: #718096; font-size: 11px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.retrieval-eval-file-types { display: flex; align-items: center; gap: 5px; }
+.retrieval-eval-file-types i { border-radius: 4px; padding: 2px 5px; color: #7183a5; background: #e9edf5; font-size: 8px; font-style: normal; font-weight: 800; }
+.retrieval-eval-file-types small { margin-left: 3px; color: #909caf; font-size: 9px; }
+.retrieval-eval-import-guide { margin-top: 20px; padding: 0 2px; }
+.retrieval-eval-import-guide > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.retrieval-eval-import-guide h4 { margin: 0; color: #40516c; font-size: 12px; }
+.retrieval-eval-import-guide > header > span { color: #a06d32; font-size: 9px; font-weight: 750; }
+.retrieval-eval-import-guide > div { display: grid; gap: 7px; margin-top: 9px; }
+.retrieval-eval-import-guide article { display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: start; gap: 8px; }
+.retrieval-eval-import-guide strong { color: #526583; font-size: 10px; }
+.retrieval-eval-import-guide article p { margin: 0; color: #78879d; font-size: 10px; line-height: 1.5; }
+.retrieval-eval-import-guide footer { margin-top: 9px; color: #8a96a8; font-size: 9px; }
+.retrieval-eval-import-modal .retrieval-eval-modal-actions { margin-top: 12px; }
 .retrieval-eval-history { margin-top: 14px; border: 1px solid #e3e9f3; border-radius: 10px; background: #fafbfe; }
 .retrieval-eval-history > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 8px; }
 .retrieval-eval-history header p { margin: 0 0 3px; color: #5470cf; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
@@ -2144,6 +2163,7 @@ button:disabled {
   .retrieval-eval-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .retrieval-eval-history-view .retrieval-eval-history-list { grid-template-columns: 1fr; }
   .retrieval-eval-import-records article { align-items: flex-start; flex-wrap: wrap; }
+  .retrieval-eval-import-guide article { grid-template-columns: 1fr; gap: 3px; }
   .retrieval-eval-cases article { grid-template-columns: auto minmax(0, 1fr); }
   .retrieval-eval-cases p, .retrieval-eval-cases small { grid-column: 1 / -1; }
 }
