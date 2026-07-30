@@ -6,6 +6,7 @@ public record AuthResponse(
         String userName,
         String publicId,
         String avatarUrl,
-        java.time.Instant createdAt
+        java.time.Instant createdAt,
+        SystemRole systemRole
 ) {
 }

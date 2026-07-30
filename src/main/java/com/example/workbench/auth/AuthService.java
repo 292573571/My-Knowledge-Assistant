@@ -35,6 +35,9 @@ public class AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         String account = normalizeAccount(request.account());
+        if ("admin".equals(account)) {
+            throw new IllegalArgumentException("admin 为系统保留账号，不能通过注册接口创建");
+        }
         if (userRepository.findByAccount(account).isPresent()) {
             log.warn("User registration rejected reason=account_already_registered");
             throw new IllegalArgumentException("account is already registered");
@@ -105,7 +108,8 @@ public class AuthService {
         sessionRepository.save(new UserSession(user, token, Instant.now().plus(sessionDuration)));
         log.info("User session created userId={} expiresInHours={}", user.getId(), sessionDuration.toHours());
         initializeProfile(user);
-        return new AuthResponse(token, user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar", user.getCreatedAt());
+        return new AuthResponse(token, user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+                user.getCreatedAt(), user.getSystemRole());
     }
 
     private String normalizeAccount(String account) {

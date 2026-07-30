@@ -11,6 +11,8 @@ import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
 import com.example.workbench.rag.RagQualityAuditService;
+import com.example.workbench.workspace.WorkspaceAccessContext;
+import com.example.workbench.workspace.WorkspaceService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -43,6 +45,7 @@ public class WorkbenchStreamController {
     private final ConversationMemory conversationMemory;
     private final LearningRecordService learningRecordService;
     private final RagQualityAuditService ragQualityAuditService;
+    private final WorkspaceService workspaceService;
 
     public WorkbenchStreamController(
             RagService ragService,
@@ -51,7 +54,8 @@ public class WorkbenchStreamController {
             ConversationExecutionRegistry executionRegistry,
             ConversationMemory conversationMemory,
             LearningRecordService learningRecordService,
-            RagQualityAuditService ragQualityAuditService
+            RagQualityAuditService ragQualityAuditService,
+            WorkspaceService workspaceService
     ) {
         this.ragService = ragService;
         this.workbenchChatService = workbenchChatService;
@@ -60,6 +64,7 @@ public class WorkbenchStreamController {
         this.conversationMemory = conversationMemory;
         this.learningRecordService = learningRecordService;
         this.ragQualityAuditService = ragQualityAuditService;
+        this.workspaceService = workspaceService;
     }
 
     @PostMapping
@@ -77,6 +82,7 @@ public class WorkbenchStreamController {
         String conversationId = request.normalizedConversationId();
         String mode = request.normalizedMode();
         String message = request.message();
+        WorkspaceAccessContext workspace = workspaceService.access(user, request.workspaceId());
         // 显式禁止代理、网关或压缩层缓冲 SSE，确保每个 token 抵达后立即交给浏览器。
         httpResponse.setHeader("Cache-Control", "no-cache, no-transform");
         httpResponse.setHeader("X-Accel-Buffering", "no");
@@ -84,7 +90,7 @@ public class WorkbenchStreamController {
         // SSE 连接只负责事件传输；实际 RAG 和消息持久化在异步任务中执行。
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
         String normalizedConversationId = conversationId.isBlank() ? "default" : conversationId;
-        String scopedConversationId = UserConversationScope.id(user, normalizedConversationId);
+        String scopedConversationId = conversationService.executionScope(user, workspace.workspaceId(), normalizedConversationId);
         // 与普通聊天使用同一取消注册表，保证停止/删除语义在两条路径一致。
         ConversationExecutionRegistry.Execution execution = executionRegistry.begin(scopedConversationId);
 
@@ -95,6 +101,7 @@ public class WorkbenchStreamController {
                 String normalizedMode = "rag";
                 conversationService.recordUserMessage(
                         user,
+                        workspace.workspaceId(),
                         normalizedConversationId,
                         message.strip().substring(0, Math.min(message.strip().length(), 24)),
                         normalizedMode,
@@ -113,7 +120,7 @@ public class WorkbenchStreamController {
                         "status", "running"
                 ));
 
-                RagStreamResponse answer = ragService.stream(new RagChatRequest(scopedConversationId, message));
+                RagStreamResponse answer = ragService.stream(new RagChatRequest(scopedConversationId, workspace.workspaceId(), message));
                 if (execution.isCancelled()) {
                     // 在检索或模型生成期间取消时，直接结束 SSE，且不发送/保存迟到结果。
                     emitter.complete();
@@ -153,7 +160,8 @@ public class WorkbenchStreamController {
                 if (!execution.isCancelled()) {
                     String answerContent = content.toString();
                     ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
-                    boolean recorded = conversationService.recordAssistantMessage(user, normalizedConversationId, normalizedMode, answerContent, answer.sources(), List.of());
+                    boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
+                            normalizedMode, answerContent, answer.sources(), List.of());
                         if (recorded) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
                             learningRecordService.record(user, message, answerContent, answer.sources());

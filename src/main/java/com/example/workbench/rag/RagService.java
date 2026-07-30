@@ -5,6 +5,7 @@ import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
+import com.example.workbench.workspace.DocumentVisibility;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -133,7 +134,7 @@ public class RagService {
 
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), options);
+        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(), options);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
@@ -232,18 +233,26 @@ public class RagService {
 
     public List<SourceDocument> retrieve(String query, int topK) {
         long startedAt = System.currentTimeMillis();
-        List<SourceDocument> sources = vectorStore.similaritySearch(query, topK);
+        List<SourceDocument> sources = similaritySearch(query, topK, "", null).stream()
+                .filter(source -> isVisibleToOwner(source, ""))
+                .limit(topK)
+                .toList();
         log.info("RAG retrieve API completed topK={} retrieved={} bestScore={} durationMs={}", topK, sources.size(), bestScore(sources), System.currentTimeMillis() - startedAt);
         return sources;
     }
 
     public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId) {
+        return debugRetrieval(question, ownerUserId, null);
+    }
+
+    public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId, String workspaceId) {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("message cannot be empty");
         }
 
         List<String> queries = retrievalQueries(question.strip());
-        List<SourceDocument> candidates = retrieveCandidates(question.strip(), ownerUserId);
+        List<SourceDocument> candidates = retrieveCandidates(question.strip(), ownerUserId, workspaceId,
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
         List<SourceDocument> usedSources = filterByThreshold(question.strip(), candidates);
         return new RetrievalDebugResponse(
                 question.strip(),
@@ -264,7 +273,8 @@ public class RagService {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER), List.of());
         }
 
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId));
+        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(),
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
             String prompt = buildModelFallbackPrompt(formatHistory(history), question);
@@ -448,19 +458,17 @@ public class RagService {
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId) {
-        return retrieveCandidates(question, ownerUserId, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return retrieveCandidates(question, ownerUserId, null, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
     }
 
-    private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, RagChatOptions options) {
+    private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, String workspaceId, RagChatOptions options) {
         // 多个查询命中同一分块时累计命中次数，并合并为一个候选，避免重复上下文。
         List<String> queries = retrievalQueries(question, options);
         LinkedHashMap<String, ScoredCandidate> candidates = new LinkedHashMap<>();
 
         for (String query : queries) {
-            // 用户私有资料可能与其他用户向量共处一个集合，扩大候选池后再做所有者过滤。
-            int candidateLimit = ownerUserId.isBlank() ? topK : Math.max(topK, topK * 4);
-            for (SourceDocument source : vectorStore.similaritySearch(query, candidateLimit)) {
-                if (!isVisibleToOwner(source, ownerUserId)) {
+            for (SourceDocument source : similaritySearch(query, topK, ownerUserId, workspaceId)) {
+                if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
                     continue;
                 }
                 String key = stableSourceKey(source);
@@ -480,6 +488,14 @@ public class RagService {
                 .sorted(Comparator.comparingDouble(this::rankingScore).reversed())
                 .limit(topK)
                 .toList();
+    }
+
+    private List<SourceDocument> similaritySearch(String query, int limit, String ownerUserId, String workspaceId) {
+        if (vectorStore instanceof ScopedVectorStore scopedVectorStore) {
+            return scopedVectorStore.similaritySearch(query, limit, ownerUserId, workspaceId);
+        }
+        int candidateLimit = ownerUserId == null || ownerUserId.isBlank() ? limit : Math.max(limit, limit * 4);
+        return vectorStore.similaritySearch(query, candidateLimit);
     }
 
     private List<String> retrievalQueries(String question) {
@@ -622,12 +638,24 @@ public class RagService {
     }
 
     private boolean isVisibleToOwner(SourceDocument source, String ownerUserId) {
+        return isVisibleToOwner(source, ownerUserId, null);
+    }
+
+    private boolean isVisibleToOwner(SourceDocument source, String ownerUserId, String workspaceId) {
         String sourceOwner = source.ownerUserId();
         if ((sourceOwner == null || sourceOwner.isBlank()) && source.path() != null) {
             var matcher = Pattern.compile("/user-([^/]+)/").matcher(source.path().replace('\\', '/'));
             sourceOwner = matcher.find() ? matcher.group(1) : "";
         }
-        return sourceOwner.isBlank() || ownerUserId.isBlank() || sourceOwner.equals(ownerUserId);
+        if (source.visibility() == DocumentVisibility.PUBLIC) {
+            return true;
+        }
+        if (source.visibility() == DocumentVisibility.PRIVATE) {
+            return ownerUserId != null && !ownerUserId.isBlank()
+                    && sourceOwner.equals(ownerUserId)
+                    && (workspaceId == null || source.workspaceId().equals(workspaceId));
+        }
+        return workspaceId != null && !workspaceId.isBlank() && source.workspaceId().equals(workspaceId);
     }
 
     private String ownerUserId(String conversationId) {

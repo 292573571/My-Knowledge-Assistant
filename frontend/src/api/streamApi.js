@@ -1,4 +1,5 @@
 import { authHeaders } from './authApi'
+import { getActiveWorkspaceId } from './workspaceApi'
 
 function parseEventData(data) {
   if (!data) return {}
@@ -12,7 +13,7 @@ export function streamChat({ conversationId, mode, message, onEvent }) {
     method: 'POST',
     credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
-    body: JSON.stringify({ conversationId, mode, message }),
+    body: JSON.stringify({ conversationId, mode, workspaceId: getActiveWorkspaceId(), message }),
     signal: controller.signal
   }).then(async response => {
     if (!response.ok || !response.body) throw new Error(`SSE request failed: ${response.status}`)

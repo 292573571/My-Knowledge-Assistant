@@ -8,13 +8,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 @Primary
 @Component
-public class ChromaVectorStoreAdapter implements VectorStore {
+public class ChromaVectorStoreAdapter implements ScopedVectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(ChromaVectorStoreAdapter.class);
 
@@ -101,19 +102,32 @@ public class ChromaVectorStoreAdapter implements VectorStore {
 
     @Override
     public List<SourceDocument> similaritySearch(String query, int topK) {
+        return similaritySearch(query, topK, null, null, false);
+    }
+
+    @Override
+    public List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId) {
+        return similaritySearch(query, topK, ownerUserId, workspaceId, true);
+    }
+
+    private List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId,
+                                                  boolean scoped) {
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
-            return fallbackVectorStore.similaritySearch(query, topK);
+            return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
         }
 
         try {
-            List<Document> documents = chromaVectorStore.similaritySearch(SearchRequest.builder()
+            SearchRequest.Builder request = SearchRequest.builder()
                     .query(query)
-                    .topK(topK)
-                    .build());
+                    .topK(topK);
+            if (scoped) {
+                request.filterExpression(visibilityFilter(ownerUserId, workspaceId));
+            }
+            List<Document> documents = chromaVectorStore.similaritySearch(request.build());
 
             if (documents == null || documents.isEmpty()) {
-                return fallbackVectorStore.similaritySearch(query, topK);
+                return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
             }
 
             return documents.stream()
@@ -121,8 +135,38 @@ public class ChromaVectorStoreAdapter implements VectorStore {
                     .toList();
         } catch (RuntimeException exception) {
             log.warn("Failed to search Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
-            return fallbackVectorStore.similaritySearch(query, topK);
+            return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
         }
+    }
+
+    private List<SourceDocument> fallbackSearch(String query, int topK, String ownerUserId, String workspaceId,
+                                                boolean scoped) {
+        return scoped
+                ? fallbackVectorStore.similaritySearch(query, topK, ownerUserId, workspaceId)
+                : fallbackVectorStore.similaritySearch(query, topK);
+    }
+
+    private Filter.Expression visibilityFilter(String ownerUserId, String workspaceId) {
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op allowed = builder.eq("visibility", "PUBLIC");
+
+        if (ownerUserId != null && !ownerUserId.isBlank()) {
+            FilterExpressionBuilder.Op privateFilter = builder.and(
+                    builder.eq("visibility", "PRIVATE"),
+                    builder.eq("ownerUserId", ownerUserId));
+            if (workspaceId != null && !workspaceId.isBlank()) {
+                privateFilter = builder.and(privateFilter, builder.eq("workspaceId", workspaceId));
+            }
+            allowed = builder.or(allowed, privateFilter);
+        }
+
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            FilterExpressionBuilder.Op workspaceFilter = builder.and(
+                    builder.eq("visibility", "WORKSPACE"),
+                    builder.eq("workspaceId", workspaceId));
+            allowed = builder.or(allowed, workspaceFilter);
+        }
+        return allowed.build();
     }
 
     private Document toSpringAiDocument(SourceDocument sourceDocument) {
@@ -142,6 +186,8 @@ public class ChromaVectorStoreAdapter implements VectorStore {
         metadata.put("chunkType", sourceDocument.chunkType());
         metadata.put("category", sourceDocument.category());
         metadata.put("ownerUserId", sourceDocument.ownerUserId());
+        metadata.put("workspaceId", sourceDocument.workspaceId());
+        metadata.put("visibility", sourceDocument.visibility().name());
 
         return new Document(sourceDocument.id(), sourceDocument.content(), metadata);
     }
@@ -169,8 +215,20 @@ public class ChromaVectorStoreAdapter implements VectorStore {
                 metadataInt(metadata, "endOffset"),
                 metadataValue(metadata, "chunkType", "text-paragraph"),
                 metadataValue(metadata, "category", "SOURCE"),
-                metadataValue(metadata, "ownerUserId", "")
+                metadataValue(metadata, "ownerUserId", ""),
+                metadataValue(metadata, "workspaceId", ""),
+                metadataVisibility(metadata)
         );
+    }
+
+    private com.example.workbench.workspace.DocumentVisibility metadataVisibility(Map<String, Object> metadata) {
+        String owner = metadataValue(metadata, "ownerUserId", "");
+        String fallback = owner.isBlank() ? "PUBLIC" : "PRIVATE";
+        try {
+            return com.example.workbench.workspace.DocumentVisibility.valueOf(metadataValue(metadata, "visibility", fallback));
+        } catch (IllegalArgumentException exception) {
+            return com.example.workbench.workspace.DocumentVisibility.valueOf(fallback);
+        }
     }
 
     private String metadataValue(Map<String, Object> metadata, String key, String defaultValue) {

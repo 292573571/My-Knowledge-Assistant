@@ -27,7 +27,7 @@ class UserProfileServiceTest {
     void setUp() {
         users = Mockito.mock(AppUserRepository.class);
         when(users.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        service = new UserProfileService(users, tempDir.resolve("avatars").toString());
+        service = new UserProfileService(users, new AdminAuthorizationService(""), tempDir.resolve("avatars").toString());
         user = new AppUser("alice", "alice", "hash");
         user.initializeProfile("usr_public-id", "avatar-seed");
     }

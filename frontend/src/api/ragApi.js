@@ -1,10 +1,11 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
+import { getActiveWorkspaceId } from './workspaceApi'
 
 const REQUEST_ERROR_MESSAGE = '检索调试请求失败，请检查后端服务是否启动。'
 
 export async function debugRetrieval(message) {
-  const body = { message }
+  const body = { message, workspaceId: getActiveWorkspaceId() }
 
   try {
     const response = await fetch('/api/rag/debug', {

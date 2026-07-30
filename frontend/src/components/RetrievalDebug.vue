@@ -3,6 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createEvalCase, deleteEvalCase, downloadEvalImport, fetchEvalCases, fetchEvalImports, fetchEvalRun, fetchEvalRuns, importEvalCases, runEvals, updateEvalCase } from '../api/ragApi'
 
+defineProps({
+  embedded: { type: Boolean, default: false }
+})
+
 const evalSummary = ref(null)
 const evalLoading = ref(false)
 const evalError = ref('')
@@ -260,14 +264,14 @@ onMounted(loadEvalCases)
 </script>
 
 <template>
-  <main class="retrieval-debug">
-    <section class="retrieval-debug-hero">
+  <main :class="['retrieval-debug', { embedded }]">
+    <section v-if="!embedded" class="retrieval-debug-hero">
       <div>
         <p class="retrieval-debug-kicker">RAG OBSERVATORY</p>
         <h1>检索评测</h1>
         <p>维护评测题，并对比基线检索与增强检索的实际效果。</p>
       </div>
-      <span class="retrieval-debug-status">30 条评测题</span>
+      <span class="retrieval-debug-status">{{ evalCases.length }} 条评测题</span>
     </section>
 
     <section v-if="!evalSummary && !historyOpen && !importsOpen" class="retrieval-eval-workbench" aria-labelledby="eval-workbench-title">

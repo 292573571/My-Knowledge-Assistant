@@ -1,7 +1,12 @@
 package com.example.workbench.rag;
 
+import com.example.workbench.workspace.DocumentVisibility;
+import com.example.workbench.workspace.WorkspaceAccessContext;
+import com.example.workbench.workspace.WorkspaceType;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharacterCodingException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -14,10 +19,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DocumentIngestionService {
@@ -25,6 +34,7 @@ public class DocumentIngestionService {
     private static final Logger log = LoggerFactory.getLogger(DocumentIngestionService.class);
     private static final Path DEFAULT_DOCS_DIRECTORY = Path.of("docs");
     private static final Path WORKSPACE_DIRECTORY = Path.of("").toAbsolutePath().normalize();
+    private static final long MAX_WORKSPACE_DOCUMENT_BYTES = 5L * 1024 * 1024;
 
     private final List<SourceDocument> documents = new ArrayList<>();
     private final VectorStore vectorStore;
@@ -116,6 +126,15 @@ public class DocumentIngestionService {
         return responseFrom(List.of(result));
     }
 
+    public synchronized IngestResponse ingestDocument(String path, boolean force, WorkspaceAccessContext access) {
+        requireWorkspaceWrite(access);
+        Path documentPath = resolveAllowedPath(path);
+        if (!Files.isRegularFile(documentPath)) {
+            throw new IllegalArgumentException("Document path must be a file: " + path);
+        }
+        return responseFrom(List.of(ingestWorkspacePath(documentPath, force, access)));
+    }
+
     public IngestResponse ingestDirectory(String path, boolean force) throws IOException {
         long startedAt = System.currentTimeMillis();
         Path directoryPath = path == null || path.isBlank()
@@ -157,12 +176,71 @@ public class DocumentIngestionService {
         return response;
     }
 
+    public synchronized IngestResponse ingestDirectory(String path, boolean force, WorkspaceAccessContext access) throws IOException {
+        requireWorkspaceWrite(access);
+        Path directoryPath = path == null || path.isBlank()
+                ? workspaceDirectory(access)
+                : resolveAllowedPath(path);
+        if (!Files.exists(directoryPath)) {
+            return responseFrom(List.of());
+        }
+        if (!Files.isDirectory(directoryPath)) {
+            throw new IllegalArgumentException("Directory path must be a directory: " + path);
+        }
+        List<IngestDocumentResult> results = supportedFiles(directoryPath).stream()
+                .map(file -> ingestWorkspacePath(file, force, access))
+                .toList();
+        return responseFrom(results);
+    }
+
     public void ingest(SourceDocument document) {
         documents.add(document);
     }
 
     public List<SourceDocument> listDocuments() {
         return Collections.unmodifiableList(documents);
+    }
+
+    public synchronized WorkspaceDocumentUploadResponse uploadWorkspaceDocument(
+            WorkspaceAccessContext access,
+            MultipartFile file
+    ) {
+        if (!access.canWrite()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色不能上传空间文档");
+        }
+        byte[] content = uploadedContent(file);
+        String originalFileName = safeOriginalFileName(file.getOriginalFilename());
+        String extension = originalFileName.substring(originalFileName.lastIndexOf('.')).toLowerCase();
+        Path workspaceDirectory = docsDirectory.resolve("workspaces").resolve(access.workspaceId()).normalize();
+        Path target = workspaceDirectory.resolve(UUID.randomUUID() + extension).normalize();
+        if (!target.startsWith(workspaceDirectory)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件名无效");
+        }
+
+        try {
+            Files.createDirectories(workspaceDirectory);
+            Files.write(target, content, java.nio.file.StandardOpenOption.CREATE_NEW);
+            IngestedFile ingested = ingestWorkspaceFile(target, originalFileName, access);
+            if (ingested.indexEntry() == null || ingested.chunkCount() == 0) {
+                Files.deleteIfExists(target);
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档内容不能为空");
+            }
+            documents.addAll(ingested.documents());
+            vectorStore.addAll(ingested.documents());
+            documentIndexStore.upsertAll(List.of(ingested.indexEntry()));
+            DocumentIndexEntry entry = ingested.indexEntry();
+            return new WorkspaceDocumentUploadResponse(entry.documentId(), entry.fileName(), entry.path(),
+                    entry.chunkCount(), entry.workspaceId(), entry.visibility());
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to save workspace document", exception);
+        } catch (RuntimeException exception) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException ignored) {
+                // Preserve the original upload/indexing failure.
+            }
+            throw exception;
+        }
     }
 
     public List<DocumentIndexEntry> listIndexedDocuments() {
@@ -179,6 +257,26 @@ public class DocumentIngestionService {
                 .toList();
     }
 
+    public List<DocumentIndexEntry> listVisibleIndexedDocuments(String ownerUserId) {
+        return listIndexedDocuments().stream()
+                .filter(entry -> canRead(entry, ownerUserId, null))
+                .toList();
+    }
+
+    public List<DocumentIndexEntry> listVisibleIndexedDocuments(WorkspaceAccessContext access) {
+        return listIndexedDocuments().stream().filter(entry -> canRead(entry, access.userId(), access.workspaceId())).toList();
+    }
+
+    public List<DocumentIndexEntry> listWorkspaceIndexedDocuments(WorkspaceAccessContext access) {
+        return listIndexedDocuments().stream()
+                .filter(entry -> entry.workspaceId().equals(access.workspaceId()))
+                .toList();
+    }
+
+    public List<DocumentIndexEntry> listPublicIndexedDocuments() {
+        return listVisibleIndexedDocuments("");
+    }
+
     private boolean isLearningRecordEntry(DocumentIndexEntry entry) {
         return "LEARNING_RECORD".equals(entry.category())
                 || entry.path().replace('\\', '/').startsWith("docs/learning-records/");
@@ -189,10 +287,14 @@ public class DocumentIngestionService {
                 .filter(item -> item.documentId().equals(documentId))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Indexed document not found: " + documentId));
-        if (!entry.ownerUserId().isBlank() && !entry.ownerUserId().equals(ownerUserId)) {
+        if (!canRead(entry, ownerUserId, null)) {
             throw new IllegalArgumentException("Indexed document not found: " + documentId);
         }
+        return readDocumentContent(entry);
+    }
 
+    private DocumentContentResponse readDocumentContent(DocumentIndexEntry entry) {
+        String documentId = entry.documentId();
         Path documentPath = resolveIndexedPath(entry.path());
         try {
             Path realDocsDirectory = docsDirectory.toRealPath();
@@ -214,15 +316,61 @@ public class DocumentIngestionService {
         }
     }
 
-    public synchronized void deleteDocument(String documentId) {
-        // 当前删除仅移除索引和向量数据，不删除 docs/ 下的源文件；重建时仍可重新导入。
+    public DocumentContentResponse documentContent(String documentId, WorkspaceAccessContext access) {
+        DocumentIndexEntry entry = indexedDocument(documentId);
+        if (!canRead(entry, access.userId(), access.workspaceId())) {
+            throw new IllegalArgumentException("Indexed document not found: " + documentId);
+        }
+        return readDocumentContent(entry);
+    }
+
+    public synchronized void deleteDocument(String documentId, String ownerUserId, boolean canManagePublicDocuments) {
         log.info("Document delete started documentId={}", documentId);
         DocumentIndexEntry entry = documentIndexStore.list().stream()
                 .filter(item -> item.documentId().equals(documentId))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Indexed document not found: " + documentId));
+        boolean ownsDocument = !entry.ownerUserId().isBlank() && entry.ownerUserId().equals(ownerUserId);
+        boolean mayDeletePublicDocument = entry.ownerUserId().isBlank() && canManagePublicDocuments;
+        if (!ownsDocument && !mayDeletePublicDocument) {
+            throw new IllegalArgumentException("Indexed document not found: " + documentId);
+        }
+        deleteWorkspaceUploadSource(entry);
         removeIndexedDocument(entry);
         log.info("Document delete completed documentId={} remainingChunks={}", documentId, documents.size());
+    }
+
+    public synchronized void deleteDocument(String documentId, WorkspaceAccessContext access, boolean canManagePublicDocuments) {
+        DocumentIndexEntry entry = indexedDocument(documentId);
+        boolean mayDeletePrivate = entry.visibility() == DocumentVisibility.PRIVATE && entry.ownerUserId().equals(access.userId());
+        boolean mayDeleteWorkspace = entry.visibility() == DocumentVisibility.WORKSPACE
+                && entry.workspaceId().equals(access.workspaceId()) && access.canWrite();
+        boolean mayDeletePublic = entry.visibility() == DocumentVisibility.PUBLIC && canManagePublicDocuments
+                && entry.workspaceId().equals(access.workspaceId()) && access.canWrite();
+        if (!mayDeletePrivate && !mayDeleteWorkspace && !mayDeletePublic) {
+            throw new IllegalArgumentException("Indexed document not found: " + documentId);
+        }
+        deleteWorkspaceUploadSource(entry);
+        removeIndexedDocument(entry);
+    }
+
+    private boolean canRead(DocumentIndexEntry entry, String ownerUserId, String workspaceId) {
+        if (entry.visibility() == DocumentVisibility.PUBLIC) {
+            return true;
+        }
+        if (entry.visibility() == DocumentVisibility.PRIVATE) {
+            return ownerUserId != null && !ownerUserId.isBlank()
+                    && entry.ownerUserId().equals(ownerUserId)
+                    && (workspaceId == null || entry.workspaceId().equals(workspaceId));
+        }
+        return workspaceId != null && !workspaceId.isBlank() && entry.workspaceId().equals(workspaceId);
+    }
+
+    private DocumentIndexEntry indexedDocument(String documentId) {
+        return documentIndexStore.list().stream()
+                .filter(item -> item.documentId().equals(documentId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Indexed document not found: " + documentId));
     }
 
     public synchronized void deleteIndexedPath(String path) {
@@ -283,6 +431,34 @@ public class DocumentIngestionService {
             );
             throw exception;
         }
+    }
+
+    public synchronized RebuildResult rebuildDocuments(WorkspaceAccessContext access) throws IOException {
+        requireWorkspaceWrite(access);
+        long startedAt = System.currentTimeMillis();
+        List<DocumentIndexEntry> existingEntries = documentIndexStore.list().stream()
+                .filter(entry -> entry.workspaceId().equals(access.workspaceId()))
+                .toList();
+        int clearedChunks = existingEntries.stream().mapToInt(DocumentIndexEntry::chunkCount).sum();
+        List<Path> existingSources = existingEntries.stream()
+                .map(entry -> resolveIndexedPath(entry.path()))
+                .filter(Files::isRegularFile)
+                .distinct()
+                .toList();
+        existingEntries.forEach(this::removeIndexedDocument);
+
+        List<IngestDocumentResult> results = new ArrayList<>();
+        for (Path source : existingSources) {
+            results.add(ingestWorkspacePath(source, true, access));
+        }
+        for (Path source : supportedFiles(workspaceDirectory(access))) {
+            if (!existingSources.contains(source)) {
+                results.add(ingestWorkspacePath(source, true, access));
+            }
+        }
+        IngestResponse response = responseFrom(results);
+        return new RebuildResult("success", existingEntries.size(), clearedChunks,
+                response.imported(), response.chunks(), System.currentTimeMillis() - startedAt);
     }
 
     public synchronized SyncResult syncDocsDirectory() throws IOException {
@@ -415,6 +591,80 @@ public class DocumentIngestionService {
         }
     }
 
+    public synchronized SyncResult syncWorkspace(WorkspaceAccessContext access) throws IOException {
+        return syncWorkspace(null, access);
+    }
+
+    public synchronized SyncResult syncWorkspace(String path, WorkspaceAccessContext access) throws IOException {
+        requireWorkspaceWrite(access);
+        long startedAt = System.currentTimeMillis();
+        Path directoryPath = path == null || path.isBlank() ? workspaceDirectory(access) : resolveAllowedPath(path);
+        if (Files.exists(directoryPath) && !Files.isDirectory(directoryPath)) {
+            throw new IllegalArgumentException("Directory path must be a directory: " + path);
+        }
+        List<DocumentIndexEntry> existingEntries = documentIndexStore.list().stream()
+                .filter(entry -> entry.workspaceId().equals(access.workspaceId()))
+                .toList();
+        List<Path> files = new ArrayList<>(supportedFiles(directoryPath));
+        if (path == null || path.isBlank()) {
+            existingEntries.stream()
+                    .map(entry -> resolveIndexedPath(entry.path()))
+                    .filter(Files::isRegularFile)
+                    .filter(source -> !files.contains(source))
+                    .forEach(files::add);
+            files.sort(Path::compareTo);
+        } else {
+            existingEntries = existingEntries.stream()
+                    .filter(entry -> resolveIndexedPath(entry.path()).startsWith(directoryPath))
+                    .toList();
+        }
+        Set<String> scannedPaths = files.stream().map(this::workspaceRelativePath).collect(Collectors.toSet());
+        Map<String, DocumentIndexEntry> entriesByPath = existingEntries.stream()
+                .collect(Collectors.toMap(DocumentIndexEntry::path, entry -> entry, (left, right) -> left, HashMap::new));
+        int addedFiles = 0;
+        int updatedFiles = 0;
+        int unchangedFiles = 0;
+        int deletedFiles = 0;
+        int addedChunks = 0;
+        int deletedChunks = 0;
+
+        for (Path file : files) {
+            String relativePath = workspaceRelativePath(file);
+            IngestedFile candidate = ingestWorkspaceFile(file, file.getFileName().toString(), access);
+            DocumentIndexEntry existing = entriesByPath.get(relativePath);
+            if (candidate.indexEntry() == null) {
+                if (existing != null) {
+                    deletedChunks += removeIndexedDocument(existing);
+                    deletedFiles++;
+                }
+                continue;
+            }
+            if (existing != null && existing.contentHash().equals(candidate.indexEntry().contentHash())) {
+                unchangedFiles++;
+                continue;
+            }
+            if (existing != null) {
+                deletedChunks += removeIndexedDocument(existing);
+                updatedFiles++;
+            } else {
+                addedFiles++;
+            }
+            documents.addAll(candidate.documents());
+            vectorStore.addAll(candidate.documents());
+            documentIndexStore.upsertAll(List.of(candidate.indexEntry()));
+            addedChunks += candidate.chunkCount();
+        }
+
+        for (DocumentIndexEntry existing : existingEntries) {
+            if (!scannedPaths.contains(existing.path())) {
+                deletedChunks += removeIndexedDocument(existing);
+                deletedFiles++;
+            }
+        }
+        return new SyncResult("success", files.size(), addedFiles, updatedFiles, unchangedFiles,
+                deletedFiles, addedChunks, deletedChunks, System.currentTimeMillis() - startedAt);
+    }
+
     private List<String> chunkIds(DocumentIndexEntry entry) {
         List<String> ids = new ArrayList<>();
 
@@ -432,6 +682,49 @@ public class DocumentIngestionService {
         documents.removeIf(document -> document.documentId().equals(entry.documentId()));
         documentIndexStore.delete(entry.documentId());
         return ids.size();
+    }
+
+    private void deleteWorkspaceUploadSource(DocumentIndexEntry entry) {
+        String normalizedPath = entry.path().replace('\\', '/');
+        String workspacePrefix = "docs/workspaces/" + entry.workspaceId() + "/";
+        if (!normalizedPath.startsWith(workspacePrefix)) {
+            return;
+        }
+
+        String storedFileName = normalizedPath.substring(workspacePrefix.length());
+        if (!storedFileName.matches("[0-9a-fA-F-]{36}\\.(md|txt)")) {
+            // 只删除系统上传时生成的随机文件，手工维护或全局导入的源文件仍由管理员管理。
+            return;
+        }
+
+        Path workspaceDirectory = docsDirectory.resolve("workspaces").resolve(entry.workspaceId()).normalize();
+        Path sourcePath = resolveIndexedPath(entry.path());
+        if (!workspaceDirectory.startsWith(docsDirectory) || !sourcePath.startsWith(workspaceDirectory)
+                || !sourcePath.getParent().equals(workspaceDirectory)) {
+            throw new IllegalStateException("Workspace document source path is outside its workspace directory");
+        }
+
+        try {
+            if (!Files.exists(sourcePath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            Path realDocsDirectory = docsDirectory.toRealPath();
+            Path realWorkspaceDirectory = workspaceDirectory.toRealPath();
+            Path realSourcePath = sourcePath.toRealPath();
+            if (!realWorkspaceDirectory.startsWith(realDocsDirectory)
+                    || !realSourcePath.startsWith(realWorkspaceDirectory)
+                    || !Files.isRegularFile(realSourcePath)) {
+                throw new IllegalStateException("Workspace document source path is outside its workspace directory");
+            }
+            Files.delete(sourcePath);
+            try {
+                Files.delete(workspaceDirectory);
+            } catch (IOException ignored) {
+                // 空目录清理是尽力而为，不影响文档删除结果。
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to delete workspace document source", exception);
+        }
     }
 
     private List<Path> supportedFiles(Path directory) throws IOException {
@@ -527,6 +820,80 @@ public class DocumentIngestionService {
         );
     }
 
+    private IngestDocumentResult ingestWorkspacePath(Path path, boolean force, WorkspaceAccessContext access) {
+        if (!isIndexableDocument(path)) {
+            return new IngestDocumentResult(path.getFileName().toString(), workspaceRelativePath(path), null,
+                    "failed", 0, "Unsupported document type");
+        }
+        String originalFileName = path.getFileName().toString();
+        IngestedFile sourceCandidate = ingestWorkspaceFile(path, originalFileName, access);
+        if (sourceCandidate.indexEntry() == null) {
+            return new IngestDocumentResult(originalFileName, workspaceRelativePath(path), null,
+                    "skipped", 0, "Document is empty");
+        }
+        DocumentIndexEntry existing = findExistingWorkspaceEntry(sourceCandidate.indexEntry(), access.workspaceId());
+        if (!force && existing != null && existing.contentHash().equals(sourceCandidate.indexEntry().contentHash())) {
+            return new IngestDocumentResult(existing.fileName(), existing.path(), existing.documentId(),
+                    "skipped", existing.chunkCount(), "Duplicate document skipped");
+        }
+
+        Path managedPath = path;
+        Path workspaceDirectory = workspaceDirectory(access);
+        if (!path.startsWith(workspaceDirectory)) {
+            String extension = originalFileName.substring(originalFileName.lastIndexOf('.')).toLowerCase();
+            managedPath = workspaceDirectory.resolve(UUID.randomUUID() + extension);
+            try {
+                Files.createDirectories(workspaceDirectory);
+                Files.copy(path, managedPath);
+            } catch (IOException exception) {
+                throw new IllegalStateException("Failed to copy document into workspace", exception);
+            }
+        }
+
+        IngestedFile ingested = ingestWorkspaceFile(managedPath, originalFileName, access);
+        if (ingested.indexEntry() == null) {
+            return new IngestDocumentResult(path.getFileName().toString(), workspaceRelativePath(path), null,
+                    "skipped", 0, "Document is empty");
+        }
+        if (existing != null) {
+            if (!existing.path().equals(ingested.indexEntry().path())) {
+                deleteWorkspaceUploadSource(existing);
+            }
+            removeIndexedDocument(existing);
+        }
+        documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
+        documents.addAll(ingested.documents());
+        vectorStore.addAll(ingested.documents());
+        documentIndexStore.upsertAll(List.of(ingested.indexEntry()));
+        return new IngestDocumentResult(ingested.indexEntry().fileName(), ingested.indexEntry().path(),
+                ingested.indexEntry().documentId(), "imported", ingested.chunkCount(),
+                force ? "Document re-imported" : "Document imported");
+    }
+
+    private DocumentIndexEntry findExistingWorkspaceEntry(DocumentIndexEntry candidate, String workspaceId) {
+        return documentIndexStore.list().stream()
+                .filter(entry -> entry.workspaceId().equals(workspaceId))
+                .filter(entry -> entry.path().equals(candidate.path())
+                        || entry.contentHash().equals(candidate.contentHash())
+                        || entry.documentId().equals(candidate.documentId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private void requireWorkspaceWrite(WorkspaceAccessContext access) {
+        if (!access.canWrite()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色不能维护空间文档");
+        }
+    }
+
+    private Path workspaceDirectory(WorkspaceAccessContext access) {
+        Path directory = docsDirectory.resolve("workspaces").resolve(access.workspaceId()).normalize();
+        if (!directory.startsWith(docsDirectory)) {
+            throw new IllegalArgumentException("Invalid workspace document directory");
+        }
+        return directory;
+    }
+
     private DocumentIndexEntry findExistingEntry(DocumentIndexEntry candidate) {
         return documentIndexStore.list().stream()
                 .filter(entry -> entry.path().equals(candidate.path())
@@ -606,6 +973,79 @@ public class DocumentIngestionService {
             return new IngestedFile(indexEntry, sourceDocuments);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to ingest document: " + path, exception);
+        }
+    }
+
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access) {
+        try {
+            String normalizedContent = decodeUtf8(Files.readAllBytes(path)).trim();
+            if (normalizedContent.isEmpty()) {
+                return new IngestedFile(null, List.of());
+            }
+
+            DocumentVisibility visibility = switch (access.type()) {
+                case PERSONAL -> DocumentVisibility.PRIVATE;
+                case TEAM -> DocumentVisibility.WORKSPACE;
+                case PUBLIC -> DocumentVisibility.PUBLIC;
+            };
+            String contentHash = sha256(normalizedContent);
+            String scopedHash = sha256(access.workspaceId() + "\n" + contentHash);
+            String documentId = scopedHash.substring(0, 16);
+            String relativePath = workspaceRelativePath(path).replace('\\', '/');
+            List<DocumentChunk> chunks = documentChunkerRouter.select(originalFileName).chunk(normalizedContent);
+            List<SourceDocument> sourceDocuments = new ArrayList<>();
+            String title = extractTitle(normalizedContent);
+
+            for (DocumentChunk chunk : chunks) {
+                sourceDocuments.add(new SourceDocument(
+                        documentId + "#chunk-" + chunk.chunkIndex(), title, originalFileName, relativePath,
+                        documentId, originalFileName, contentHash, chunk, "SOURCE", access.userId(),
+                        access.workspaceId(), visibility
+                ));
+            }
+            DocumentIndexEntry entry = new DocumentIndexEntry(
+                    documentId, originalFileName, relativePath, scopedHash, chunks.size(), System.currentTimeMillis(),
+                    "SOURCE", "INDEXED", access.userId(), access.workspaceId(), visibility
+            );
+            return new IngestedFile(entry, sourceDocuments);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to ingest workspace document", exception);
+        }
+    }
+
+    private byte[] uploadedContent(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要上传的文档");
+        }
+        if (file.getSize() > MAX_WORKSPACE_DOCUMENT_BYTES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 5 MB");
+        }
+        try {
+            byte[] content = file.getBytes();
+            decodeUtf8(content);
+            return content;
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to read uploaded document", exception);
+        }
+    }
+
+    private String safeOriginalFileName(String originalFileName) {
+        String fileName = originalFileName == null ? "" : Path.of(originalFileName).getFileName().toString().strip();
+        String lower = fileName.toLowerCase();
+        if (fileName.isBlank() || (!lower.endsWith(".md") && !lower.endsWith(".txt"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown 或 TXT");
+        }
+        if (fileName.length() > 180) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档文件名过长");
+        }
+        return fileName;
+    }
+
+    private String decodeUtf8(byte[] content) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(content)).toString();
+        } catch (CharacterCodingException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档必须使用 UTF-8 编码");
         }
     }
 

@@ -10,50 +10,65 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.Comment;
 
 @Entity
 @Table(name = "eval_cases")
+@Comment("RAG 评测用例表")
 public class EvalCaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Comment("评测用例主键")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_user_id", nullable = false)
+    @Comment("所属用户主键")
     private AppUser owner;
 
     @Column(name = "case_id", nullable = false, length = 128)
+    @Comment("评测用例业务标识")
     private String caseId;
 
     @Column(nullable = false, length = 64)
+    @Comment("评测模式")
     private String mode;
 
     @Column(nullable = false, length = 64)
+    @Comment("评测类型")
     private String type;
 
     @Column(nullable = false, length = 4000)
+    @Comment("评测问题")
     private String question;
 
     @Column(name = "expect_no_answer", nullable = false)
+    @Comment("是否期望拒绝回答")
     private boolean expectNoAnswer;
 
     @Column(name = "require_local_evidence", nullable = false)
+    @Comment("是否要求本地知识证据")
     private boolean requireLocalEvidence;
 
     @Column(name = "allow_model_fallback", nullable = false)
+    @Comment("是否允许模型兜底")
     private boolean allowModelFallback;
 
     @Column(name = "expected_sources", nullable = false, columnDefinition = "TEXT")
+    @Comment("期望来源规则")
     private String expectedSources;
 
     @Column(name = "expected_heading_paths", nullable = false, columnDefinition = "TEXT")
+    @Comment("期望标题路径规则")
     private String expectedHeadingPaths;
 
     @Column(name = "expected_keywords", nullable = false, columnDefinition = "TEXT")
+    @Comment("期望关键词规则")
     private String expectedKeywords;
 
     @Column(name = "forbidden_keywords", nullable = false, columnDefinition = "TEXT")
+    @Comment("禁用关键词规则")
     private String forbiddenKeywords;
 
     protected EvalCaseEntity() {

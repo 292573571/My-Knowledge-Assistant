@@ -1,5 +1,11 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
+import { getActiveWorkspaceId } from './workspaceApi'
+
+function workspaceQuery() {
+  const workspaceId = getActiveWorkspaceId()
+  return workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''
+}
 
 async function request(path, options = {}) {
   let response
@@ -31,15 +37,24 @@ async function request(path, options = {}) {
 }
 
 export function fetchDocuments() {
-  return request('/api/documents')
+  return request(`/api/documents${workspaceQuery()}`)
 }
 
 export function fetchDocumentContent(documentId) {
-  return request(`/api/documents/${encodeURIComponent(documentId)}/content`)
+  return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery()}`)
+}
+
+export function uploadWorkspaceDocument(file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request(`/api/documents/upload${workspaceQuery()}`, {
+    method: 'POST',
+    body: form
+  })
 }
 
 export function ingestDocuments(path = '', force = false) {
-  return request('/api/documents/ingest-directory', {
+  return request(`/api/documents/ingest-directory${workspaceQuery()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, force })
@@ -47,7 +62,7 @@ export function ingestDocuments(path = '', force = false) {
 }
 
 export function ingestDocument(path, force = false) {
-  return request('/api/documents/ingest', {
+  return request(`/api/documents/ingest${workspaceQuery()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, force })
@@ -55,19 +70,19 @@ export function ingestDocument(path, force = false) {
 }
 
 export function rebuildDocuments() {
-  return request('/api/documents/rebuild', {
+  return request(`/api/documents/rebuild${workspaceQuery()}`, {
     method: 'POST'
   })
 }
 
 export function syncDocuments() {
-  return request('/api/documents/sync', {
+  return request(`/api/documents/sync${workspaceQuery()}`, {
     method: 'POST'
   })
 }
 
 export function deleteDocument(documentId) {
-  return request(`/api/documents/${encodeURIComponent(documentId)}`, {
+  return request(`/api/documents/${encodeURIComponent(documentId)}${workspaceQuery()}`, {
     method: 'DELETE'
   })
 }

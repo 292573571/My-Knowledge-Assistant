@@ -1,5 +1,6 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
+import { getActiveWorkspaceId } from './workspaceApi'
 
 // 一次 RAG 问答可能包含召回质量评估、回答生成和答案评估，需与 SSE 请求预算保持一致。
 const REQUEST_TIMEOUT_MS = 120000
@@ -9,7 +10,7 @@ export async function sendChatMessage({ conversationId, mode, message, onAbortRe
   const controller = new AbortController()
   onAbortReady?.(() => controller.abort())
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  const body = { conversationId, mode, message }
+  const body = { conversationId, mode, workspaceId: getActiveWorkspaceId(), message }
   const startedAt = performance.now()
 
   try {

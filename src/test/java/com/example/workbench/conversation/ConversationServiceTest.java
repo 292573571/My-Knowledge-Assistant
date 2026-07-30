@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.memory.ConversationMemory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
@@ -23,9 +24,10 @@ class ConversationServiceTest {
         ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(), new ConversationExecutionRegistry(), new ObjectMapper());
         AppUser anotherUser = new AppUser("bob", "Bob", "hash");
 
-        when(conversations.findByIdAndUserId("conversation-a", anotherUser.getId())).thenReturn(Optional.empty());
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", anotherUser.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.messages(anotherUser, "conversation-a"))
+        assertThatThrownBy(() -> service.messages(anotherUser, "team-1", "conversation-a"))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("404 NOT_FOUND");
 
@@ -39,9 +41,11 @@ class ConversationServiceTest {
         ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(), new ConversationExecutionRegistry(), new ObjectMapper());
         AppUser user = new AppUser("alice", "Alice", "hash");
 
-        when(conversations.findByIdAndUserId("conversation-a", user.getId())).thenReturn(Optional.empty());
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.empty());
 
-        boolean recorded = service.recordAssistantMessage(user, "conversation-a", "rag", "迟到的回答", java.util.List.of(), java.util.List.of());
+        boolean recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "rag", "迟到的回答",
+                java.util.List.of(), java.util.List.of());
 
         assertThat(recorded).isFalse();
         verify(conversations, never()).save(Mockito.any(ChatConversation.class));
@@ -58,13 +62,30 @@ class ConversationServiceTest {
         AppUser user = new AppUser("alice", "Alice", "hash");
         ChatConversation conversation = new ChatConversation("conversation-a", user, "测试", "rag");
 
-        when(conversations.findByIdAndUserId("conversation-a", user.getId())).thenReturn(Optional.of(conversation));
-        ConversationExecutionRegistry.Execution execution = executions.begin("user-" + user.getId() + ":conversation-a");
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        ConversationExecutionRegistry.Execution execution = executions.begin(service.executionScope(user, "team-1", "conversation-a"));
 
-        service.delete(user, "conversation-a");
+        service.delete(user, "team-1", "conversation-a");
 
         assertThat(execution.isCancelled()).isTrue();
         verify(messages).deleteByConversationId("conversation-a");
         verify(conversations).deleteById("conversation-a");
+    }
+
+    @Test
+    void doesNotReadConversationFromAnotherWorkspaceOwnedBySameUser() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.messages(user, "team-1", "conversation-a"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("404 NOT_FOUND");
+        verify(messages, never()).findByConversationIdOrderByCreatedAtAsc("conversation-a");
     }
 }

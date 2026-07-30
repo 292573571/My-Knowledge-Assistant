@@ -354,6 +354,21 @@ export function useChatStore() {
     state.lastFailedMessage = ''
   }
 
+  async function resetForWorkspace() {
+    await stop()
+    const conversation = createConversation()
+    state.conversations = [conversation]
+    state.activeConversationId = conversation.id
+    state.messages = conversation.messages
+    state.mode = conversation.mode
+    state.error = ''
+    state.lastFailedMessage = ''
+  }
+
+  async function reloadWorkspace() {
+    await setUser(activeAccount)
+  }
+
   async function selectConversation(id) {
     stop()
     const conversation = state.conversations.find((item) => item.id === id)
@@ -410,6 +425,8 @@ export function useChatStore() {
     selectConversation,
     deleteConversation,
     retryLast,
-    setUser
+    setUser,
+    resetForWorkspace,
+    reloadWorkspace
   }
 }

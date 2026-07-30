@@ -2,7 +2,6 @@ package com.example.workbench.tools;
 
 import com.example.workbench.advisor.AnswerJudge;
 import com.example.workbench.advisor.ToolCallLogger;
-import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.SourceDocument;
 import java.io.IOException;
@@ -17,20 +16,17 @@ public class SummaryWorkflowService {
 
     private static final Pattern FILE_PATTERN = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9._-]*\\.md");
 
-    private final DocumentIngestionService documentIngestionService;
     private final RagService ragService;
     private final WorkspaceFileService workspaceFileService;
     private final ToolCallLogger toolCallLogger;
     private final AnswerJudge answerJudge;
 
     public SummaryWorkflowService(
-            DocumentIngestionService documentIngestionService,
             RagService ragService,
             WorkspaceFileService workspaceFileService,
             ToolCallLogger toolCallLogger,
             AnswerJudge answerJudge
     ) {
-        this.documentIngestionService = documentIngestionService;
         this.ragService = ragService;
         this.workspaceFileService = workspaceFileService;
         this.toolCallLogger = toolCallLogger;
@@ -43,7 +39,6 @@ public class SummaryWorkflowService {
             String targetFile = extractTargetFile(message);
 
             toolCallLogger.logToolCall("RAG", "用户要求总结知识库内容，需要先检索相关文档", 0.92);
-            documentIngestionService.ingestDocsDirectory();
             List<SourceDocument> sources = ragService.retrieve(query, 5);
 
             if (sources.isEmpty()) {

@@ -10,23 +10,29 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.Comment;
 
 @Entity
 @Table(name = "user_sessions")
+@Comment("用户登录会话表")
 public class UserSession {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Comment("会话主键")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
+    @Comment("所属用户主键")
     private AppUser user;
 
     @Column(name = "token", nullable = false, unique = true, length = 96)
+    @Comment("会话令牌")
     private String token;
 
     @Column(name = "expires_at", nullable = false)
+    @Comment("会话过期时间")
     private Instant expiresAt;
 
     protected UserSession() {

@@ -36,6 +36,18 @@ class AuthServiceTest {
         assertThat(response.publicId()).isEqualTo(userCaptor.getValue().getPublicId());
         assertThat(response.avatarUrl()).isEqualTo("/api/auth/avatar");
         assertThat(response.token()).isNotBlank();
+        assertThat(response.systemRole()).isEqualTo(SystemRole.USER);
+    }
+
+    @Test
+    void adminAccountCannotBeClaimedThroughPublicRegistration() {
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        UserSessionRepository sessions = Mockito.mock(UserSessionRepository.class);
+        AuthService service = new AuthService(users, sessions, 24);
+
+        assertThatThrownBy(() -> service.register(new RegisterRequest("admin", "correct-horse-battery")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("系统保留账号");
     }
 
     @Test

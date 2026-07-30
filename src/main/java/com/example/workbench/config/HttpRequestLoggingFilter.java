@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.UUID;
 import org.apache.logging.log4j.ThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class HttpRequestLoggingFilter extends OncePerRequestFilter {
 
+    public static final String REQUEST_ID_ATTRIBUTE = HttpRequestLoggingFilter.class.getName() + ".requestId";
     private static final Logger log = LoggerFactory.getLogger(HttpRequestLoggingFilter.class);
     @Override
     protected void doFilterInternal(
@@ -30,6 +32,7 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
         ThreadContext.put("apiLogFile", LocalDate.now() + "/" + apiLogFileName(request));
         ThreadContext.put("apiLogArchiveFile", LocalDate.now() + "/archive/" + apiArchiveFileName(request));
         response.setHeader("X-Request-Id", requestId);
+        request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
 
         log.info(
                 "HTTP request started requestId={} method={} path={}",
@@ -86,7 +89,7 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
     }
 
     private String requestId() {
-        return Long.toUnsignedString(System.nanoTime(), 36);
+        return UUID.randomUUID().toString();
     }
 
     private String apiLogFileName(HttpServletRequest request) {

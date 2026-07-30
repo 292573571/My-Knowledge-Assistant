@@ -13,4 +13,5 @@ public interface VectorStore {
     void replaceAll(List<SourceDocument> documents);
 
     List<SourceDocument> similaritySearch(String query, int topK);
+
 }

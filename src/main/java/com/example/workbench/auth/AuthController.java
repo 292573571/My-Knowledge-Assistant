@@ -26,14 +26,17 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserProfileService userProfileService;
+    private final AdminAuthorizationService adminAuthorizationService;
     private final boolean secureCookie;
     private final Duration sessionDuration;
 
     public AuthController(AuthService authService, UserProfileService userProfileService,
+                          AdminAuthorizationService adminAuthorizationService,
                           @Value("${app.auth.cookie-secure:false}") boolean secureCookie,
                           @Value("${app.auth.session-hours:168}") long sessionHours) {
         this.authService = authService;
         this.userProfileService = userProfileService;
+        this.adminAuthorizationService = adminAuthorizationService;
         this.secureCookie = secureCookie;
         this.sessionDuration = Duration.ofHours(sessionHours);
     }
@@ -92,13 +95,18 @@ public class AuthController {
     }
 
     private CurrentUserResponse profile(AppUser user) {
-        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar", user.getCreatedAt());
+        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+                user.getCreatedAt(), adminAuthorizationService.effectiveRole(user));
     }
 
     private CurrentUserResponse authenticated(AuthResponse authentication, HttpServletResponse response) {
         response.addHeader("Set-Cookie", sessionCookie(authentication.token(), sessionDuration).toString());
         return new CurrentUserResponse(authentication.account(), authentication.userName(), authentication.publicId(),
-                authentication.avatarUrl(), authentication.createdAt());
+                authentication.avatarUrl(), authentication.createdAt(), effectiveRole(authentication));
+    }
+
+    private SystemRole effectiveRole(AuthResponse authentication) {
+        return adminAuthorizationService.effectiveRole(authentication.account(), authentication.systemRole());
     }
 
     private ResponseCookie sessionCookie(String value, Duration maxAge) {

@@ -93,6 +93,27 @@ spring.ai.openai.embedding.options.model=BAAI/bge-m3
 
 地址不要以 `/v1` 结尾，Spring AI 会自动追加 OpenAI API 路径。
 
+## PostgreSQL 表与字段注释
+
+全部 JPA 实体都使用 Hibernate `@Comment` 声明了中文表注释和中文字段注释，包括主键、普通字段和外键字段。当前 `spring.jpa.hibernate.ddl-auto=update` 会在 PostgreSQL 建表或更新结构时生成对应的 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN` 语句，已有数据库在应用启动执行 schema update 后也会补充注释。
+
+可在 PostgreSQL 中查询注释：
+
+```sql
+SELECT obj_description('app_users'::regclass, 'pg_class') AS table_comment;
+
+SELECT
+    a.attname AS column_name,
+    col_description(a.attrelid, a.attnum) AS column_comment
+FROM pg_attribute a
+WHERE a.attrelid = 'app_users'::regclass
+  AND a.attnum > 0
+  AND NOT a.attisdropped
+ORDER BY a.attnum;
+```
+
+`DatabaseCommentCoverageTest` 会自动扫描项目中的全部 `@Entity`，要求每张表以及每个 `@Id`、`@Column`、`@JoinColumn` 字段都有包含中文的 `@Comment`。后续切换到 Flyway 时，应将相同的 `COMMENT ON` 语句固化到版本化迁移脚本，并在生产环境关闭 `ddl-auto=update`。
+
 ## 如何运行
 
 前置要求：
@@ -327,6 +348,161 @@ curl -X POST http://localhost:8080/api/documents/ingest \
 ```bash
 curl -X POST http://localhost:8080/api/documents/rebuild
 ```
+
+全局文档导入、目录扫描、同步、重建以及公共文档删除仅允许数据库系统角色为 `ADMIN` 或 `SUPER_ADMIN` 的用户执行。账号 `admin` 固定为最高权限 `SUPER_ADMIN`，应用启动时会自动修正存量 `admin` 的数据库角色；该账号不能通过公开注册接口创建，也不能在用户管理接口中被降级。
+
+旧版本通过环境变量配置的管理员账号仍可平滑迁移，多个账号使用逗号分隔：
+
+```text
+ADMIN_ACCOUNTS=admin,owner@example.com
+```
+
+应用启动时会把 `ADMIN_ACCOUNTS` 中已存在的账号一次性写为数据库 `ADMIN` 角色；之后可以在用户管理页面调整，运行期授权不再依赖环境变量。未配置时，除数据库中已有管理员和固定的 `admin` 超级管理员外，其他普通用户不能执行全局管理操作。普通用户只能枚举公共文档和自己有权访问的空间文档。
+
+### 用户管理
+
+管理员登录后，顶部导航会显示“用户管理”页面：
+
+```text
+GET /api/admin/users
+PUT /api/admin/users/{publicId}/role
+```
+
+- `ADMIN` 和 `SUPER_ADMIN` 可以查看全部用户、账号、公开 ID、注册时间和系统角色。
+- 只有 `SUPER_ADMIN` 可以将其他用户在 `USER` 与 `ADMIN` 之间切换。
+- 不允许通过接口授予第二个 `SUPER_ADMIN`。
+- `admin` 账号永久保持 `SUPER_ADMIN`，不能降级。
+- 用户角色变更会持久化为 `USER_ROLE_CHANGE` 业务审计事件。
+- 当前不提供物理删除用户，避免级联破坏会话、文档、空间成员关系和审计记录。
+
+## 知识空间与成员角色
+
+系统已建立知识空间与成员关系模型：
+
+```text
+WorkspaceType = PERSONAL | TEAM | PUBLIC
+WorkspaceRole = OWNER | EDITOR | VIEWER
+```
+
+用户首次访问空间列表时会自动创建 `personal-<userId>` 个人空间，存量用户不需要单独执行迁移。团队空间可由普通用户创建；公共空间仅允许通过 `ADMIN_ACCOUNTS` 配置的系统管理员创建。
+
+空间 API：
+
+```text
+GET    /api/workspaces
+POST   /api/workspaces/team
+POST   /api/workspaces/public
+GET    /api/workspaces/{workspaceId}/members
+POST   /api/workspaces/{workspaceId}/members
+PUT    /api/workspaces/{workspaceId}/members/{memberPublicId}
+DELETE /api/workspaces/{workspaceId}/members/{memberPublicId}
+GET    /api/workspaces/{workspaceId}/audit-events
+```
+
+创建团队空间：
+
+```json
+{
+  "name": "研发团队"
+}
+```
+
+添加成员：
+
+```json
+{
+  "account": "member@example.com",
+  "role": "EDITOR"
+}
+```
+
+当前成员权限规则：
+
+- `OWNER` 可以添加、移除成员以及修改成员角色。
+- `EDITOR` 和 `VIEWER` 可以查看空间成员，但不能管理成员。
+- 个人空间不能添加其他成员。
+- 不能添加第二个 `OWNER`，也不能降级或移除现有 `OWNER`。
+- 非成员访问空间统一返回空间不存在，避免泄露空间是否存在。
+- 暂不支持所有权转移。
+- 仅 `OWNER` 可以查看当前空间最近 200 条业务审计事件。
+
+文档索引和 Chroma chunk metadata 已增加 `workspaceId` 与 `visibility`。旧数据按安全规则转换：有 owner 的文档归入 `personal-<ownerUserId>` 并设为 `PRIVATE`，无 owner 的文档归入 `public-default` 并设为 `PUBLIC`。
+
+Chroma 相似度查询会在向量库召回阶段强制附加 `ownerUserId`、`workspaceId` 和 `visibility` metadata 过滤，只召回公共文档、当前用户在当前空间的私有文档以及当前空间文档。应用层仍会再次执行相同的可见性校验；Chroma 不可用时，内存回退也会在排序和截断前执行范围过滤。
+
+当前文档可见性规则：
+
+- `PUBLIC`：登录用户可读取和检索。
+- `PRIVATE`：只有 `ownerUserId` 对应用户可读取和检索。
+- `WORKSPACE`：仅对应空间成员可读取和检索。
+
+聊天、流式聊天、检索调试和文档管理请求已接入 `workspaceId`。未传该字段时默认使用用户的 `personal-<userId>` 空间；传入其他空间时，服务会先通过 `workspace_members` 验证成员关系，非成员统一返回 404。
+
+空间上下文传递方式：
+
+```text
+POST /api/workbench/chat                 JSON workspaceId
+POST /api/workbench/chat/stream          JSON workspaceId
+POST /api/rag/chat                       JSON workspaceId
+POST /api/rag/debug                      JSON workspaceId
+GET  /api/documents                      Query workspaceId
+GET  /api/documents/{id}/content         Query workspaceId
+DELETE /api/documents/{id}               Query workspaceId
+```
+
+空间文档权限：
+
+- `PUBLIC` 文档在任意已授权空间上下文中可读取和检索。
+- `PRIVATE` 文档仅在其个人空间中对 owner 可见。
+- `WORKSPACE` 文档仅对对应空间成员可读取和检索。
+- `VIEWER` 不能删除 `WORKSPACE` 文档。
+- `EDITOR` 和 `OWNER` 可以删除当前空间的 `WORKSPACE` 文档。
+- 伪造其他团队的 `workspaceId` 会在检索或文档读取前被拒绝。
+
+前端登录后会初始化个人空间，并在顶部提供个人、团队和公共空间切换器。聊天、SSE、检索调试和文档请求会自动携带当前空间 ID；切换空间时会停止当前流式回答、清空旧空间前端上下文并恢复目标空间的会话历史，避免跨空间混用检索上下文。现有服务器路径导入仍属于管理员全局管理能力。
+
+空间切换器旁提供空间管理入口：所有登录用户可以创建团队空间，空间成员可以查看成员列表；团队和公共空间的 `OWNER` 可以添加成员、在 `EDITOR/VIEWER` 间调整角色、移除非所有者成员，并查看当前空间最近 200 条业务审计事件。公共空间创建仍由管理员 API 控制，前端不会依据客户端状态猜测系统管理员身份。
+
+会话列表、消息读取、停止和删除同样按 `userId + workspaceId` 双重约束。新会话会持久化所属空间；升级前没有 `workspaceId` 的历史会话仅归入该用户个人空间。空间切换后前端只恢复新空间的会话历史。
+
+### 空间文档上传
+
+空间成员可以通过 multipart 接口上传文档：
+
+```text
+POST /api/documents/upload?workspaceId=<workspaceId>
+Content-Type: multipart/form-data
+file=<Markdown 或 TXT 文件>
+```
+
+上传限制与归属规则：
+
+- 仅支持 UTF-8 编码的 `.md` 和 `.txt`。
+- 单个文件最大 5 MB。
+- `VIEWER` 不能上传，`EDITOR` 和 `OWNER` 可以上传。
+- 上传到个人空间时自动设为 `PRIVATE`。
+- 上传到团队空间时自动设为 `WORKSPACE`。
+- 上传到公共空间时自动设为 `PUBLIC`。
+- 服务端使用随机存储文件名，客户端原文件名仅用于展示。
+- 磁盘目录按 `docs/workspaces/<workspaceId>/` 隔离。
+- 文档 ID 和 chunk ID 由 `workspaceId + contentHash` 生成；不同空间上传相同内容不会发生 ID 覆盖。
+
+前端知识库页面已经提供“上传到当前空间”入口。删除通过空间上传接口保存的文档时，会先安全删除 `docs/workspaces/<workspaceId>/` 下对应的 UUID 源文件，再删除索引与向量，防止后续同步或重建让已删除文档重新出现。删除路径必须精确匹配当前空间的系统生成文件名，并校验规范化路径与真实路径，拒绝目录穿越和符号链接逃逸。管理员手工维护或全局导入的非 UUID 源文件仍只删除索引与向量，不自动操作磁盘文件。
+
+### 业务审计
+
+系统将以下高风险操作的成功、权限拒绝和执行失败结果持久化到 `audit_events`：
+
+```text
+WORKSPACE_CREATE
+WORKSPACE_MEMBER_ADD
+WORKSPACE_MEMBER_ROLE_CHANGE
+WORKSPACE_MEMBER_REMOVE
+DOCUMENT_UPLOAD
+DOCUMENT_DELETE
+```
+
+审计事件包含操作用户 `publicId`、空间 ID、动作、资源类型与标识、结果、固定失败代码、服务端生成的 `requestId` 和发生时间。审计表不保存账号、成员查询账号、文档正文、上传内容、文件路径、请求体、异常消息、密码、Cookie 或 Token。审计采用独立事务；审计存储故障不会回滚已经完成的业务操作，也不会覆盖原始权限错误响应。
 
 查看已导入文档：
 

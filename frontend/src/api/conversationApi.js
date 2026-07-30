@@ -1,7 +1,13 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
+import { getActiveWorkspaceId } from './workspaceApi'
 
 const REQUEST_ERROR_MESSAGE = '会话请求失败，请检查后端服务是否启动。'
+
+function workspacePath(path) {
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}workspaceId=${encodeURIComponent(getActiveWorkspaceId())}`
+}
 
 async function request(path, options = {}) {
   try {
@@ -22,15 +28,15 @@ async function request(path, options = {}) {
 }
 
 export function fetchConversations() {
-  return request('/api/conversations')
+  return request(workspacePath('/api/conversations'))
 }
 
 export function fetchConversationMessages(conversationId) {
-  return request(`/api/conversations/${encodeURIComponent(conversationId)}/messages`)
+  return request(workspacePath(`/api/conversations/${encodeURIComponent(conversationId)}/messages`))
 }
 
 export function createConversation(conversation) {
-  return request('/api/conversations', {
+  return request(workspacePath('/api/conversations'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(conversation)
@@ -38,9 +44,9 @@ export function createConversation(conversation) {
 }
 
 export function deleteConversation(conversationId) {
-  return request(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
+  return request(workspacePath(`/api/conversations/${encodeURIComponent(conversationId)}`), { method: 'DELETE' })
 }
 
 export function stopConversation(conversationId) {
-  return request(`/api/conversations/${encodeURIComponent(conversationId)}/stop`, { method: 'POST' })
+  return request(workspacePath(`/api/conversations/${encodeURIComponent(conversationId)}/stop`), { method: 'POST' })
 }

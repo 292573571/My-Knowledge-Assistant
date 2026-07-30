@@ -11,18 +11,20 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.Comment;
 
 @Entity
 @Table(name = "eval_imports")
+@Comment("评测用例导入记录表")
 public class EvalImportEntity {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
-    @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "owner_user_id", nullable = false) private AppUser owner;
-    @Column(name = "original_file_name", nullable = false, length = 255) private String originalFileName;
-    @Column(name = "stored_file_name", nullable = false, length = 255) private String storedFileName;
-    @Column(name = "content_type", nullable = false, length = 128) private String contentType;
-    @Column(name = "file_size", nullable = false) private long fileSize;
-    @Column(name = "imported_count", nullable = false) private int importedCount;
-    @Column(name = "created_at", nullable = false) private Instant createdAt;
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) @Comment("导入记录主键") private Long id;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "owner_user_id", nullable = false) @Comment("所属用户主键") private AppUser owner;
+    @Column(name = "original_file_name", nullable = false, length = 255) @Comment("原始文件名") private String originalFileName;
+    @Column(name = "stored_file_name", nullable = false, length = 255) @Comment("存储文件名") private String storedFileName;
+    @Column(name = "content_type", nullable = false, length = 128) @Comment("文件媒体类型") private String contentType;
+    @Column(name = "file_size", nullable = false) @Comment("文件大小（字节）") private long fileSize;
+    @Column(name = "imported_count", nullable = false) @Comment("成功导入用例数量") private int importedCount;
+    @Column(name = "created_at", nullable = false) @Comment("导入时间") private Instant createdAt;
 
     protected EvalImportEntity() { }
 

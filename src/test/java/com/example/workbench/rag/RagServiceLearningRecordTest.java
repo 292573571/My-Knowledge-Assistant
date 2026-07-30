@@ -362,6 +362,26 @@ class RagServiceLearningRecordTest {
         verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
     }
 
+    @Test
+    void doesNotExposePrivateSourcesWhenUserScopeIsMissing() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument privateSource = new SourceDocument(
+                "private-1", "Bob 的私有数据库设计。", "私有笔记", "private.md",
+                "docs/manual-notes/user-2/private.md", 0, "private-doc", "private.md", "hash",
+                0.9, "# 私有笔记", 1, 0, 12, "text-paragraph", "FORMAL_NOTE", "2"
+        );
+        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt())).thenReturn(List.of(privateSource));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("当前没有可用的公共知识内容。");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-without-user-scope", "数据库如何设计？"));
+
+        assertThat(response.sources()).isEmpty();
+        assertThat(response.answer()).doesNotContain("Bob 的私有数据库设计");
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
     private RagService service(VectorStore vectorStore, LocalChatClient chatClient) {
         return service(vectorStore, chatClient, new RagQualityGate(chatClient, false));
     }

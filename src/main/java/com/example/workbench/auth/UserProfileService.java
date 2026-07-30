@@ -29,12 +29,15 @@ public class UserProfileService {
 
     private final AppUserRepository userRepository;
     private final Path avatarDirectory;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public UserProfileService(
             AppUserRepository userRepository,
+            AdminAuthorizationService adminAuthorizationService,
             @Value("${app.user.avatar-directory:data/avatars}") String avatarDirectory
     ) {
         this.userRepository = userRepository;
+        this.adminAuthorizationService = adminAuthorizationService;
         this.avatarDirectory = Path.of(avatarDirectory).toAbsolutePath().normalize();
     }
 
@@ -168,6 +171,7 @@ public class UserProfileService {
     }
 
     private CurrentUserResponse response(AppUser user) {
-        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar", user.getCreatedAt());
+        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+                user.getCreatedAt(), adminAuthorizationService.effectiveRole(user));
     }
 }

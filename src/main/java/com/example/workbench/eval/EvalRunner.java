@@ -1,7 +1,6 @@
 package com.example.workbench.eval;
 
 import com.example.workbench.auth.AppUser;
-import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
@@ -33,7 +32,6 @@ public class EvalRunner {
             .withZone(ZoneOffset.UTC);
 
     private final RagService ragService;
-    private final DocumentIngestionService documentIngestionService;
     private final RuleBasedEvaluator evaluator;
     private final LlmJudgeEvaluator llmJudgeEvaluator;
     private final ObjectMapper objectMapper;
@@ -49,7 +47,6 @@ public class EvalRunner {
 
     public EvalRunner(
             RagService ragService,
-            DocumentIngestionService documentIngestionService,
             RuleBasedEvaluator evaluator,
             LlmJudgeEvaluator llmJudgeEvaluator,
             ObjectMapper objectMapper,
@@ -64,7 +61,6 @@ public class EvalRunner {
             @Value("${workbench.rag.debug:false}") boolean retrievalDebugEnabled
     ) {
         this.ragService = ragService;
-        this.documentIngestionService = documentIngestionService;
         this.evaluator = evaluator;
         this.llmJudgeEvaluator = llmJudgeEvaluator;
         this.objectMapper = objectMapper;
@@ -85,7 +81,6 @@ public class EvalRunner {
 
     public EvalSummary run(List<EvalCase> cases, boolean enhanced, AppUser owner) throws IOException {
         String runId = RUN_ID_FORMAT.format(Instant.now());
-        documentIngestionService.rebuildDocuments();
         List<EvalResult> results = cases.stream()
                 .map(evalCase -> runCase(evalCase, enhanced, owner == null ? "" : owner.getId().toString()))
                 .toList();

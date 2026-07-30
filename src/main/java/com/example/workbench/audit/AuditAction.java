@@ -1,0 +1,11 @@
+package com.example.workbench.audit;
+
+public enum AuditAction {
+    WORKSPACE_CREATE,
+    WORKSPACE_MEMBER_ADD,
+    WORKSPACE_MEMBER_ROLE_CHANGE,
+    WORKSPACE_MEMBER_REMOVE,
+    DOCUMENT_UPLOAD,
+    DOCUMENT_DELETE,
+    USER_ROLE_CHANGE
+}
