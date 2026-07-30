@@ -1,6 +1,6 @@
 # My Knowledge Assistant
 
-一个基于 Spring Boot 和 Spring AI 的个人知识库助手实验项目。项目支持文档导入、RAG 问答、多轮对话、Chroma 向量数据库、OpenAI-compatible 模型、受限 filesystem 文件操作、搜索兜底、答案质量检查和工具调用日志。
+一个基于 Spring Boot 和 Spring AI 的知识库助手项目。项目支持多用户知识空间、文档导入、RAG 问答、多轮对话、Chroma 向量数据库、OpenAI-compatible 模型、搜索兜底、答案质量检查和工具调用日志。
 
 ## 项目功能
 
@@ -11,8 +11,6 @@
 - 支持 `/api/rag/chat` 基于知识库问答。
 - 支持 `conversationId` 多轮对话。
 - RAG 上下文不足时再调用搜索工具，不会每次都搜索。
-- 支持文件生成任务，例如总结 MCP 相关内容并写入 `notes/mcp-overview.md`。
-- filesystem 操作限制在项目内 `docs` 和 `notes`，不授权整个用户目录。
 - 回答后通过 judge 检查是否基于上下文，不合格会重新生成保守答案。
 - 记录工具调用日志，包括调用原因和 confidence。
 
@@ -43,21 +41,6 @@ TaskRouter
   |                                |
   |                                +--> 搜索结果进入 Prompt
   |                                +--> 回答标明来自 Web
-  |
-  +--> 文件操作 ----------------> NoteAssistantService
-  |                                |
-  |                                +--> WorkspaceFileService
-  |                                       |
-  |                                       +--> read: docs / notes
-  |                                       +--> write: notes only
-  |
-  +--> 总结任务 ----------------> SummaryWorkflowService
-                                   |
-                                   +--> RAG 检索相关文档
-                                   +--> 生成总结
-                                   +--> AnswerJudge 检查
-                                   +--> filesystem 写入 notes
-
 Document Ingestion
   |
   v
@@ -622,87 +605,6 @@ curl -X POST http://localhost:8080/api/rag/chat \
 }
 ```
 
-## 如何启用 MCP filesystem
-
-当前项目实现的是受限 filesystem 工具，行为等价于只授权工作区内的 `docs` 和 `notes`，不会授权整个用户目录。
-
-读取边界：
-
-```text
-允许读取：docs / notes
-禁止读取：用户目录、绝对路径、.. 路径穿越
-```
-
-写入边界：
-
-```text
-允许写入：notes
-禁止写入：docs、用户目录、绝对路径、.. 路径穿越
-```
-
-文件总结示例：
-
-```bash
-curl -X POST http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"请总结 mcp-notes.md 并写入 mcp-summary.md"}'
-```
-
-执行后创建：
-
-```text
-notes/mcp-summary.md
-```
-
-创建学习计划示例：
-
-```bash
-curl -X POST http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"请帮我在 notes 目录下创建一个 rag-learning-plan.md"}'
-```
-
-执行后创建：
-
-```text
-notes/rag-learning-plan.md
-```
-
-RAG + filesystem 联合任务：
-
-```bash
-curl -X POST http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"请总结 docs 里的 MCP 相关内容，并写成 mcp-overview.md"}'
-```
-
-系统会自动执行：
-
-- 识别为文件生成任务。
-- RAG 检索 MCP 相关文档。
-- 生成总结。
-- judge 检查总结是否基于上下文。
-- 调用受限 filesystem 写入 `notes/mcp-overview.md`。
-- 返回写入成功和文件路径。
-
-响应示例：
-
-```json
-{
-  "answer": "已识别为文件生成任务，完成 RAG 检索、总结生成和 filesystem 写入。文件路径：notes/mcp-overview.md"
-}
-```
-
-如果你要接真正的 MCP filesystem server，建议只授权项目目录或 `notes` 目录，不要授权整个用户目录。
-
-示例边界：
-
-```text
-允许：/Users/95h/95h/95h-ai-workspace/my-knowledge-assistant
-或：/Users/95h/95h/95h-ai-workspace/my-knowledge-assistant/notes
-禁止：/Users/95h
-```
-
 ## 如何启用搜索
 
 当前项目的搜索入口是 `WebSearchService`。策略是：
@@ -849,7 +751,6 @@ logs/2026-07-24/archive/
 ```text
 Tool call: tool=RAG, reason=用户要求总结知识库内容，需要先检索相关文档, confidence=0.92
 Tool call: tool=judge, reason=检查总结是否基于检索上下文, confidence=0.86
-Tool call: tool=MCP filesystem, reason=用户要求把总结写成文件，只允许写入 notes 目录, confidence=0.97
 ```
 
 实现位置：
@@ -862,8 +763,8 @@ src/main/java/com/example/workbench/advisor/ToolCallLogger.java
 
 ```text
 docs/      知识库源文档
-notes/     助手生成的总结、学习计划等文件
 src/       Spring Boot 应用源码
+frontend/  Vue 前端源码
 ```
 
 ## 常见问题
