@@ -4,7 +4,7 @@
 
 ## 项目功能
 
-- 读取 `docs` 目录下的 `.md` / `.txt` 文档。
+- 读取 `docs` 目录下的 `.md`、`.txt`、`.docx` 和文本型 `.pdf` 文档。
 - 将文档切分成 chunks，并保留 `source`、`path`、`chunkIndex`、`title` metadata。
 - 使用 Spring AI Embedding 将 chunks 向量化。
 - 将向量写入 Chroma collection：`knowledge_assistant`。
@@ -49,7 +49,7 @@ POST /api/ingest
   v
 DocumentIngestionService
   |
-  +--> read docs/*.md docs/*.txt
+  +--> read docs/*.md docs/*.txt docs/*.docx docs/*.pdf
   +--> split chunks
   +--> metadata
   +--> Spring AI Embedding
@@ -151,7 +151,7 @@ mvn test
 当前测试覆盖：
 
 - Markdown 文档切分和 heading metadata。
-- Text 文档切分和 chunk index。
+- TXT、HTML、PDF 和 DOCX 的结构解析与切分。
 - 文档类型路由。
 - 文档索引读写、删除、清空。
 - RAG 规则评测器。
@@ -281,7 +281,7 @@ curl http://localhost:8080
 
 ## 如何导入文档
 
-把 Markdown 或文本文件放到 `docs` 目录：
+把 Markdown、UTF-8 文本、HTML、DOCX 或文本型 PDF 文件放到 `docs` 目录：
 
 ```text
 docs/
@@ -455,12 +455,15 @@ DELETE /api/documents/{id}               Query workspaceId
 ```text
 POST /api/documents/upload?workspaceId=<workspaceId>
 Content-Type: multipart/form-data
-file=<Markdown 或 TXT 文件>
+file=<Markdown、TXT、HTML、DOCX 或 PDF 文件>
 ```
 
 上传限制与归属规则：
 
-- 仅支持 UTF-8 编码的 `.md` 和 `.txt`。
+- `.md`、`.txt`、`.html` 和 `.htm` 必须使用 UTF-8 编码；`.pdf` 必须包含可提取的文本层。
+- HTML 仅支持上传文件，不抓取网页 URL；解析时删除脚本、样式及嵌入资源，不执行脚本或加载远程资源，并按标题、正文、列表、代码块和表格的 DOM 顺序建立索引。HTML 预览始终显示清洗后的纯文本，不直接渲染上传内容。
+- PDF 按原始页码解析和引用；检测到扫描页时拒绝整份导入，当前版本不执行 OCR。
+- DOCX 按主文档中的标题、正文、列表和表格顺序解析；不支持旧 `.doc`，也不提取图片文字。
 - 单个文件最大 5 MB。
 - `VIEWER` 不能上传，`EDITOR` 和 `OWNER` 可以上传。
 - 上传到个人空间时自动设为 `PRIVATE`。
@@ -499,7 +502,7 @@ curl http://localhost:8080/api/documents
 curl -X DELETE http://localhost:8080/api/documents/<documentId>
 ```
 
-出于安全限制，导入路径必须在项目 `docs` 目录下，支持 `.md` 和 `.txt`。
+出于安全限制，导入路径必须在项目 `docs` 目录下，支持 `.md`、`.txt`、`.docx` 和文本型 `.pdf`。
 
 响应示例：
 
@@ -525,7 +528,7 @@ curl -X DELETE http://localhost:8080/api/documents/<documentId>
 
 含义：
 
-- `files`: 读取到的 `.md` / `.txt` 文件数量。
+- `files`: 读取到的 `.md`、`.txt`、`.docx` 和 `.pdf` 文件数量。
 - `chunks`: 本次成功导入的 chunk 数量。
 - `imported`: 本次导入的文件数量。
 - `skipped`: 因重复或空文档跳过的文件数量。

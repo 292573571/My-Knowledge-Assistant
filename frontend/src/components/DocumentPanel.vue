@@ -198,9 +198,9 @@ onBeforeUnmount(() => {
     <div class="document-upload-bar">
       <div class="document-upload-copy">
         <span class="document-upload-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
-        <span><strong>添加文档</strong><small>支持 UTF-8 Markdown、TXT，单个文件最大 5 MB</small></span>
+        <span><strong>添加文档</strong><small>支持 UTF-8 Markdown、TXT、HTML、DOCX 和含文本层的 PDF；扫描件暂不支持 OCR；单个文件最大 5 MB</small></span>
       </div>
-      <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,text/markdown,text/plain" @change="handleUpload">
+      <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="handleUpload">
       <button type="button" :disabled="loading" @click="uploadInput?.click()">{{ loading ? '正在处理...' : '选择文件' }}</button>
     </div>
 
@@ -237,7 +237,7 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
 
-    <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown 或 TXT 文件开始构建知识库</div>
+    <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown、TXT、HTML、DOCX 或文本型 PDF 开始构建知识库</div>
     <div v-else-if="!filteredDocuments.length && !loading" class="muted-card">没有匹配的文档</div>
     <div v-if="loading" class="muted-card">正在处理文档索引...</div>
 

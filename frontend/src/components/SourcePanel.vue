@@ -13,7 +13,7 @@ const selectedSource = ref(null)
 const tooltipPosition = ref({ x: 0, y: 0 })
 
 function getSourceKey(source) {
-  return `${source.file || source.title || source.name || 'source'}-${source.chunkIndex ?? source.id ?? ''}`
+  return `${source.file || source.title || source.name || 'source'}-${source.pageNumber ?? ''}-${source.chunkIndex ?? source.id ?? ''}`
 }
 
 function getFileName(source) {
@@ -28,6 +28,10 @@ function getHeadingPath(source) {
   }
 
   return value || ''
+}
+
+function getPageLabel(source) {
+  return source.pageNumber ? `第 ${source.pageNumber} 页` : ''
 }
 
 function getScoreLabel(source) {
@@ -88,9 +92,10 @@ function selectSource(source) {
             <strong>{{ getFileName(source) }}</strong>
             <span>{{ getScoreLabel(source) }}</span>
           </div>
-          <small v-if="getHeadingPath(source)" class="source-heading-path">{{ getHeadingPath(source) }}</small>
+          <small v-if="getPageLabel(source)" class="source-heading-path">{{ getPageLabel(source) }}</small>
+          <small v-else-if="getHeadingPath(source)" class="source-heading-path">{{ getHeadingPath(source) }}</small>
           <small v-else class="source-heading-path">未返回标题路径</small>
-          <small>chunk #{{ source.chunkIndex ?? '-' }} · 点击查看详情</small>
+          <small>{{ getPageLabel(source) ? `${getPageLabel(source)} · ` : '' }}chunk #{{ source.chunkIndex ?? '-' }} · 点击查看详情</small>
         </div>
       </article>
 
@@ -111,6 +116,10 @@ function selectSource(source) {
               <dd>{{ getHeadingPath(hoveredSource) || '-' }}</dd>
             </div>
             <div>
+              <dt>page</dt>
+              <dd>{{ getPageLabel(hoveredSource) || '-' }}</dd>
+            </div>
+            <div>
               <dt>chunk</dt>
               <dd>#{{ hoveredSource.chunkIndex ?? '-' }} · score {{ hoveredSource.score ?? '-' }}</dd>
             </div>
@@ -129,6 +138,7 @@ function selectSource(source) {
             <dl class="detail-sheet-details">
               <div><dt>path</dt><dd>{{ getPath(selectedSource) }}</dd></div>
               <div><dt>heading</dt><dd>{{ getHeadingPath(selectedSource) || '-' }}</dd></div>
+              <div><dt>page</dt><dd>{{ getPageLabel(selectedSource) || '-' }}</dd></div>
               <div><dt>chunk</dt><dd>#{{ selectedSource.chunkIndex ?? '-' }} · score {{ selectedSource.score ?? '-' }}</dd></div>
             </dl>
             <p>{{ selectedSource.snippet || selectedSource.excerpt || selectedSource.content || '后端未返回 chunk 内容预览' }}</p>

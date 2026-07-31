@@ -21,10 +21,23 @@ public record SourceDocument(
         String category,
         String ownerUserId,
         String workspaceId,
-        DocumentVisibility visibility
+        DocumentVisibility visibility,
+        int pageNumber
 ) {
+    public SourceDocument(
+            String id, String content, String title, String source, String path, int chunkIndex,
+            String documentId, String fileName, String contentHash, double score, String headingPath,
+            int headingLevel, int startOffset, int endOffset, String chunkType, String category,
+            String ownerUserId, String workspaceId, DocumentVisibility visibility
+    ) {
+        this(id, content, title, source, path, chunkIndex, documentId, fileName, contentHash, score,
+                headingPath, headingLevel, startOffset, endOffset, chunkType, category, ownerUserId,
+                workspaceId, visibility, 0);
+    }
+
     public SourceDocument(String id, String content, String title, String source, String path, int chunkIndex) {
-        this(id, content, title, source, path, chunkIndex, source, source, "", 0.0, title, 0, 0, content.length(), "text-paragraph", "SOURCE", "", "public-default", DocumentVisibility.PUBLIC);
+        this(id, content, title, source, path, chunkIndex, source, source, "", 0.0, title, 0, 0,
+                content.length(), "text-paragraph", "SOURCE", "", "public-default", DocumentVisibility.PUBLIC, 0);
     }
 
     public SourceDocument(
@@ -43,7 +56,7 @@ public record SourceDocument(
     ) {
         this(id, chunk.content(), title, source, path, chunk.chunkIndex(), documentId, fileName, contentHash, 0.0,
                 chunk.headingPath(), chunk.headingLevel(), chunk.startOffset(), chunk.endOffset(), chunk.chunkType(),
-                category, ownerUserId, workspaceId, visibility);
+                category, ownerUserId, workspaceId, visibility, chunk.pageNumber());
     }
 
     public SourceDocument(String id, String content, String title, String source, String path, int chunkIndex,
@@ -86,7 +99,8 @@ public record SourceDocument(
                 category,
                 ownerUserId,
                 defaultWorkspace(ownerUserId),
-                defaultVisibility(ownerUserId)
+                defaultVisibility(ownerUserId),
+                chunk.pageNumber()
         );
     }
 
@@ -110,7 +124,8 @@ public record SourceDocument(
                 category,
                 ownerUserId,
                 workspaceId,
-                visibility
+                visibility,
+                pageNumber
         );
     }
 

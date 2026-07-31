@@ -21,9 +21,10 @@ const isModelSupplement = computed(() => isAssistant.value && !props.message.err
   && props.message.content?.includes('以上回答基于通用大模型知识'))
 function sourceLabel(source) {
   const file = source.fileName || source.file || source.title || source.name || '来源'
+  const page = source.pageNumber ? ` / 第 ${source.pageNumber} 页` : ''
   const heading = source.headingPath ? ` / ${source.headingPath}` : ''
 
-  return `${file}${heading}`
+  return `${file}${page}${heading}`
 }
 const timeLabel = computed(() => {
   if (!props.message.createdAt) return ''

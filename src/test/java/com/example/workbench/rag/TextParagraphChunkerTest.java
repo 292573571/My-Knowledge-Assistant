@@ -8,17 +8,17 @@ import org.junit.jupiter.api.Test;
 class TextParagraphChunkerTest {
 
     private final TextParagraphChunker chunker = new TextParagraphChunker();
+    private final TextDocumentParser parser = new TextDocumentParser();
 
     @Test
-    void supportsTextFilesCaseInsensitively() {
-        assertThat(chunker.supports("notes.txt")).isTrue();
-        assertThat(chunker.supports("NOTES.TXT")).isTrue();
-        assertThat(chunker.supports("notes.md")).isFalse();
+    void supportsParsedTextDocuments() {
+        assertThat(chunker.supports(parser.parse("Notes"))).isTrue();
+        assertThat(chunker.supports(new MarkdownDocumentParser().parse("# Notes"))).isFalse();
     }
 
     @Test
     void chunksShortTextIntoSingleParagraphChunk() {
-        List<DocumentChunk> chunks = chunker.chunk("第一段。\n\n第二段。");
+        List<DocumentChunk> chunks = chunker.chunk(parser.parse("第一段。\n\n第二段。"));
 
         assertThat(chunks).hasSize(1);
         assertThat(chunks.get(0).content()).contains("第一段", "第二段");
@@ -31,7 +31,7 @@ class TextParagraphChunkerTest {
         String paragraph = "段落内容".repeat(180) + "\n\n";
         String content = paragraph + paragraph + paragraph;
 
-        List<DocumentChunk> chunks = chunker.chunk(content);
+        List<DocumentChunk> chunks = chunker.chunk(parser.parse(content));
 
         assertThat(chunks).hasSizeGreaterThan(1);
         assertThat(chunks).extracting(DocumentChunk::chunkIndex)

@@ -1003,6 +1003,7 @@ public class RagService {
                 source: %s
                 path: %s
                 chunkIndex: %d
+                pageNumber: %s
                 title: %s
                 content:
                 %s
@@ -1010,6 +1011,7 @@ public class RagService {
                 document.source(),
                 document.path(),
                 document.chunkIndex(),
+                document.pageNumber() > 0 ? document.pageNumber() : "-",
                 document.title(),
                 document.content()
         );
@@ -1046,7 +1048,8 @@ public class RagService {
                         snippet(source.content()),
                         source.score(),
                         source.headingPath(),
-                        source.path()
+                        source.path(),
+                        source.pageNumber() > 0 ? source.pageNumber() : null
                 ))
                 .distinct()
                 .toList();
@@ -1065,10 +1068,7 @@ public class RagService {
         }
 
         List<String> referenceItems = sources.stream()
-                .map(source -> "%s / %s".formatted(
-                        source.file(),
-                        source.headingPath() == null || source.headingPath().isBlank() ? "-" : source.headingPath()
-                ))
+                .map(this::referenceLabel)
                 .distinct()
                 .limit(5)
                 .toList();
@@ -1079,6 +1079,18 @@ public class RagService {
         }
 
         return answer.stripTrailing() + "\n\n参考来源：\n" + String.join("\n", numberedReferences);
+    }
+
+    private String referenceLabel(RagSource source) {
+        List<String> parts = new ArrayList<>();
+        parts.add(source.file());
+        if (source.pageNumber() != null) {
+            parts.add("第 " + source.pageNumber() + " 页");
+        }
+        if (source.headingPath() != null && !source.headingPath().isBlank()) {
+            parts.add(source.headingPath());
+        }
+        return String.join(" / ", parts);
     }
 
     private List<RetrievalDebug> retrievalDebug(

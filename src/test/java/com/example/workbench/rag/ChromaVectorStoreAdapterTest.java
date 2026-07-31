@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
@@ -69,6 +70,29 @@ class ChromaVectorStoreAdapterTest {
         assertThat(adapter.similaritySearch("shared", 10, "user-1", "team-1"))
                 .extracting(SourceDocument::id)
                 .containsExactlyInAnyOrder("public", "own-private", "own-workspace");
+    }
+
+    @Test
+    void writesPdfPageNumberToChromaMetadata() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<org.springframework.ai.vectorstore.VectorStore> provider = Mockito.mock(ObjectProvider.class);
+        org.springframework.ai.vectorstore.VectorStore chroma = Mockito.mock(org.springframework.ai.vectorstore.VectorStore.class);
+        Mockito.when(provider.getIfAvailable()).thenReturn(chroma);
+        ChromaVectorStoreAdapter adapter = new ChromaVectorStoreAdapter(provider, new InMemoryVectorStore());
+        SourceDocument pdfSource = new SourceDocument(
+                "pdf#chunk-0", "page content", "Guide", "guide.pdf", "docs/guide.pdf", 0,
+                "pdf", "guide.pdf", "hash", 0, "", 0, 0, 12,
+                "pdf-page", "SOURCE", "", "public-default", DocumentVisibility.PUBLIC, 3
+        );
+
+        adapter.addAll(List.of(pdfSource));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> documents = ArgumentCaptor.forClass(List.class);
+        verify(chroma).add(documents.capture());
+        assertThat(documents.getValue()).singleElement().satisfies(document ->
+                assertThat(document.getMetadata()).containsEntry("pageNumber", 3)
+        );
     }
 
     private SourceDocument source(String id, String owner, String workspaceId, DocumentVisibility visibility) {

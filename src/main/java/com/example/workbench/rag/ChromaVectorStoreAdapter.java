@@ -184,6 +184,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         metadata.put("startOffset", sourceDocument.startOffset());
         metadata.put("endOffset", sourceDocument.endOffset());
         metadata.put("chunkType", sourceDocument.chunkType());
+        metadata.put("pageNumber", sourceDocument.pageNumber());
         metadata.put("category", sourceDocument.category());
         metadata.put("ownerUserId", sourceDocument.ownerUserId());
         metadata.put("workspaceId", sourceDocument.workspaceId());
@@ -217,7 +218,8 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                 metadataValue(metadata, "category", "SOURCE"),
                 metadataValue(metadata, "ownerUserId", ""),
                 metadataValue(metadata, "workspaceId", ""),
-                metadataVisibility(metadata)
+                metadataVisibility(metadata),
+                metadataInt(metadata, "pageNumber", 0)
         );
     }
 
@@ -237,6 +239,10 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     }
 
     private int metadataInt(Map<String, Object> metadata, String key) {
+        return metadataInt(metadata, key, -1);
+    }
+
+    private int metadataInt(Map<String, Object> metadata, String key, int defaultValue) {
         Object value = metadata.get(key);
         if (value instanceof Number number) {
             return number.intValue();
@@ -246,7 +252,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             return Integer.parseInt(value.toString());
         }
 
-        return -1;
+        return defaultValue;
     }
 
     private double metadataDouble(Map<String, Object> metadata, String key) {

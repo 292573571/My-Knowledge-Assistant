@@ -11,40 +11,43 @@ public class TextParagraphChunker implements DocumentChunker {
     private static final int OVERLAP_CHARS = 120;
 
     @Override
-    public boolean supports(String fileName) {
-        return fileName.toLowerCase().endsWith(".txt");
+    public boolean supports(ParsedDocument document) {
+        return "text".equals(document.documentType());
     }
 
     @Override
-    public List<DocumentChunk> chunk(String content) {
+    public List<DocumentChunk> chunk(ParsedDocument document) {
         List<DocumentChunk> chunks = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         int currentStart = 0;
-        int offset = 0;
+        int currentEnd = 0;
 
-        for (String paragraph : content.split("(?<=\\R\\R)")) {
+        for (DocumentBlock paragraph : document.blocks()) {
+            if (!"text-paragraph".equals(paragraph.blockType())) {
+                continue;
+            }
             if (current.isEmpty()) {
-                currentStart = offset;
+                currentStart = paragraph.startOffset();
             }
 
-            if (!current.isEmpty() && current.length() + paragraph.length() > MAX_CHUNK_CHARS) {
+            if (!current.isEmpty() && current.length() + paragraph.content().length() > MAX_CHUNK_CHARS) {
                 chunks.add(new DocumentChunk(
                         current.toString().trim(),
                         chunks.size(),
                         "",
                         0,
                         currentStart,
-                        offset,
+                        currentEnd,
                         "text-paragraph"
                 ));
 
                 String overlap = overlapText(current.toString());
                 current = new StringBuilder(overlap);
-                currentStart = Math.max(0, offset - overlap.length());
+                currentStart = Math.max(0, currentEnd - overlap.length());
             }
 
-            current.append(paragraph);
-            offset += paragraph.length();
+            current.append(paragraph.content());
+            currentEnd = paragraph.endOffset();
         }
 
         if (!current.isEmpty()) {
@@ -54,7 +57,7 @@ public class TextParagraphChunker implements DocumentChunker {
                     "",
                     0,
                     currentStart,
-                    content.length(),
+                    currentEnd,
                     "text-paragraph"
             ));
         }

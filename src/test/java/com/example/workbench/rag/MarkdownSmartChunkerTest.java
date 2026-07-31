@@ -8,12 +8,12 @@ import org.junit.jupiter.api.Test;
 class MarkdownSmartChunkerTest {
 
     private final MarkdownSmartChunker chunker = new MarkdownSmartChunker();
+    private final MarkdownDocumentParser parser = new MarkdownDocumentParser();
 
     @Test
-    void supportsMarkdownFilesCaseInsensitively() {
-        assertThat(chunker.supports("notes.md")).isTrue();
-        assertThat(chunker.supports("NOTES.MD")).isTrue();
-        assertThat(chunker.supports("notes.txt")).isFalse();
+    void supportsParsedMarkdownDocuments() {
+        assertThat(chunker.supports(parser.parse("# Notes"))).isTrue();
+        assertThat(chunker.supports(new TextDocumentParser().parse("Notes"))).isFalse();
     }
 
     @Test
@@ -29,7 +29,7 @@ class MarkdownSmartChunkerTest {
                 Retrieval 会检索相关片段。
                 """;
 
-        List<DocumentChunk> chunks = chunker.chunk(content);
+        List<DocumentChunk> chunks = chunker.chunk(parser.parse(content));
 
         assertThat(chunks).hasSize(3);
         assertThat(chunks).extracting(DocumentChunk::chunkIndex).containsExactly(0, 1, 2);
@@ -49,7 +49,7 @@ class MarkdownSmartChunkerTest {
                 正文内容。
                 """;
 
-        List<DocumentChunk> chunks = chunker.chunk(content);
+        List<DocumentChunk> chunks = chunker.chunk(parser.parse(content));
 
         assertThat(chunks).hasSize(1);
         assertThat(chunks.get(0).headingPath()).isEqualTo("Real Heading");

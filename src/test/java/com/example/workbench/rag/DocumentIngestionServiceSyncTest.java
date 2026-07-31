@@ -37,9 +37,12 @@ class DocumentIngestionServiceSyncTest {
         indexStore = new DocumentIndexStore(new ObjectMapper(), tempDir.resolve("document-index.json"));
         DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(
                 new MarkdownSmartChunker(),
-                new TextParagraphChunker()
+                new TextParagraphChunker(),
+                new PdfPageChunker(),
+                new DocxBlockChunker(),
+                new HtmlBlockChunker()
         ));
-        service = new DocumentIngestionService(vectorStore, indexStore, router, docsDirectory);
+        service = new DocumentIngestionService(vectorStore, indexStore, parserRouter(), router, docsDirectory);
     }
 
     @Test
@@ -92,7 +95,11 @@ class DocumentIngestionServiceSyncTest {
         DocumentIngestionService restartedService = new DocumentIngestionService(
                 restartedVectorStore,
                 indexStore,
-                new DocumentChunkerRouter(List.of(new MarkdownSmartChunker(), new TextParagraphChunker())),
+                parserRouter(),
+                new DocumentChunkerRouter(List.of(
+                        new MarkdownSmartChunker(), new TextParagraphChunker(), new PdfPageChunker(),
+                        new DocxBlockChunker(), new HtmlBlockChunker()
+                )),
                 docsDirectory
         );
 
@@ -103,6 +110,13 @@ class DocumentIngestionServiceSyncTest {
                 .toList());
         verify(restartedVectorStore, never()).replaceAll(Mockito.anyList());
         assertThat(indexStore.list()).isEmpty();
+    }
+
+    private DocumentParserRouter parserRouter() {
+        return new DocumentParserRouter(List.of(
+                new MarkdownDocumentParser(), new TextDocumentParser(), new PdfDocumentParser(),
+                new DocxDocumentParser(), new HtmlDocumentParser()
+        ));
     }
 
     @Test
@@ -238,6 +252,114 @@ class DocumentIngestionServiceSyncTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("403 FORBIDDEN");
         assertThat(indexStore.list()).isEmpty();
+    }
+
+    @Test
+    void uploadsTextPdfAndKeepsPageMetadataForRetrieval() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
+        );
+        byte[] pdf = PdfTestDocuments.textPdf(
+                "Architecture", "First page architecture", "Second page boundaries"
+        );
+
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(editor,
+                new MockMultipartFile("file", "architecture.pdf", "application/pdf", pdf));
+
+        assertThat(response.fileName()).isEqualTo("architecture.pdf");
+        assertThat(service.listDocuments()).extracting(SourceDocument::pageNumber).containsExactly(1, 2);
+        assertThat(service.documentContent(response.documentId(), editor).content())
+                .contains("First page architecture", "Second page boundaries");
+    }
+
+    @Test
+    void rejectsScannedPdfUploadWithoutLeavingSourceFile() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
+        );
+
+        assertThatThrownBy(() -> service.uploadWorkspaceDocument(editor,
+                new MockMultipartFile("file", "scan.pdf", "application/pdf", PdfTestDocuments.scannedPdf())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("扫描页", "不支持 OCR");
+        Path workspaceDirectory = docsDirectory.resolve("workspaces/team-1");
+        try (var files = Files.list(workspaceDirectory)) {
+            assertThat(files).isEmpty();
+        }
+    }
+
+    @Test
+    void uploadsPreviewsAndDeletesStructuredDocx() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
+        );
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "architecture.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                DocxTestDocuments.structuredDocument()
+        );
+
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(editor, file);
+        Path source = docsDirectory.resolve(response.path().substring("docs/".length()));
+
+        assertThat(response.fileName()).isEqualTo("architecture.docx");
+        assertThat(response.path()).endsWith(".docx");
+        assertThat(service.listDocuments()).extracting(SourceDocument::chunkType).contains(
+                "docx-heading", "docx-paragraph", "docx-list-item", "docx-table"
+        );
+        assertThat(service.documentContent(response.documentId(), editor).content())
+                .containsSubsequence("Introduction before table", "Component", "Processing", "Parse blocks");
+
+        service.deleteDocument(response.documentId(), editor, false);
+
+        assertThat(Files.exists(source)).isFalse();
+        assertThat(indexStore.list()).isEmpty();
+    }
+
+    @Test
+    void uploadsPreviewsAndDeletesCleanedHtml() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
+        );
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "architecture.html", "text/html", """
+                <!doctype html><html><head><title>Architecture</title></head><body>
+                <script>alert('xss')</script><h1>Pipeline</h1><p>Parse the DOM safely.</p>
+                <pre><code>  ingest();</code></pre>
+                </body></html>
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(editor, file);
+        Path source = docsDirectory.resolve(response.path().substring("docs/".length()));
+        DocumentContentResponse preview = service.documentContent(response.documentId(), editor);
+
+        assertThat(response.fileName()).isEqualTo("architecture.html");
+        assertThat(response.path()).endsWith(".html");
+        assertThat(service.listDocuments()).extracting(SourceDocument::chunkType)
+                .containsExactly("html-heading", "html-paragraph", "html-code");
+        assertThat(preview.content()).contains("Pipeline", "Parse the DOM safely.", "  ingest();")
+                .doesNotContain("<script>", "alert('xss')", "<h1>");
+
+        service.deleteDocument(response.documentId(), editor, false);
+
+        assertThat(Files.exists(source)).isFalse();
+        assertThat(indexStore.list()).isEmpty();
+    }
+
+    @Test
+    void syncsHtmlAndHtmDocumentsFromDocsDirectory() throws Exception {
+        Files.writeString(docsDirectory.resolve("guide.html"), "<h1>HTML Guide</h1><p>First source.</p>");
+        Files.writeString(docsDirectory.resolve("legacy.htm"), "<h1>HTM Guide</h1><p>Second source.</p>");
+
+        SyncResult result = service.syncDocsDirectory();
+
+        assertThat(result.addedFiles()).isEqualTo(2);
+        assertThat(indexStore.list()).extracting(DocumentIndexEntry::fileName)
+                .containsExactlyInAnyOrder("guide.html", "legacy.htm");
+        assertThat(service.listDocuments()).extracting(SourceDocument::chunkType).containsOnly(
+                "html-heading", "html-paragraph"
+        );
     }
 
     @Test

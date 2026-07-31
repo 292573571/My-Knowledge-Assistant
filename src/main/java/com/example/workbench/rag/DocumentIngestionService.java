@@ -5,8 +5,6 @@ import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceType;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.charset.CharacterCodingException;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -39,6 +37,7 @@ public class DocumentIngestionService {
     private final List<SourceDocument> documents = new ArrayList<>();
     private final VectorStore vectorStore;
     private final DocumentIndexStore documentIndexStore;
+    private final DocumentParserRouter documentParserRouter;
     private final DocumentChunkerRouter documentChunkerRouter;
     private final Path docsDirectory;
 
@@ -46,19 +45,22 @@ public class DocumentIngestionService {
     public DocumentIngestionService(
             VectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
+            DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter
     ) {
-        this(vectorStore, documentIndexStore, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY);
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY);
     }
 
     DocumentIngestionService(
             VectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
+            DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
             Path docsDirectory
     ) {
         this.vectorStore = vectorStore;
         this.documentIndexStore = documentIndexStore;
+        this.documentParserRouter = documentParserRouter;
         this.documentChunkerRouter = documentChunkerRouter;
         this.docsDirectory = docsDirectory.toAbsolutePath().normalize();
     }
@@ -208,8 +210,8 @@ public class DocumentIngestionService {
         if (!access.canWrite()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色不能上传空间文档");
         }
-        byte[] content = uploadedContent(file);
         String originalFileName = safeOriginalFileName(file.getOriginalFilename());
+        byte[] content = uploadedContent(file);
         String extension = originalFileName.substring(originalFileName.lastIndexOf('.')).toLowerCase();
         Path workspaceDirectory = docsDirectory.resolve("workspaces").resolve(access.workspaceId()).normalize();
         Path target = workspaceDirectory.resolve(UUID.randomUUID() + extension).normalize();
@@ -307,7 +309,7 @@ public class DocumentIngestionService {
                     entry.fileName(),
                     entry.path(),
                     entry.category(),
-                    Files.readString(realDocumentPath, StandardCharsets.UTF_8)
+                    documentParserRouter.parse(entry.fileName(), Files.readAllBytes(realDocumentPath)).content()
             );
         } catch (java.nio.file.NoSuchFileException exception) {
             throw new IllegalArgumentException("Document source file is not available: " + documentId);
@@ -692,7 +694,7 @@ public class DocumentIngestionService {
         }
 
         String storedFileName = normalizedPath.substring(workspacePrefix.length());
-        if (!storedFileName.matches("[0-9a-fA-F-]{36}\\.(md|txt)")) {
+        if (!storedFileName.matches("[0-9a-fA-F-]{36}\\.(md|txt|pdf|docx|html|htm)")) {
             // 只删除系统上传时生成的随机文件，手工维护或全局导入的源文件仍由管理员管理。
             return;
         }
@@ -917,22 +919,21 @@ public class DocumentIngestionService {
 
     private IngestedFile ingestFile(Path path) {
         try {
-            String content = Files.readString(path, StandardCharsets.UTF_8);
-            String normalizedContent = content.trim();
-
+            String fileName = path.getFileName().toString();
+            byte[] sourceContent = Files.readAllBytes(path);
+            ParsedDocument parsedDocument = documentParserRouter.parse(fileName, sourceContent);
+            String normalizedContent = parsedDocument.content();
             if (normalizedContent.isEmpty()) {
                 return new IngestedFile(null, List.of());
             }
 
-            String fileName = path.getFileName().toString();
-            String title = extractTitle(normalizedContent);
             // 内容哈希既用于去重，也作为稳定文档 ID 的来源；内容变化会得到新的 documentId。
-            String contentHash = sha256(normalizedContent);
+            String contentHash = isBinaryDocument(fileName) ? sha256(sourceContent) : sha256(normalizedContent);
             String documentId = contentHash.substring(0, 16);
             String relativePath = workspaceRelativePath(path).replace('\\', '/');
             String category = documentCategory(relativePath);
             String ownerUserId = ownerUserId(relativePath);
-            List<DocumentChunk> chunks = documentChunkerRouter.select(fileName).chunk(normalizedContent);
+            List<DocumentChunk> chunks = documentChunkerRouter.select(parsedDocument).chunk(parsedDocument);
             log.info(
                     "Document chunking completed chunks={} contentLength={}",
                     chunks.size(),
@@ -944,7 +945,7 @@ public class DocumentIngestionService {
                 String id = documentId + "#chunk-" + documentChunk.chunkIndex();
                 SourceDocument sourceDocument = new SourceDocument(
                         id,
-                        title,
+                        parsedDocument.title(),
                         fileName,
                         relativePath,
                         documentId,
@@ -978,7 +979,9 @@ public class DocumentIngestionService {
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access) {
         try {
-            String normalizedContent = decodeUtf8(Files.readAllBytes(path)).trim();
+            byte[] sourceContent = Files.readAllBytes(path);
+            ParsedDocument parsedDocument = documentParserRouter.parse(originalFileName, sourceContent);
+            String normalizedContent = parsedDocument.content();
             if (normalizedContent.isEmpty()) {
                 return new IngestedFile(null, List.of());
             }
@@ -988,17 +991,16 @@ public class DocumentIngestionService {
                 case TEAM -> DocumentVisibility.WORKSPACE;
                 case PUBLIC -> DocumentVisibility.PUBLIC;
             };
-            String contentHash = sha256(normalizedContent);
+            String contentHash = isBinaryDocument(originalFileName) ? sha256(sourceContent) : sha256(normalizedContent);
             String scopedHash = sha256(access.workspaceId() + "\n" + contentHash);
             String documentId = scopedHash.substring(0, 16);
             String relativePath = workspaceRelativePath(path).replace('\\', '/');
-            List<DocumentChunk> chunks = documentChunkerRouter.select(originalFileName).chunk(normalizedContent);
+            List<DocumentChunk> chunks = documentChunkerRouter.select(parsedDocument).chunk(parsedDocument);
             List<SourceDocument> sourceDocuments = new ArrayList<>();
-            String title = extractTitle(normalizedContent);
 
             for (DocumentChunk chunk : chunks) {
                 sourceDocuments.add(new SourceDocument(
-                        documentId + "#chunk-" + chunk.chunkIndex(), title, originalFileName, relativePath,
+                        documentId + "#chunk-" + chunk.chunkIndex(), parsedDocument.title(), originalFileName, relativePath,
                         documentId, originalFileName, contentHash, chunk, "SOURCE", access.userId(),
                         access.workspaceId(), visibility
                 ));
@@ -1021,9 +1023,7 @@ public class DocumentIngestionService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 5 MB");
         }
         try {
-            byte[] content = file.getBytes();
-            decodeUtf8(content);
-            return content;
+            return file.getBytes();
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to read uploaded document", exception);
         }
@@ -1032,21 +1032,15 @@ public class DocumentIngestionService {
     private String safeOriginalFileName(String originalFileName) {
         String fileName = originalFileName == null ? "" : Path.of(originalFileName).getFileName().toString().strip();
         String lower = fileName.toLowerCase();
-        if (fileName.isBlank() || (!lower.endsWith(".md") && !lower.endsWith(".txt"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown 或 TXT");
+        if (fileName.isBlank() || (!lower.endsWith(".md") && !lower.endsWith(".txt")
+                && !lower.endsWith(".pdf") && !lower.endsWith(".docx")
+                && !lower.endsWith(".html") && !lower.endsWith(".htm"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown、TXT、HTML、PDF 或 DOCX");
         }
         if (fileName.length() > 180) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档文件名过长");
         }
         return fileName;
-    }
-
-    private String decodeUtf8(byte[] content) {
-        try {
-            return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(content)).toString();
-        } catch (CharacterCodingException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档必须使用 UTF-8 编码");
-        }
     }
 
     private Path resolveAllowedPath(String path) {
@@ -1093,7 +1087,14 @@ public class DocumentIngestionService {
 
     private boolean isSupportedDocument(Path path) {
         String fileName = path.getFileName().toString().toLowerCase();
-        return fileName.endsWith(".md") || fileName.endsWith(".txt");
+        return fileName.endsWith(".md") || fileName.endsWith(".txt")
+                || fileName.endsWith(".pdf") || fileName.endsWith(".docx")
+                || fileName.endsWith(".html") || fileName.endsWith(".htm");
+    }
+
+    private boolean isBinaryDocument(String fileName) {
+        String lower = fileName.toLowerCase();
+        return lower.endsWith(".pdf") || lower.endsWith(".docx");
     }
 
     private boolean isIndexableDocument(Path path) {
@@ -1119,20 +1120,14 @@ public class DocumentIngestionService {
         return matcher.find() ? matcher.group(1) : "";
     }
 
-    private String extractTitle(String content) {
-        return content.lines()
-                .map(String::trim)
-                .filter(line -> !line.isEmpty())
-                .filter(line -> line.startsWith("# "))
-                .map(line -> line.substring(2).trim())
-                .findFirst()
-                .orElse(null);
+    private String sha256(String content) {
+        return sha256(content.getBytes(StandardCharsets.UTF_8));
     }
 
-    private String sha256(String content) {
+    private String sha256(byte[] content) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(content.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(digest.digest(content));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
         }

@@ -12,17 +12,16 @@ public class MarkdownSmartChunker implements DocumentChunker {
     private static final int OVERLAP_CHARS = 120;
 
     @Override
-    public boolean supports(String fileName) {
-        return fileName.toLowerCase().endsWith(".md");
+    public boolean supports(ParsedDocument document) {
+        return "markdown".equals(document.documentType());
     }
 
     @Override
-    public List<DocumentChunk> chunk(String content) {
-        List<Section> sections = parseSections(content);
+    public List<DocumentChunk> chunk(ParsedDocument document) {
         List<DocumentChunk> chunks = new ArrayList<>();
 
-        for (Section section : sections) {
-            if (section.content().isBlank()) {
+        for (DocumentBlock section : document.blocks()) {
+            if (!"markdown-section".equals(section.blockType()) || section.content().isBlank()) {
                 continue;
             }
 
@@ -45,66 +44,7 @@ public class MarkdownSmartChunker implements DocumentChunker {
         return mergeSmallChunks(chunks);
     }
 
-    private List<Section> parseSections(String content) {
-        List<Section> sections = new ArrayList<>();
-        List<Line> lines = toLines(content);
-        String[] headingStack = new String[6];
-        int sectionStart = 0;
-        int sectionHeadingLevel = 0;
-        String sectionHeadingPath = "";
-        boolean hasActiveSection = false;
-        boolean inCodeBlock = false;
-
-        for (Line line : lines) {
-            String trimmed = line.text().trim();
-
-            if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-                inCodeBlock = !inCodeBlock;
-            }
-
-            Heading heading = inCodeBlock ? null : parseHeading(line.text());
-
-            if (heading == null) {
-                continue;
-            }
-
-            if (hasActiveSection) {
-                sections.add(new Section(
-                        content.substring(sectionStart, line.startOffset()),
-                        sectionHeadingPath,
-                        sectionHeadingLevel,
-                        sectionStart,
-                        line.startOffset()
-                ));
-            }
-
-            headingStack[heading.level() - 1] = heading.text();
-            for (int index = heading.level(); index < headingStack.length; index++) {
-                headingStack[index] = null;
-            }
-
-            sectionStart = line.startOffset();
-            sectionHeadingLevel = heading.level();
-            sectionHeadingPath = buildHeadingPath(headingStack);
-            hasActiveSection = true;
-        }
-
-        if (hasActiveSection) {
-            sections.add(new Section(
-                    content.substring(sectionStart),
-                    sectionHeadingPath,
-                    sectionHeadingLevel,
-                    sectionStart,
-                    content.length()
-            ));
-        } else if (!content.isBlank()) {
-            sections.add(new Section(content, "", 0, 0, content.length()));
-        }
-
-        return sections;
-    }
-
-    private List<DocumentChunk> splitLongSection(Section section, int initialChunkIndex) {
+    private List<DocumentChunk> splitLongSection(DocumentBlock section, int initialChunkIndex) {
         List<Block> blocks = parseBlocks(section);
         List<DocumentChunk> chunks = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -151,7 +91,7 @@ public class MarkdownSmartChunker implements DocumentChunker {
         return chunks;
     }
 
-    private List<Block> parseBlocks(Section section) {
+    private List<Block> parseBlocks(DocumentBlock section) {
         List<Line> lines = toLines(section.content(), section.startOffset());
         List<Block> blocks = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -202,10 +142,6 @@ public class MarkdownSmartChunker implements DocumentChunker {
         return blocks;
     }
 
-    private List<Line> toLines(String content) {
-        return toLines(content, 0);
-    }
-
     private List<Line> toLines(String content, int baseOffset) {
         List<Line> lines = new ArrayList<>();
         int start = 0;
@@ -218,32 +154,6 @@ public class MarkdownSmartChunker implements DocumentChunker {
         }
 
         return lines;
-    }
-
-    private Heading parseHeading(String line) {
-        int level = 0;
-
-        while (level < line.length() && line.charAt(level) == '#') {
-            level++;
-        }
-
-        if (level == 0 || level > 6 || level >= line.length() || line.charAt(level) != ' ') {
-            return null;
-        }
-
-        return new Heading(level, line.substring(level + 1).trim());
-    }
-
-    private String buildHeadingPath(String[] headingStack) {
-        List<String> headings = new ArrayList<>();
-
-        for (String heading : headingStack) {
-            if (heading != null && !heading.isBlank()) {
-                headings.add(heading);
-            }
-        }
-
-        return String.join(" > ", headings);
     }
 
     private String overlapText(String value) {
@@ -311,12 +221,6 @@ public class MarkdownSmartChunker implements DocumentChunker {
 
     private boolean isTableLine(String trimmed) {
         return trimmed.startsWith("|") && trimmed.endsWith("|");
-    }
-
-    private record Heading(int level, String text) {
-    }
-
-    private record Section(String content, String headingPath, int headingLevel, int startOffset, int endOffset) {
     }
 
     private record Line(String text, int startOffset, int endOffset) {

@@ -4,7 +4,7 @@ import java.util.List;
 
 public interface DocumentChunker {
 
-    boolean supports(String fileName);
+    boolean supports(ParsedDocument document);
 
-    List<DocumentChunk> chunk(String content);
+    List<DocumentChunk> chunk(ParsedDocument document);
 }

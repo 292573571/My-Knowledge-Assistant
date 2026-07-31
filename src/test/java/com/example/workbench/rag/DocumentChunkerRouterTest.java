@@ -12,18 +12,24 @@ class DocumentChunkerRouterTest {
     void selectsFirstSupportingChunker() {
         MarkdownSmartChunker markdown = new MarkdownSmartChunker();
         TextParagraphChunker text = new TextParagraphChunker();
-        DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(markdown, text));
+        DocxBlockChunker docx = new DocxBlockChunker();
+        HtmlBlockChunker html = new HtmlBlockChunker();
+        DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(markdown, text, docx, html));
 
-        assertThat(router.select("guide.md")).isSameAs(markdown);
-        assertThat(router.select("guide.txt")).isSameAs(text);
+        assertThat(router.select(new MarkdownDocumentParser().parse("# Guide"))).isSameAs(markdown);
+        assertThat(router.select(new TextDocumentParser().parse("Guide"))).isSameAs(text);
+        assertThat(router.select(new ParsedDocument("docx", "Guide", null, List.of()))).isSameAs(docx);
+        assertThat(router.select(new ParsedDocument("html", "Guide", null, List.of()))).isSameAs(html);
     }
 
     @Test
     void rejectsUnsupportedDocumentType() {
         DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(new MarkdownSmartChunker(), new TextParagraphChunker()));
 
-        assertThatThrownBy(() -> router.select("guide.pdf"))
+        ParsedDocument unsupported = new ParsedDocument("pdf", "content", null, List.of());
+
+        assertThatThrownBy(() -> router.select(unsupported))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unsupported document type");
+                .hasMessageContaining("Unsupported parsed document type");
     }
 }

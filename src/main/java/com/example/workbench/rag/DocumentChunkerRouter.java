@@ -12,10 +12,12 @@ public class DocumentChunkerRouter {
         this.chunkers = chunkers;
     }
 
-    public DocumentChunker select(String fileName) {
+    public DocumentChunker select(ParsedDocument document) {
         return chunkers.stream()
-                .filter(chunker -> chunker.supports(fileName))
+                .filter(chunker -> chunker.supports(document))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Unsupported document type: " + fileName));
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unsupported parsed document type: " + document.documentType()
+                ));
     }
 }
