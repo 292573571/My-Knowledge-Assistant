@@ -74,6 +74,7 @@ mkdir -p /opt/zhihai/app /opt/zhihai/frontend/dist
 | --- | --- |
 | `DEPLOY_HOST` | 服务器 IP，例如 `175.178.229.209` |
 | `DEPLOY_PORT` | SSH 端口，默认是 `22` |
+| `DEPLOY_USER` | SSH 发布用户，未配置时默认使用 `deploy` |
 | `DEPLOY_PRIVATE_KEY` | `zhihai_deploy_key` 私钥的完整内容 |
 | `DEPLOY_KNOWN_HOSTS` | 服务器 SSH host key 的完整一行 |
 

@@ -65,24 +65,34 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
+          : "${DEPLOY_HOST:?缺少 production Secret: DEPLOY_HOST}"
+          : "${DEPLOY_PRIVATE_KEY:?缺少 production Secret: DEPLOY_PRIVATE_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?缺少 production Secret: DEPLOY_KNOWN_HOSTS}"
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
           cat >> ~/.ssh/config <<EOF
           Host production
             HostName ${DEPLOY_HOST}
             Port ${DEPLOY_PORT:-22}
-            User deploy
+            User ${DEPLOY_USER:-deploy}
             IdentityFile ~/.ssh/deploy_key
             IdentitiesOnly yes
+            BatchMode yes
+            ConnectTimeout 15
             StrictHostKeyChecking yes
           EOF
           chmod 600 ~/.ssh/config
+
+      - name: Verify SSH connection
+        run: ssh production 'printf "SSH connection established\n"'
 
       - name: Upload release
         env:
