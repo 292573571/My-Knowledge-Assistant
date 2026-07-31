@@ -1,4 +1,4 @@
-name: Deploy production
+name: Verify master
 
 on:
   push:
@@ -7,17 +7,16 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: production
+  group: verify-master
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 60
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -45,69 +44,3 @@ jobs:
         run: |
           npm ci
           npm run build
-
-      - name: Create release archive
-        env:
-          RELEASE_ID: ${{ github.sha }}
-        run: |
-          mkdir -p release/backend release/frontend
-          mapfile -t backend_jars < <(find target -maxdepth 1 -type f -name '*.jar' | sort)
-          if [[ ${#backend_jars[@]} -ne 1 ]]; then
-            printf '预期生成一个可执行 JAR，实际找到 %s 个\n' "${#backend_jars[@]}" >&2
-            exit 1
-          fi
-          cp "${backend_jars[0]}" release/backend/zhihai.jar
-          cp -R frontend/dist/. release/frontend/
-          printf '%s\n' "$RELEASE_ID" > release/REVISION
-          tar -czf "zhihai-${RELEASE_ID}.tar.gz" -C release .
-
-      - name: Configure SSH
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          : "${DEPLOY_HOST:?缺少 production Secret: DEPLOY_HOST}"
-          : "${DEPLOY_PRIVATE_KEY:?缺少 production Secret: DEPLOY_PRIVATE_KEY}"
-          : "${DEPLOY_KNOWN_HOSTS:?缺少 production Secret: DEPLOY_KNOWN_HOSTS}"
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<EOF
-          Host production
-            HostName ${DEPLOY_HOST}
-            Port ${DEPLOY_PORT:-22}
-            User ${DEPLOY_USER:-deploy}
-            IdentityFile ~/.ssh/deploy_key
-            IdentitiesOnly yes
-            BatchMode yes
-            ConnectTimeout 15
-            ServerAliveInterval 30
-            ServerAliveCountMax 6
-            StrictHostKeyChecking yes
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Verify SSH connection
-        run: ssh production 'command -v rsync >/dev/null && printf "SSH connection established\n"'
-
-      - name: Upload release
-        env:
-          RELEASE_ID: ${{ github.sha }}
-        run: |
-          rsync \
-            --partial \
-            --inplace \
-            --info=progress2 \
-            "zhihai-${RELEASE_ID}.tar.gz" \
-            "production:/tmp/zhihai-${RELEASE_ID}.tar.gz"
-
-      - name: Deploy and verify
-        env:
-          RELEASE_ID: ${{ github.sha }}
-        run: ssh production "sudo /usr/local/sbin/deploy-zhihai '/tmp/zhihai-${RELEASE_ID}.tar.gz' '${RELEASE_ID}'"

@@ -6,3 +6,6 @@ eval/reports/latest.md
 frontend/node_modules/
 frontend/dist/
 logs/
+.DS_Store
+zhihai_deploy_key
+zhihai_deploy_key.pub
