@@ -19,6 +19,11 @@ eval/results/*
 eval/reports/*
 !eval/reports/.gitkeep
 
+# 本地部署和执行脚本
+deploy/
+scripts/
+docker-compose.yml
+
 # 本地配置和敏感信息
 .env
 .env.*
