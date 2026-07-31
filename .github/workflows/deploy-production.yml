@@ -17,7 +17,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -87,17 +87,25 @@ jobs:
             IdentitiesOnly yes
             BatchMode yes
             ConnectTimeout 15
+            ServerAliveInterval 30
+            ServerAliveCountMax 6
             StrictHostKeyChecking yes
           EOF
           chmod 600 ~/.ssh/config
 
       - name: Verify SSH connection
-        run: ssh production 'printf "SSH connection established\n"'
+        run: ssh production 'command -v rsync >/dev/null && printf "SSH connection established\n"'
 
       - name: Upload release
         env:
           RELEASE_ID: ${{ github.sha }}
-        run: scp "zhihai-${RELEASE_ID}.tar.gz" production:/tmp/
+        run: |
+          rsync \
+            --partial \
+            --inplace \
+            --info=progress2 \
+            "zhihai-${RELEASE_ID}.tar.gz" \
+            "production:/tmp/zhihai-${RELEASE_ID}.tar.gz"
 
       - name: Deploy and verify
         env:

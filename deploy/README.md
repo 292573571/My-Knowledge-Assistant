@@ -13,6 +13,12 @@
 
 ## 服务器初始化
 
+安装断点续传所需的 `rsync`：
+
+```bash
+dnf install -y rsync
+```
+
 在服务器创建发布用户：
 
 ```bash
