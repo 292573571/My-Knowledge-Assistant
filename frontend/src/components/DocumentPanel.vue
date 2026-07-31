@@ -5,7 +5,7 @@ import { deleteDocument, fetchDocumentContent, fetchDocuments, uploadWorkspaceDo
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
 
-defineProps({
+const props = defineProps({
   workspace: { type: Object, default: null }
 })
 
@@ -70,7 +70,7 @@ async function loadDocuments() {
   clearError()
 
   try {
-    documents.value = await fetchDocuments()
+    documents.value = await fetchDocuments(props.workspace?.id)
   } catch (exception) {
     showError(`文档列表加载失败：${formatApiError(exception)}`)
   } finally {
@@ -130,9 +130,19 @@ async function runIngest(action, successText) {
 async function handleUpload(event) {
   const files = [...(event.target.files || [])]
   if (!files.length) return
+  const targetWorkspaceId = props.workspace?.id
+  const targetWorkspaceName = props.workspace?.name || '当前空间'
   await runIngest(async () => {
-    for (const file of files) await uploadWorkspaceDocument(file)
-  }, files.length === 1 ? '文档已上传并完成索引' : `${files.length} 个文档已上传并完成索引`)
+    for (const file of files) {
+      const result = await uploadWorkspaceDocument(file, targetWorkspaceId)
+      if (result.workspaceId !== targetWorkspaceId
+          || (props.workspace?.type === 'PUBLIC' && result.visibility !== 'PUBLIC')) {
+        throw new Error('服务端返回的文档归属与当前空间不一致')
+      }
+    }
+  }, files.length === 1
+    ? `文档已上传到“${targetWorkspaceName}”并完成索引`
+    : `${files.length} 个文档已上传到“${targetWorkspaceName}”并完成索引`)
   event.target.value = ''
 }
 
@@ -141,7 +151,7 @@ async function openDocument(document) {
   contentLoading.value = true
   contentError.value = ''
   try {
-    contentDocument.value = await fetchDocumentContent(document.documentId)
+    contentDocument.value = await fetchDocumentContent(document.documentId, props.workspace?.id)
   } catch (exception) {
     contentError.value = formatApiError(exception, '文件内容加载失败。')
   } finally {
@@ -164,7 +174,7 @@ async function confirmDelete() {
   notice.value = ''
 
   try {
-    await deleteDocument(documentId)
+    await deleteDocument(documentId, props.workspace?.id)
     documents.value = documents.value.filter((document) => document.documentId !== documentId)
     pendingDeleteDocument.value = null
     showNotice('文档已从当前知识空间删除')

@@ -54,7 +54,7 @@ public class EvalRunner {
             @Value("${workbench.eval.judge.enabled:false}") boolean judgeEnabled,
             @Value("${workbench.eval.case-ids:}") String caseIds,
             @Value("${workbench.rag.top-k:5}") int ragTopK,
-            @Value("${workbench.rag.similarity-threshold:0.45}") double similarityThreshold,
+            @Value("${workbench.rag.similarity-threshold:1.0}") double similarityThreshold,
             @Value("${workbench.rag.score-direction:distance}") String scoreDirection,
             @Value("${workbench.rag.query-rewrite.enabled:false}") boolean queryRewriteEnabled,
             @Value("${workbench.rag.multi-query.enabled:false}") boolean multiQueryEnabled,

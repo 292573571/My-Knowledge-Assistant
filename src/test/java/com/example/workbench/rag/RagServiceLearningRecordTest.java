@@ -84,6 +84,54 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void keepsRelevantPdfPageAtCalibratedChromaDistance() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument pdfPage = new SourceDocument(
+                "vpn#chunk-0", "VPN客户端只支持：MacOS 10.13及以上版本", "", "vpn.pdf",
+                "docs/workspaces/personal-1/vpn.pdf", 0, "vpn", "vpn.pdf", "hash",
+                0.6392584, "", 0, 0, 30, "pdf-page", "SOURCE", "1",
+                "personal-1", com.example.workbench.workspace.DocumentVisibility.PRIVATE, 1
+        );
+        when(vectorStore.similaritySearch("VPN客户端支持什么操作系统版本？", 20)).thenReturn(List.of(pdfPage));
+        when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("VPN客户端支持 MacOS 10.13 及以上版本。");
+        RagService service = service(vectorStore, chatClient, 1.0);
+
+        RagChatResponse response = service.chat(new RagChatRequest(
+                "user-1:conversation-1", "personal-1", "VPN客户端支持什么操作系统版本？"));
+
+        assertThat(response.answer()).contains("MacOS 10.13");
+        assertThat(response.sources()).singleElement().satisfies(source -> {
+            assertThat(source.file()).isEqualTo("vpn.pdf");
+            assertThat(source.pageNumber()).isEqualTo(1);
+        });
+        verify(chatClient, never()).generate(Mockito.anyString());
+    }
+
+    @Test
+    void rejectsPdfPageAboveCalibratedChromaDistance() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument unrelatedPdfPage = new SourceDocument(
+                "vpn#chunk-3", "勾选完全磁盘访问权限。", "", "vpn.pdf",
+                "docs/workspaces/personal-1/vpn.pdf", 3, "vpn", "vpn.pdf", "hash",
+                1.3449115, "", 0, 0, 20, "pdf-page", "SOURCE", "1",
+                "personal-1", com.example.workbench.workspace.DocumentVisibility.PRIVATE, 4
+        );
+        when(vectorStore.similaritySearch("红烧肉应该怎么制作？", 20)).thenReturn(List.of(unrelatedPdfPage));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("红烧肉可以通过焯水、炒糖色和炖煮制作。");
+        RagService service = service(vectorStore, chatClient, 1.0);
+
+        RagChatResponse response = service.chat(new RagChatRequest(
+                "user-1:conversation-1", "personal-1", "红烧肉应该怎么制作？"));
+
+        assertThat(response.sources()).isEmpty();
+        assertThat(response.answer()).contains("通用大模型知识").doesNotContain("完全磁盘访问权限");
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
     void excludesAutomaticLearningRecordsFromNormalQuestions() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
@@ -387,6 +435,15 @@ class RagServiceLearningRecordTest {
     }
 
     private RagService service(VectorStore vectorStore, LocalChatClient chatClient, RagQualityGate qualityGate) {
+        return service(vectorStore, chatClient, qualityGate, 0.45);
+    }
+
+    private RagService service(VectorStore vectorStore, LocalChatClient chatClient, double similarityThreshold) {
+        return service(vectorStore, chatClient, new RagQualityGate(chatClient, false), similarityThreshold);
+    }
+
+    private RagService service(VectorStore vectorStore, LocalChatClient chatClient, RagQualityGate qualityGate,
+                               double similarityThreshold) {
         return new RagService(
                 Mockito.mock(DocumentIngestionService.class),
                 vectorStore,
@@ -396,7 +453,7 @@ class RagServiceLearningRecordTest {
                 qualityGate,
                 false,
                 5,
-                0.45,
+                similarityThreshold,
                 "distance",
                 false,
                 false,

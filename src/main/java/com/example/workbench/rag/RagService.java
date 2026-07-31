@@ -66,7 +66,7 @@ public class RagService {
             RagQualityGate qualityGate,
             @Value("${workbench.rag.debug:false}") boolean retrievalDebugEnabled,
             @Value("${workbench.rag.top-k:5}") int topK,
-            @Value("${workbench.rag.similarity-threshold:0.45}") double similarityThreshold,
+            @Value("${workbench.rag.similarity-threshold:1.0}") double similarityThreshold,
             @Value("${workbench.rag.score-direction:distance}") String scoreDirection,
             @Value("${workbench.rag.query-rewrite.enabled:false}") boolean queryRewriteEnabled,
             @Value("${workbench.rag.multi-query.enabled:false}") boolean multiQueryEnabled,

@@ -37,7 +37,7 @@ onMounted(loadSummary)
 
 async function loadSummary() {
   try {
-    documents.value = await fetchDocuments()
+    documents.value = await fetchDocuments(props.workspace?.id)
   } catch (exception) {
     error.value = `空间概览加载失败：${formatApiError(exception)}`
   }
@@ -65,7 +65,7 @@ async function importFile() {
     error.value = '请输入 docs 目录下的文件路径。'
     return
   }
-  await run('import-file', () => ingestDocument(path), '文件已导入当前空间')
+  await run('import-file', () => ingestDocument(path, false, props.workspace?.id), '文件已导入当前空间')
 }
 
 async function importDirectory() {
@@ -74,14 +74,14 @@ async function importDirectory() {
     error.value = '请输入 docs 目录下的文件夹路径。'
     return
   }
-  await run('import-directory', () => ingestDocuments(path), '目录已导入当前空间')
+  await run('import-directory', () => ingestDocuments(path, false, props.workspace?.id), '目录已导入当前空间')
 }
 
 async function confirmMaintenance() {
   const action = pendingAction.value
   pendingAction.value = ''
-  if (action === 'sync') await run('sync', syncDocuments, '当前空间同步完成')
-  if (action === 'rebuild') await run('rebuild', rebuildDocuments, '当前空间索引重建完成')
+  if (action === 'sync') await run('sync', () => syncDocuments(props.workspace?.id), '当前空间同步完成')
+  if (action === 'rebuild') await run('rebuild', () => rebuildDocuments(props.workspace?.id), '当前空间索引重建完成')
 }
 </script>
 

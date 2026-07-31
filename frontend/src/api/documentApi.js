@@ -2,8 +2,8 @@ import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
 import { getActiveWorkspaceId } from './workspaceApi'
 
-function workspaceQuery() {
-  const workspaceId = getActiveWorkspaceId()
+function workspaceQuery(explicitWorkspaceId = '') {
+  const workspaceId = explicitWorkspaceId || getActiveWorkspaceId()
   return workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''
 }
 
@@ -36,53 +36,53 @@ async function request(path, options = {}) {
   return data && typeof data === 'object' ? { ...data, requestId } : data
 }
 
-export function fetchDocuments() {
-  return request(`/api/documents${workspaceQuery()}`)
+export function fetchDocuments(workspaceId = '') {
+  return request(`/api/documents${workspaceQuery(workspaceId)}`)
 }
 
-export function fetchDocumentContent(documentId) {
-  return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery()}`)
+export function fetchDocumentContent(documentId, workspaceId = '') {
+  return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery(workspaceId)}`)
 }
 
-export function uploadWorkspaceDocument(file) {
+export function uploadWorkspaceDocument(file, workspaceId = '') {
   const form = new FormData()
   form.append('file', file)
-  return request(`/api/documents/upload${workspaceQuery()}`, {
+  return request(`/api/documents/upload${workspaceQuery(workspaceId)}`, {
     method: 'POST',
     body: form
   })
 }
 
-export function ingestDocuments(path = '', force = false) {
-  return request(`/api/documents/ingest-directory${workspaceQuery()}`, {
+export function ingestDocuments(path = '', force = false, workspaceId = '') {
+  return request(`/api/documents/ingest-directory${workspaceQuery(workspaceId)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, force })
   })
 }
 
-export function ingestDocument(path, force = false) {
-  return request(`/api/documents/ingest${workspaceQuery()}`, {
+export function ingestDocument(path, force = false, workspaceId = '') {
+  return request(`/api/documents/ingest${workspaceQuery(workspaceId)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, force })
   })
 }
 
-export function rebuildDocuments() {
-  return request(`/api/documents/rebuild${workspaceQuery()}`, {
+export function rebuildDocuments(workspaceId = '') {
+  return request(`/api/documents/rebuild${workspaceQuery(workspaceId)}`, {
     method: 'POST'
   })
 }
 
-export function syncDocuments() {
-  return request(`/api/documents/sync${workspaceQuery()}`, {
+export function syncDocuments(workspaceId = '') {
+  return request(`/api/documents/sync${workspaceQuery(workspaceId)}`, {
     method: 'POST'
   })
 }
 
-export function deleteDocument(documentId) {
-  return request(`/api/documents/${encodeURIComponent(documentId)}${workspaceQuery()}`, {
+export function deleteDocument(documentId, workspaceId = '') {
+  return request(`/api/documents/${encodeURIComponent(documentId)}${workspaceQuery(workspaceId)}`, {
     method: 'DELETE'
   })
 }

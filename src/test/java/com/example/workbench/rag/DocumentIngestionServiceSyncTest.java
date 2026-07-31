@@ -348,6 +348,31 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void uploadsPublicPdfWithGloballyVisibleMetadata() throws Exception {
+        WorkspaceAccessContext publicEditor = new WorkspaceAccessContext(
+                "1", "public-1", WorkspaceRole.EDITOR, WorkspaceType.PUBLIC
+        );
+
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(publicEditor,
+                new MockMultipartFile("file", "public-guide.pdf", "application/pdf",
+                        PdfTestDocuments.textPdf("Public Guide", "Globally visible PDF knowledge.")));
+
+        assertThat(response.workspaceId()).isEqualTo("public-1");
+        assertThat(response.visibility()).isEqualTo(DocumentVisibility.PUBLIC);
+        assertThat(indexStore.list()).singleElement().satisfies(entry -> {
+            assertThat(entry.workspaceId()).isEqualTo("public-1");
+            assertThat(entry.visibility()).isEqualTo(DocumentVisibility.PUBLIC);
+        });
+        assertThat(service.listDocuments()).allSatisfy(document -> {
+            assertThat(document.workspaceId()).isEqualTo("public-1");
+            assertThat(document.visibility()).isEqualTo(DocumentVisibility.PUBLIC);
+        });
+        assertThat(vectorStore.similaritySearch("Globally visible", 5, "2", "personal-2"))
+                .extracting(SourceDocument::documentId)
+                .contains(response.documentId());
+    }
+
+    @Test
     void syncsHtmlAndHtmDocumentsFromDocsDirectory() throws Exception {
         Files.writeString(docsDirectory.resolve("guide.html"), "<h1>HTML Guide</h1><p>First source.</p>");
         Files.writeString(docsDirectory.resolve("legacy.htm"), "<h1>HTM Guide</h1><p>Second source.</p>");
