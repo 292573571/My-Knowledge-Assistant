@@ -7,7 +7,7 @@
 在项目根目录执行：
 
 ```bash
-./deploy/release-local.sh
+./deploy/release-local.sh --yes
 ```
 
 脚本会依次执行：

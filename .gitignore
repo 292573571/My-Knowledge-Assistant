@@ -1,11 +1,51 @@
-.idea/
+# 构建产物和依赖
 target/
-data/
-eval/results/latest.json
-eval/reports/latest.md
+*.class
+*.jar
+*.war
 frontend/node_modules/
 frontend/dist/
+coverage/
+.nyc_output/
+
+# 运行数据和生成结果
+data/
 logs/
-.DS_Store
+docs/workspaces/
+docs/learning-records/
+docs/manual-notes/
+eval/results/*
+!eval/results/.gitkeep
+eval/reports/*
+!eval/reports/.gitkeep
+
+# 本地配置和敏感信息
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 zhihai_deploy_key
 zhihai_deploy_key.pub
+
+# IDE 和操作系统文件
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 临时文件和编辑器备份
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.orig
+*.rej
+*~

@@ -230,7 +230,6 @@ src/
 │   ├── ConversationSidebar.vue
 │   ├── InfoPanel.vue
 │   ├── LoadingDots.vue
-│   ├── ModeSelector.vue
 │   ├── SourcePanel.vue
 │   └── ToolCallPanel.vue
 ├── stores/

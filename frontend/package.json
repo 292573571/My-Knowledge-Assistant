@@ -9,7 +9,6 @@
     "dompurify": "latest",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.3.0",
-    "marked": "latest",
     "vite": "latest",
     "vue": "latest"
   }
