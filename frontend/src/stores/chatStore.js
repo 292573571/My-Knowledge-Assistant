@@ -3,12 +3,13 @@ import { apiErrorFromException, formatApiError } from '../api/apiError'
 import { sendChatMessage } from '../api/chatApi'
 import { streamChat } from '../api/streamApi'
 import { deleteConversation as deleteRemoteConversation, fetchConversationMessages, fetchConversations, stopConversation } from '../api/conversationApi'
+import { createUuid } from '../utils/uuid'
 
 const REQUEST_ERROR_MESSAGE = '请求失败，请检查后端服务是否启动。'
 
 function createConversation(title = '新的对话') {
   return {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     title,
     mode: 'rag',
     messages: [],
@@ -22,7 +23,7 @@ function createConversation(title = '新的对话') {
 function normalizeConversation(conversation) {
   // 后端只返回会话元数据；前端补齐 UI 专用字段，消息在选中会话后按需加载。
   return {
-    id: conversation.id || crypto.randomUUID(),
+    id: conversation.id || createUuid(),
     title: conversation.title || '新的对话',
     mode: conversation.mode || 'rag',
     messages: (conversation.messages || []).map((message) => ({
@@ -138,7 +139,7 @@ function touchActiveConversation() {
 
 function createUserMessage(content) {
   return {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     role: 'user',
     content,
     createdAt: Date.now(),
@@ -149,7 +150,7 @@ function createUserMessage(content) {
 
 function createAssistantMessage() {
   return {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     role: 'assistant',
     content: '',
     streaming: true,
@@ -190,7 +191,7 @@ function upsertToolCall(toolCalls, toolCall) {
   }
 
   toolCalls.push({
-    id: toolCall.id || toolCall.toolCallId || crypto.randomUUID(),
+    id: toolCall.id || toolCall.toolCallId || createUuid(),
     toolName: toolCall.toolName || toolCall.name || toolCall.tool || 'tool',
     arguments: toolCall.arguments || toolCall.input || {},
     resultPreview: toolCall.resultPreview || toolCall.result || toolCall.output || '',
