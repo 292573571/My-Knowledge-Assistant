@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -481,7 +482,9 @@ public class RagService {
         LinkedHashMap<String, ScoredCandidate> candidates = new LinkedHashMap<>();
 
         for (String query : queries) {
-            for (SourceDocument source : similaritySearch(query, topK, ownerUserId, workspaceId)) {
+            // 先扩大向量候选集，再用正文质量和问题词命中重排，避免标题片段占满最终上下文。
+            int candidateLimit = Math.max(topK, topK * 3);
+            for (SourceDocument source : similaritySearch(query, candidateLimit, ownerUserId, workspaceId)) {
                 if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
                     continue;
                 }
@@ -500,7 +503,6 @@ public class RagService {
                 // 多查询重复命中可获得小幅加分，但不改变向量库分数方向的语义。
                 .map(candidate -> candidate.source().withScore(finalScore(candidate.source().score(), candidate.hitCount())))
                 .sorted(Comparator.comparingDouble(this::rankingScore).reversed())
-                .limit(topK)
                 .toList();
     }
 
@@ -844,10 +846,68 @@ public class RagService {
     }
 
     private List<SourceDocument> rerankSources(String question, List<SourceDocument> sources) {
-        // 规则重排用于补偿当前学习资料中可预期的标题和关键词命中，不替代通用 reranker。
+        // 规则重排同时保留向量距离，并优先正文质量，避免标题片段压过真正的解释内容。
         return sources.stream()
-                .sorted(Comparator.comparingInt((SourceDocument source) -> documentPriority(source) + sourceBoost(question, source)).reversed())
+                .sorted(Comparator.comparingDouble((SourceDocument source) -> rerankScore(question, source)).reversed())
+                .limit(topK)
                 .toList();
+    }
+
+    private double rerankScore(String question, SourceDocument source) {
+        double vectorScore = "similarity".equals(scoreDirection)
+                ? source.score()
+                : Math.max(0.0, 1.0 - source.score());
+        return vectorScore * 10
+                + lexicalMatchScore(question, source.content())
+                + contentQualityScore(source)
+                + documentPriority(source)
+                + sourceBoost(question, source);
+    }
+
+    private int lexicalMatchScore(String question, String content) {
+        if (question == null || content == null) {
+            return 0;
+        }
+
+        String normalizedContent = content.toLowerCase(Locale.ROOT);
+        int score = 0;
+        var matcher = Pattern.compile("[\\p{IsHan}]{2,}|[a-z][a-z0-9_-]{1,}", Pattern.CASE_INSENSITIVE)
+                .matcher(question.toLowerCase(Locale.ROOT));
+        while (matcher.find()) {
+            if (normalizedContent.contains(matcher.group())) {
+                score += matcher.group().length() >= 3 ? 3 : 2;
+            }
+        }
+        return score;
+    }
+
+    private int contentQualityScore(SourceDocument source) {
+        String content = source.content() == null ? "" : source.content().strip();
+        if (content.isBlank() || isHeadingOnly(source)) {
+            return -12;
+        }
+
+        int score = Math.min(8, content.length() / 160);
+        if (content.length() > 80) {
+            score += 3;
+        }
+        if (content.contains("是") || content.contains("用于") || content.contains("主要")) {
+            score += 3;
+        }
+        return score;
+    }
+
+    private boolean isHeadingOnly(SourceDocument source) {
+        String content = source.content() == null ? "" : source.content().strip();
+        if (content.contains("\n") || content.length() > 80) {
+            return false;
+        }
+
+        String headingPath = source.headingPath() == null ? "" : source.headingPath().strip();
+        if (headingPath.isBlank()) {
+            return false;
+        }
+        return headingPath.equals(content) || headingPath.endsWith(" > " + content);
     }
 
     private int documentPriority(SourceDocument source) {

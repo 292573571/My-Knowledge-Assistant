@@ -73,14 +73,14 @@ class RagServiceLearningRecordTest {
     void doesNotTreatGreetingWithARealQuestionAsIntroductionOnly() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
-        when(vectorStore.similaritySearch("你好，RAG 是什么？", 5)).thenReturn(List.of());
+        when(vectorStore.similaritySearch("你好，RAG 是什么？", 15)).thenReturn(List.of());
         when(chatClient.generate(Mockito.anyString())).thenReturn("RAG 是一种结合信息检索与模型生成的技术。 ");
         RagService service = service(vectorStore, chatClient);
 
         RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "你好，RAG 是什么？"));
 
         assertThat(response.answer()).contains("通用大模型知识").contains("信息检索");
-        verify(vectorStore).similaritySearch("你好，RAG 是什么？", 5);
+        verify(vectorStore).similaritySearch("你好，RAG 是什么？", 15);
     }
 
     @Test
@@ -93,7 +93,7 @@ class RagServiceLearningRecordTest {
                 0.6392584, "", 0, 0, 30, "pdf-page", "SOURCE", "1",
                 "personal-1", com.example.workbench.workspace.DocumentVisibility.PRIVATE, 1
         );
-        when(vectorStore.similaritySearch("VPN客户端支持什么操作系统版本？", 20)).thenReturn(List.of(pdfPage));
+        when(vectorStore.similaritySearch("VPN客户端支持什么操作系统版本？", 60)).thenReturn(List.of(pdfPage));
         when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
                 .thenReturn("VPN客户端支持 MacOS 10.13 及以上版本。");
         RagService service = service(vectorStore, chatClient, 1.0);
@@ -110,6 +110,38 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void reranksSubstantiveBodyBeforeLimitingCandidates() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        List<SourceDocument> candidates = new java.util.ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            String heading = "Kettle 标题 " + index;
+            candidates.add(new SourceDocument(
+                    "heading-" + index, heading, "", "kettle.docx", "docs/kettle.docx", index,
+                    "kettle", "kettle.docx", "hash", 0.1 + index * 0.01, heading,
+                    1, 0, heading.length(), "docx-heading", "SOURCE", "",
+                    "public-default", com.example.workbench.workspace.DocumentVisibility.PUBLIC, 0
+            ));
+        }
+        SourceDocument body = new SourceDocument(
+                "body", "Kettle 是一款开源的数据集成工具，主要用于数据抽取、转换和加载。", "",
+                "kettle.docx", "docs/kettle.docx", 5, "kettle", "kettle.docx", "hash",
+                0.6, "Kettle 入门", 1, 100, 160, "docx-section", "SOURCE", "",
+                "public-default", com.example.workbench.workspace.DocumentVisibility.PUBLIC, 0
+        );
+        candidates.add(body);
+        when(vectorStore.similaritySearch("Kettle是啥？", 15)).thenReturn(candidates);
+        when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("Kettle 是一款开源的数据集成工具。");
+        RagService service = service(vectorStore, chatClient, 1.0);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "Kettle是啥？"));
+
+        assertThat(response.answer()).contains("数据集成工具");
+        assertThat(response.sources()).extracting(RagSource::chunkIndex).contains(5);
+    }
+
+    @Test
     void rejectsPdfPageAboveCalibratedChromaDistance() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
@@ -119,7 +151,7 @@ class RagServiceLearningRecordTest {
                 1.3449115, "", 0, 0, 20, "pdf-page", "SOURCE", "1",
                 "personal-1", com.example.workbench.workspace.DocumentVisibility.PRIVATE, 4
         );
-        when(vectorStore.similaritySearch("红烧肉应该怎么制作？", 20)).thenReturn(List.of(unrelatedPdfPage));
+        when(vectorStore.similaritySearch("红烧肉应该怎么制作？", 60)).thenReturn(List.of(unrelatedPdfPage));
         when(chatClient.generate(Mockito.anyString())).thenReturn("红烧肉可以通过焯水、炒糖色和炖煮制作。");
         RagService service = service(vectorStore, chatClient, 1.0);
 
@@ -264,7 +296,7 @@ class RagServiceLearningRecordTest {
                 "1"
         );
         String retrievalQuery = "embedding是什么？\nEmbedding 向量表示 语义表示";
-        when(vectorStore.similaritySearch(retrievalQuery, 20)).thenReturn(List.of(unrelatedNote));
+        when(vectorStore.similaritySearch(retrievalQuery, 60)).thenReturn(List.of(unrelatedNote));
         when(chatClient.generate(Mockito.anyString())).thenReturn("Embedding 是将文本等对象映射为数值向量的表示方法。");
         RagService service = service(vectorStore, chatClient);
 
@@ -272,7 +304,7 @@ class RagServiceLearningRecordTest {
 
         assertThat(response.answer()).contains("Embedding 是").doesNotContain("RAG 是一种先检索");
         assertThat(response.sources()).isEmpty();
-        verify(vectorStore).similaritySearch(retrievalQuery, 20);
+        verify(vectorStore).similaritySearch(retrievalQuery, 60);
         verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
     }
 
