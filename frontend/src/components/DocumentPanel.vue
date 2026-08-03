@@ -13,7 +13,9 @@ const props = defineProps({
 const documents = ref([])
 const loading = ref(false)
 const error = ref('')
+const errorTitle = ref('操作失败')
 const errorType = ref('error')
+const errorCopied = ref(false)
 const notice = ref('')
 const lastFailedAction = ref(null)
 const searchQuery = ref('')
@@ -89,6 +91,9 @@ const taskStageLabels = {
   FAILED: '请查看失败原因'
 }
 
+const supportedUploadExtensions = new Set(['md', 'txt', 'html', 'htm', 'pdf', 'docx', 'png', 'jpg', 'jpeg'])
+const maxUploadBytes = 50 * 1024 * 1024
+
 function fileExtension(fileName = '') {
   const index = fileName.lastIndexOf('.')
   return index < 0 ? '' : fileName.slice(index + 1).toLowerCase()
@@ -146,20 +151,31 @@ function showNotice(message) {
   }, 3000)
 }
 
-function showError(message, type = 'error') {
+function showError(message, type = 'error', title = '') {
   error.value = message
   errorType.value = type
+  errorTitle.value = title || (type === 'warning' ? '请完善操作信息' : '操作失败')
+  errorCopied.value = false
   if (errorTimer) window.clearTimeout(errorTimer)
-  errorTimer = window.setTimeout(() => {
-    error.value = ''
-    errorTimer = null
-  }, type === 'warning' ? 3500 : 6000)
+  errorTimer = type === 'warning' ? window.setTimeout(() => {
+    clearError()
+  }, 6000) : null
 }
 
 function clearError() {
   error.value = ''
+  errorCopied.value = false
   if (errorTimer) window.clearTimeout(errorTimer)
   errorTimer = null
+}
+
+async function copyError() {
+  try {
+    await navigator.clipboard.writeText(`${errorTitle.value}\n${error.value}`)
+    errorCopied.value = true
+  } catch {
+    errorCopied.value = false
+  }
 }
 
 function clearNotice() {
@@ -198,7 +214,31 @@ function closeUploadDialog() {
 }
 
 function chooseUploadFiles(files) {
-  selectedUploadFiles.value = [...files]
+  const selectedFiles = [...files]
+  const unsupportedFiles = selectedFiles.filter((file) => !supportedUploadExtensions.has(fileExtension(file.name)))
+  if (unsupportedFiles.length) {
+    selectedUploadFiles.value = []
+    showError(
+      `不支持 ${unsupportedFiles.map((file) => `“${file.name}”`).join('、')}。请选择 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 文件。`,
+      'error',
+      '文件格式不支持'
+    )
+    uploadDragActive.value = false
+    return
+  }
+  const oversizedFiles = selectedFiles.filter((file) => file.size > maxUploadBytes)
+  if (oversizedFiles.length) {
+    selectedUploadFiles.value = []
+    showError(
+      `${oversizedFiles.map((file) => `“${file.name}”`).join('、')} 超过单文件 50 MB 限制。`,
+      'error',
+      '文件过大'
+    )
+    uploadDragActive.value = false
+    return
+  }
+  clearError()
+  selectedUploadFiles.value = selectedFiles
   uploadDragActive.value = false
 }
 
@@ -349,9 +389,16 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="error" :class="['document-toast', errorType]" role="alert" aria-live="assertive">
-        <span class="document-toast-icon">{{ errorType === 'warning' ? '!' : '×' }}</span>
-        <span><strong>{{ errorType === 'warning' ? '请完善操作信息' : '操作失败' }}</strong>{{ error }}</span>
-        <div class="document-toast-actions"><button v-if="lastFailedAction && !loading" type="button" class="retry" @click="clearError(); lastFailedAction()">重试</button><button type="button" aria-label="关闭提示" @click="clearError">×</button></div>
+        <span class="document-toast-icon" aria-hidden="true">{{ errorType === 'warning' ? '!' : '×' }}</span>
+        <div class="document-toast-content">
+          <strong>{{ errorTitle }}</strong>
+          <p>{{ error }}</p>
+        </div>
+        <div class="document-toast-actions">
+          <button type="button" class="copy" @click="copyError">{{ errorCopied ? '已复制' : '复制详情' }}</button>
+          <button v-if="lastFailedAction && !loading" type="button" class="retry" @click="clearError(); lastFailedAction()">重试</button>
+          <button type="button" class="close" aria-label="关闭提示" @click="clearError">×</button>
+        </div>
       </div>
     </Teleport>
     <Teleport to="body">

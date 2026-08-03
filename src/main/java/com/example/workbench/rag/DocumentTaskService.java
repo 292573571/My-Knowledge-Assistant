@@ -178,10 +178,13 @@ public class DocumentTaskService {
             log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
         } catch (Exception exception) {
             task = repository.findById(taskId).orElseThrow();
+            String failedStage = task.getStage();
             task.fail(publicErrorMessage(exception), isRetryable(exception));
             repository.saveAndFlush(task);
-            log.warn("Document task failed taskId={} status={} attempt={} errorType={}", taskId,
-                    task.getStatus(), task.getAttemptCount(), exception.getClass().getSimpleName());
+            // 后台线程没有 HTTP 异常处理器兜底，必须保留完整异常链才能区分 OCR、Embedding 和 Chroma 故障。
+            log.warn("Document task failed taskId={} type={} fileName={} failedStage={} status={} attempt={}",
+                    taskId, task.getType(), task.getFileName(), failedStage, task.getStatus(),
+                    task.getAttemptCount(), exception);
         }
     }
 

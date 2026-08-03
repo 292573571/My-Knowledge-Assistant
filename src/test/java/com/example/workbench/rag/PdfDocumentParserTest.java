@@ -53,6 +53,17 @@ class PdfDocumentParserTest {
     }
 
     @Test
+    void usesOcrWhenPdfTextLayerIsFragmented() throws Exception {
+        org.mockito.Mockito.when(ocrEngine.recognize(org.mockito.Mockito.any()))
+                .thenReturn("ZOOM65 VIA 使用教程 正常识别内容");
+
+        ParsedDocument document = parser.parse(PdfTestDocuments.fragmentedTextPdf());
+
+        assertThat(document.content()).isEqualTo("ZOOM65 VIA 使用教程 正常识别内容");
+        org.mockito.Mockito.verify(ocrEngine).recognize(org.mockito.Mockito.any());
+    }
+
+    @Test
     void removesRepeatedShortWatermarkLinesAcrossPages() throws Exception {
         ParsedDocument document = parser.parse(PdfTestDocuments.repeatedLinePdf(
                 "CONFIDENTIAL COPY", "First page knowledge", "Second page knowledge", "Third page knowledge"

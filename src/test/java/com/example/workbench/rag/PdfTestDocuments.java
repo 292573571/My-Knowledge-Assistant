@@ -94,6 +94,11 @@ final class PdfTestDocuments {
         }
     }
 
+    static byte[] fragmentedTextPdf() throws IOException {
+        return textPdf("Broken text layer",
+                "X\n3 > 3 > JSON\nG TE JSON p\nWPS i\nEee\n2023 3 28 1\nSH Fs\n3 Ps\nAR Ps\n0ar Ps\nQa Ps\nJSON BGS\nOIA\neA ao x\neA ox");
+    }
+
     private static byte[] save(PDDocument document) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         document.save(output);

@@ -5,6 +5,7 @@ public record DocumentContentResponse(
         String fileName,
         String path,
         String category,
-        String content
+        String content,
+        boolean sourceAvailable
 ) {
 }

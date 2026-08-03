@@ -3,6 +3,9 @@ package com.example.workbench.rag;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.springframework.ai.chroma.vectorstore.ChromaApi;
+import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaVectorStoreProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -10,6 +13,7 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -20,15 +24,29 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     private static final Logger log = LoggerFactory.getLogger(ChromaVectorStoreAdapter.class);
 
     private final ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider;
+    private final ObjectProvider<ChromaApi> chromaApiProvider;
+    private final ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider;
     private final InMemoryVectorStore fallbackVectorStore;
     private List<String> currentDocumentIds = List.of();
 
     public ChromaVectorStoreAdapter(
             ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider,
-            InMemoryVectorStore fallbackVectorStore
+            InMemoryVectorStore fallbackVectorStore,
+            ObjectProvider<ChromaApi> chromaApiProvider,
+            ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider
     ) {
         this.chromaVectorStoreProvider = chromaVectorStoreProvider;
         this.fallbackVectorStore = fallbackVectorStore;
+        this.chromaApiProvider = chromaApiProvider;
+        this.chromaPropertiesProvider = chromaPropertiesProvider;
+    }
+
+    ChromaVectorStoreAdapter(
+            ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider,
+            InMemoryVectorStore fallbackVectorStore
+    ) {
+        this(chromaVectorStoreProvider, fallbackVectorStore, emptyProvider(ChromaApi.class),
+                emptyProvider(ChromaVectorStoreProperties.class));
     }
 
     public boolean isChromaConfigured() {
@@ -99,6 +117,41 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     public void replaceAll(List<SourceDocument> documents) {
         clear();
         addAll(documents);
+    }
+
+    /**
+     * 按精确 chunk ID 从 Chroma 恢复已经持久化的正文，不触发新的向量计算。
+     *
+     * @param ids chunk ID 列表
+     * @return Chroma 中仍存在的文档片段
+     */
+    public List<SourceDocument> documentsByIds(List<String> ids) {
+        ChromaApi api = chromaApiProvider.getIfAvailable();
+        ChromaVectorStoreProperties properties = chromaPropertiesProvider.getIfAvailable();
+        if (api == null || properties == null || ids.isEmpty()) {
+            return List.of();
+        }
+        try {
+            ChromaApi.Collection collection = api.getCollection(
+                    properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName());
+            ChromaApi.GetEmbeddingResponse response = api.getEmbeddings(
+                    properties.getTenantName(), properties.getDatabaseName(), collection.id(),
+                    new ChromaApi.GetEmbeddingsRequest(ids, null, ids.size(), 0,
+                            List.of(ChromaApi.QueryRequest.Include.DOCUMENTS,
+                                    ChromaApi.QueryRequest.Include.METADATAS)));
+            List<String> responseIds = Optional.ofNullable(response.ids()).orElse(List.of());
+            List<String> contents = Optional.ofNullable(response.documents()).orElse(List.of());
+            List<Map<String, String>> metadata = Optional.ofNullable(response.metadata()).orElse(List.of());
+            List<SourceDocument> recovered = new java.util.ArrayList<>();
+            for (int index = 0; index < responseIds.size() && index < contents.size(); index++) {
+                recovered.add(toSourceDocument(responseIds.get(index), contents.get(index),
+                        index < metadata.size() ? metadata.get(index) : Map.of()));
+            }
+            return recovered;
+        } catch (RuntimeException exception) {
+            log.warn("Failed to read documents from Chroma by ids count={}", ids.size(), exception);
+            return List.of();
+        }
     }
 
     @Override
@@ -222,6 +275,16 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                 metadataVisibility(metadata),
                 metadataInt(metadata, "pageNumber", 0)
         );
+    }
+
+    private SourceDocument toSourceDocument(String id, String content, Map<String, String> metadata) {
+        Map<String, Object> values = new HashMap<>(metadata);
+        values.putIfAbsent("id", id);
+        return toSourceDocument(new Document(id, content == null ? "" : content, values));
+    }
+
+    private static <T> ObjectProvider<T> emptyProvider(Class<T> type) {
+        return new StaticListableBeanFactory().getBeanProvider(type);
     }
 
     private com.example.workbench.workspace.DocumentVisibility metadataVisibility(Map<String, Object> metadata) {

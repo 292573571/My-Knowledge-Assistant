@@ -382,15 +382,42 @@ public class DocumentIngestionService {
             return new DocumentContentResponse(
                     entry.documentId(),
                     entry.fileName(),
-                    entry.path(),
-                    entry.category(),
-                    documentParserRouter.parse(entry.fileName(), Files.readAllBytes(realDocumentPath)).content()
+                     entry.path(),
+                     entry.category(),
+                     documentParserRouter.parse(entry.fileName(), Files.readAllBytes(realDocumentPath)).content(),
+                     true
             );
         } catch (java.nio.file.NoSuchFileException exception) {
-            throw new IllegalArgumentException("Document source file is not available: " + documentId);
+            return recoveredDocumentContent(entry);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to read document source: " + documentId, exception);
         }
+    }
+
+    private DocumentContentResponse recoveredDocumentContent(DocumentIndexEntry entry) {
+        if (!(vectorStore instanceof ChromaVectorStoreAdapter chromaVectorStore)) {
+            throw new IllegalArgumentException("文档源文件和索引正文均不可用，请重新上传：" + entry.fileName());
+        }
+        List<SourceDocument> chunks = chromaVectorStore.documentsByIds(chunkIds(entry)).stream()
+                .filter(chunk -> entry.documentId().equals(chunk.documentId()))
+                .sorted(java.util.Comparator.comparingInt(SourceDocument::chunkIndex))
+                .toList();
+        if (chunks.isEmpty()) {
+            throw new IllegalArgumentException("文档源文件和索引正文均不可用，请重新上传：" + entry.fileName());
+        }
+        StringBuilder content = new StringBuilder();
+        int previousEndOffset = 0;
+        for (SourceDocument chunk : chunks) {
+            int overlap = Math.max(0, previousEndOffset - chunk.startOffset());
+            int overlapInContent = Math.min(overlap, chunk.content().length());
+            if (!content.isEmpty() && overlapInContent == 0) {
+                content.append("\n\n");
+            }
+            content.append(chunk.content().substring(overlapInContent));
+            previousEndOffset = Math.max(previousEndOffset, chunk.endOffset());
+        }
+        return new DocumentContentResponse(entry.documentId(), entry.fileName(), entry.path(), entry.category(),
+                content.toString(), false);
     }
 
     public DocumentContentResponse documentContent(String documentId, WorkspaceAccessContext access) {

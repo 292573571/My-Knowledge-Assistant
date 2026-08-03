@@ -130,6 +130,41 @@ class DocumentIngestionServiceSyncTest {
 
         assertThat(response.fileName()).isEqualTo("readable.md");
         assertThat(response.content()).contains("complete source content");
+        assertThat(response.sourceAvailable()).isTrue();
+    }
+
+    @Test
+    void recoversPreviewFromChromaWhenSourceFileIsMissing() throws Exception {
+        Path document = docsDirectory.resolve("recoverable.md");
+        Files.writeString(document, "# Recoverable\n\nIndexed content survives source loss.");
+        service.syncDocsDirectory();
+        DocumentIndexEntry entry = indexStore.list().get(0);
+        Files.delete(document);
+
+        ChromaVectorStoreAdapter chroma = Mockito.mock(ChromaVectorStoreAdapter.class);
+        Mockito.when(chroma.documentsByIds(Mockito.anyList())).thenReturn(List.of(
+                recoveredChunk(entry, 0, "First indexed section ABC", 0, 25),
+                recoveredChunk(entry, 1, "ABC second indexed section", 22, 48)
+        ));
+        DocumentIngestionService recoveredService = new DocumentIngestionService(
+                chroma, indexStore, parserRouter(), new DocumentChunkerRouter(List.of(
+                new MarkdownSmartChunker(), new TextParagraphChunker(), new PdfPageChunker(),
+                new DocxBlockChunker(), new HtmlBlockChunker(), new ImageOcrChunker())), docsDirectory);
+
+        DocumentContentResponse response = recoveredService.documentContent(entry.documentId(), "");
+
+        assertThat(response.content()).isEqualTo("First indexed section ABC second indexed section");
+        assertThat(response.sourceAvailable()).isFalse();
+        verify(chroma).documentsByIds(java.util.stream.IntStream.range(0, entry.chunkCount())
+                .mapToObj(index -> entry.documentId() + "#chunk-" + index).toList());
+    }
+
+    private SourceDocument recoveredChunk(DocumentIndexEntry entry, int chunkIndex, String content,
+                                            int startOffset, int endOffset) {
+        return new SourceDocument(entry.documentId() + "#chunk-" + chunkIndex, content, null,
+                entry.fileName(), entry.path(), chunkIndex, entry.documentId(), entry.fileName(), entry.contentHash(),
+                0, "", 0, startOffset, endOffset, "text-paragraph", entry.category(), entry.ownerUserId(),
+                entry.workspaceId(), entry.visibility());
     }
 
     @Test

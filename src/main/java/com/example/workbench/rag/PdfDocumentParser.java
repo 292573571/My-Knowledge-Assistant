@@ -99,7 +99,8 @@ public class PdfDocumentParser implements DocumentParser {
             stripper.setEndPage(pageNumber);
             String text = stripper.getText(pdf).strip();
             boolean hasImage = containsImage(pdf.getPage(pageNumber - 1).getResources());
-            if (hasImage && meaningfulCharacters(text) < MIN_MEANINGFUL_PAGE_CHARACTERS) {
+            if ((hasImage && meaningfulCharacters(text) < MIN_MEANINGFUL_PAGE_CHARACTERS)
+                    || hasUnusableTextLayer(text)) {
                 text = ocrEngine.recognize(renderer.renderImageWithDPI(pageNumber - 1, OCR_RENDER_DPI, ImageType.RGB)).strip();
                 if (text.isBlank()) {
                     throw new IllegalArgumentException("PDF 第 " + pageNumber + " 页 OCR 未识别到文字");
@@ -131,6 +132,38 @@ public class PdfDocumentParser implements DocumentParser {
 
     private long meaningfulCharacters(String text) {
         return text.codePoints().filter(Character::isLetterOrDigit).count();
+    }
+
+    private boolean hasUnusableTextLayer(String text) {
+        if (meaningfulCharacters(text) < MIN_MEANINGFUL_PAGE_CHARACTERS) {
+            return false;
+        }
+        long invalidCharacters = text.codePoints()
+                .filter(codePoint -> codePoint == 0xFFFD || Character.isISOControl(codePoint)
+                        && codePoint != '\n' && codePoint != '\r' && codePoint != '\t'
+                        || Character.getType(codePoint) == Character.PRIVATE_USE)
+                .count();
+        if (invalidCharacters > 0) {
+            return true;
+        }
+
+        List<String> lines = text.lines().map(String::strip).filter(line -> !line.isBlank()).toList();
+        if (lines.size() >= 8) {
+            long sparseLines = lines.stream().filter(line -> meaningfulCharacters(line) <= 4).count();
+            double averageMeaningfulCharacters = meaningfulCharacters(text) / (double) lines.size();
+            if (sparseLines >= Math.ceil(lines.size() * 0.6) && averageMeaningfulCharacters < 8) {
+                return true;
+            }
+        }
+
+        List<String> tokens = List.of(text.split("\\s+")).stream().filter(token -> !token.isBlank()).toList();
+        if (tokens.size() < 16) {
+            return false;
+        }
+        long fragmentedTokens = tokens.stream()
+                .filter(token -> token.codePoints().filter(Character::isLetterOrDigit).count() <= 2)
+                .count();
+        return fragmentedTokens >= Math.ceil(tokens.size() * 0.7);
     }
 
     private List<PageText> filterRepeatedPageLines(List<PageText> pages) {
