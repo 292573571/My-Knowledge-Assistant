@@ -8,9 +8,11 @@ import org.junit.jupiter.api.Test;
 
 class DocumentParserRouterTest {
 
+    private static final OcrEngine OCR = image -> "图片中的知识";
+
     private final DocumentParserRouter router = new DocumentParserRouter(List.of(
-            new MarkdownDocumentParser(), new TextDocumentParser(), new PdfDocumentParser(),
-            new DocxDocumentParser(), new HtmlDocumentParser()
+            new MarkdownDocumentParser(), new TextDocumentParser(), new PdfDocumentParser(OCR),
+            new DocxDocumentParser(), new HtmlDocumentParser(), new ImageDocumentParser(OCR)
     ));
 
     @Test
@@ -23,6 +25,7 @@ class DocumentParserRouterTest {
                 .isEqualTo("docx");
         assertThat(router.parse("guide.html", "<h1>HTML content</h1>").documentType()).isEqualTo("html");
         assertThat(router.parse("guide.htm", "<p>HTML content</p>").documentType()).isEqualTo("html");
+        assertThat(router.parse("guide.png", ImageTestDocuments.png()).documentType()).isEqualTo("image");
     }
 
     @Test

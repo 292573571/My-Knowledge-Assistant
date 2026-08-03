@@ -14,12 +14,14 @@ class DocumentChunkerRouterTest {
         TextParagraphChunker text = new TextParagraphChunker();
         DocxBlockChunker docx = new DocxBlockChunker();
         HtmlBlockChunker html = new HtmlBlockChunker();
-        DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(markdown, text, docx, html));
+        ImageOcrChunker image = new ImageOcrChunker();
+        DocumentChunkerRouter router = new DocumentChunkerRouter(List.of(markdown, text, docx, html, image));
 
         assertThat(router.select(new MarkdownDocumentParser().parse("# Guide"))).isSameAs(markdown);
         assertThat(router.select(new TextDocumentParser().parse("Guide"))).isSameAs(text);
         assertThat(router.select(new ParsedDocument("docx", "Guide", null, List.of()))).isSameAs(docx);
         assertThat(router.select(new ParsedDocument("html", "Guide", null, List.of()))).isSameAs(html);
+        assertThat(router.select(new ParsedDocument("image", "Guide", null, List.of()))).isSameAs(image);
     }
 
     @Test

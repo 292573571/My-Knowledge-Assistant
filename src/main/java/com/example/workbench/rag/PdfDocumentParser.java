@@ -2,8 +2,12 @@ package com.example.workbench.rag;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -13,15 +17,30 @@ import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.rendering.ImageType;
 import org.springframework.stereotype.Component;
 
 /**
- * 提取文本型 PDF 的逐页文本。检测到扫描页时拒绝整份文档，避免建立不完整索引。
+ * 提取 PDF 的逐页文本，并对疑似扫描页执行 OCR。
  */
 @Component
 public class PdfDocumentParser implements DocumentParser {
 
     private static final int MIN_MEANINGFUL_PAGE_CHARACTERS = 10;
+    private static final float OCR_RENDER_DPI = 300;
+    private static final int MIN_PAGES_FOR_REPEATED_LINE_FILTER = 3;
+    private static final int MAX_REPEATED_LINE_CHARACTERS = 80;
+    private final OcrEngine ocrEngine;
+
+    /**
+     * 创建支持扫描页识别的 PDF 解析器。
+     *
+     * @param ocrEngine 扫描页 OCR 引擎
+     */
+    public PdfDocumentParser(OcrEngine ocrEngine) {
+        this.ocrEngine = ocrEngine;
+    }
 
     @Override
     public boolean supports(String fileName) {
@@ -40,16 +59,7 @@ public class PdfDocumentParser implements DocumentParser {
                 throw new IllegalArgumentException("暂不支持加密 PDF");
             }
 
-            List<PageText> pages = extractPages(pdf);
-            List<Integer> scannedPages = pages.stream()
-                    .filter(page -> page.hasImage() && meaningfulCharacters(page.text()) < MIN_MEANINGFUL_PAGE_CHARACTERS)
-                    .map(PageText::pageNumber)
-                    .toList();
-            if (!scannedPages.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "PDF 第 " + scannedPages.get(0) + " 页疑似扫描页，当前版本不支持 OCR"
-                );
-            }
+            List<PageText> pages = filterRepeatedPageLines(extractPages(pdf));
 
             StringBuilder fullText = new StringBuilder();
             List<DocumentBlock> blocks = new ArrayList<>();
@@ -82,12 +92,20 @@ public class PdfDocumentParser implements DocumentParser {
     private List<PageText> extractPages(PDDocument pdf) throws IOException {
         PDFTextStripper stripper = new PDFTextStripper();
         stripper.setSortByPosition(true);
+        PDFRenderer renderer = new PDFRenderer(pdf);
         List<PageText> pages = new ArrayList<>();
         for (int pageNumber = 1; pageNumber <= pdf.getNumberOfPages(); pageNumber++) {
             stripper.setStartPage(pageNumber);
             stripper.setEndPage(pageNumber);
             String text = stripper.getText(pdf).strip();
-            pages.add(new PageText(pageNumber, text, containsImage(pdf.getPage(pageNumber - 1).getResources())));
+            boolean hasImage = containsImage(pdf.getPage(pageNumber - 1).getResources());
+            if (hasImage && meaningfulCharacters(text) < MIN_MEANINGFUL_PAGE_CHARACTERS) {
+                text = ocrEngine.recognize(renderer.renderImageWithDPI(pageNumber - 1, OCR_RENDER_DPI, ImageType.RGB)).strip();
+                if (text.isBlank()) {
+                    throw new IllegalArgumentException("PDF 第 " + pageNumber + " 页 OCR 未识别到文字");
+                }
+            }
+            pages.add(new PageText(pageNumber, text));
         }
         return pages;
     }
@@ -115,6 +133,57 @@ public class PdfDocumentParser implements DocumentParser {
         return text.codePoints().filter(Character::isLetterOrDigit).count();
     }
 
-    private record PageText(int pageNumber, String text, boolean hasImage) {
+    private List<PageText> filterRepeatedPageLines(List<PageText> pages) {
+        if (pages.size() < MIN_PAGES_FOR_REPEATED_LINE_FILTER) {
+            return pages;
+        }
+        Map<String, Integer> pageOccurrences = new HashMap<>();
+        Map<Integer, Set<String>> pageLines = new HashMap<>();
+        for (PageText page : pages) {
+            Set<String> linesOnPage = new HashSet<>();
+            for (String line : page.text().split("\\R")) {
+                String normalized = normalizedRepeatedLine(line);
+                if (!normalized.isEmpty()) {
+                    linesOnPage.add(normalized);
+                }
+            }
+            pageLines.put(page.pageNumber(), linesOnPage);
+            linesOnPage.forEach(line -> pageOccurrences.merge(line, 1, Integer::sum));
+        }
+
+        int minimumOccurrences = Math.max(3, (int) Math.ceil(pages.size() * 0.6));
+        Set<String> repeatedLines = new HashSet<>();
+        pageOccurrences.forEach((line, count) -> {
+            boolean appearsOnlyAlongsideOtherText = pages.stream()
+                    .filter(page -> pageLines.get(page.pageNumber()).contains(line))
+                    .allMatch(page -> pageLines.get(page.pageNumber()).size() > 1);
+            if (count >= minimumOccurrences && appearsOnlyAlongsideOtherText) {
+                repeatedLines.add(line);
+            }
+        });
+        if (repeatedLines.isEmpty()) {
+            return pages;
+        }
+
+        return pages.stream()
+                .map(page -> new PageText(page.pageNumber(), page.text().lines()
+                        .filter(line -> !repeatedLines.contains(normalizedRepeatedLine(line)))
+                        .reduce((left, right) -> left + "\n" + right)
+                        .orElse("")
+                        .strip()))
+                .toList();
+    }
+
+    private String normalizedRepeatedLine(String line) {
+        String normalized = line.codePoints()
+                .filter(Character::isLetterOrDigit)
+                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+                .toString()
+                .toLowerCase(Locale.ROOT);
+        int characters = normalized.codePointCount(0, normalized.length());
+        return characters >= 2 && characters <= MAX_REPEATED_LINE_CHARACTERS ? normalized : "";
+    }
+
+    private record PageText(int pageNumber, String text) {
     }
 }

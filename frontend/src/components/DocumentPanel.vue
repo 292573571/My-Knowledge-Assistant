@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
-import { deleteDocument, fetchDocumentContent, fetchDocuments, uploadWorkspaceDocument } from '../api/documentApi'
+import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTasks, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
+import { createUuid } from '../utils/uuid'
 
 const props = defineProps({
   workspace: { type: Object, default: null }
@@ -27,8 +28,12 @@ const uploadInput = ref(null)
 const uploadDialogOpen = ref(false)
 const uploadDragActive = ref(false)
 const selectedUploadFiles = ref([])
+const documentTasks = ref([])
+const retryingTaskId = ref('')
 let noticeTimer = null
 let errorTimer = null
+let taskPollTimer = null
+let disposed = false
 
 const categoryLabels = {
   SOURCE: '原始资料',
@@ -51,6 +56,38 @@ const filteredDocuments = computed(() => {
     return matchesType && matchesCategory && (!query || text.includes(query))
   })
 })
+
+const visibleTasks = computed(() => documentTasks.value.slice(0, 10))
+const hasPendingTasks = computed(() => documentTasks.value.some((task) => ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(task.status)))
+
+const taskStatusLabels = {
+  QUEUED: '等待处理',
+  RUNNING: '处理中',
+  RETRY_WAIT: '等待重试',
+  SUCCEEDED: '处理完成',
+  FAILED: '处理失败'
+}
+
+const taskTypeLabels = {
+  UPLOAD: '上传',
+  INGEST_FILE: '文件导入',
+  INGEST_DIRECTORY: '目录导入',
+  SYNC: '空间同步',
+  REBUILD: '索引重建'
+}
+
+const taskStageLabels = {
+  QUEUED: '任务已进入队列',
+  PARSING: '正在解析文档',
+  OCR: '正在识别扫描文字',
+  SCANNING: '正在扫描文件',
+  CHUNKING: '正在切分内容',
+  VECTORIZING: '正在生成向量',
+  PERSISTING_INDEX: '正在保存索引',
+  RETRY_WAIT: '稍后自动重试',
+  DONE: '文档可以参与检索',
+  FAILED: '请查看失败原因'
+}
 
 function fileExtension(fileName = '') {
   const index = fileName.lastIndexOf('.')
@@ -79,6 +116,25 @@ async function loadDocuments() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadDocumentTasks() {
+  try {
+    const previous = new Map(documentTasks.value.map((task) => [task.taskId, task.status]))
+    documentTasks.value = await fetchDocumentTasks(props.workspace?.id)
+    if (documentTasks.value.some((task) => task.status === 'SUCCEEDED' && previous.get(task.taskId) !== 'SUCCEEDED')) {
+      await loadDocuments()
+    }
+  } catch (exception) {
+    if (!documentTasks.value.length) showError(`任务状态加载失败：${formatApiError(exception)}`)
+  } finally {
+    if (!disposed) scheduleTaskPoll()
+  }
+}
+
+function scheduleTaskPoll() {
+  if (taskPollTimer) window.clearTimeout(taskPollTimer)
+  taskPollTimer = window.setTimeout(loadDocumentTasks, hasPendingTasks.value ? 2000 : 5000)
 }
 
 function showNotice(message) {
@@ -160,20 +216,35 @@ async function uploadSelectedFiles() {
   if (!files.length) return
   const targetWorkspaceId = props.workspace?.id
   const targetWorkspaceName = props.workspace?.name || '当前空间'
+  const pendingFiles = files.map((file) => ({ file, clientRequestId: createUuid() }))
   await runIngest(async () => {
-    for (const file of files) {
-      const result = await uploadWorkspaceDocument(file, targetWorkspaceId)
-      if (result.workspaceId !== targetWorkspaceId
-          || (props.workspace?.type === 'PUBLIC' && result.visibility !== 'PUBLIC')) {
-        throw new Error('服务端返回的文档归属与当前空间不一致')
-      }
+    while (pendingFiles.length) {
+      const pending = pendingFiles[0]
+      const result = await uploadWorkspaceDocument(pending.file, targetWorkspaceId, pending.clientRequestId)
+      if (result.workspaceId !== targetWorkspaceId) throw new Error('服务端返回的任务归属与当前空间不一致')
+      pendingFiles.shift()
     }
+    await loadDocumentTasks()
   }, files.length === 1
-    ? `文档已上传到“${targetWorkspaceName}”并完成索引`
-    : `${files.length} 个文档已上传到“${targetWorkspaceName}”并完成索引`)
+    ? `文档已上传到“${targetWorkspaceName}”，正在后台建立索引`
+    : `${files.length} 个文档已上传到“${targetWorkspaceName}”，正在后台建立索引`)
   if (!error.value) {
     selectedUploadFiles.value = []
     uploadDialogOpen.value = false
+  }
+}
+
+async function retryTask(task) {
+  retryingTaskId.value = task.taskId
+  clearError()
+  try {
+    await retryDocumentTask(task.taskId, props.workspace?.id)
+    await loadDocumentTasks()
+    showNotice(`“${task.fileName}”已重新进入处理队列`)
+  } catch (exception) {
+    showError(`任务重试失败：${formatApiError(exception)}`)
+  } finally {
+    retryingTaskId.value = ''
   }
 }
 
@@ -217,10 +288,15 @@ async function confirmDelete() {
   }
 }
 
-onMounted(loadDocuments)
+onMounted(() => {
+  loadDocuments()
+  loadDocumentTasks()
+})
 onBeforeUnmount(() => {
+  disposed = true
   if (noticeTimer) window.clearTimeout(noticeTimer)
   if (errorTimer) window.clearTimeout(errorTimer)
+  if (taskPollTimer) window.clearTimeout(taskPollTimer)
 })
 </script>
 
@@ -241,6 +317,22 @@ onBeforeUnmount(() => {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg>
       <span><strong>全局可见</strong>上传到“{{ workspace.name }}”的文档会成为平台公共知识，可被所有用户在个人或团队空间提问时检索。</span>
     </div>
+
+    <section v-if="visibleTasks.length" class="document-task-list" aria-label="文档处理任务">
+      <header><div><h3>处理任务</h3><span>解析和索引在后台执行</span></div><span v-if="hasPendingTasks" class="document-task-live">自动更新</span></header>
+      <article v-for="task in visibleTasks" :key="task.taskId" class="document-task-item" :class="task.status.toLowerCase()">
+        <div class="document-task-main">
+          <div><strong>{{ task.fileName }}</strong><span>{{ taskTypeLabels[task.type] || task.type }} · {{ taskStatusLabels[task.status] || task.status }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
+          <b>{{ task.progress }}%</b>
+        </div>
+        <div class="document-task-progress" :aria-label="`处理进度 ${task.progress}%`"><span :style="{ width: `${task.progress}%` }"></span></div>
+        <div class="document-task-meta">
+          <small v-if="task.errorMessage">{{ task.errorMessage }}</small>
+          <small v-else>尝试 {{ task.attemptCount }}/{{ task.maxAttempts }} · {{ formatTime(task.createdAt) }}</small>
+          <button v-if="task.status === 'FAILED'" type="button" :disabled="retryingTaskId === task.taskId" @click="retryTask(task)">{{ retryingTaskId === task.taskId ? '重试中...' : '重试' }}</button>
+        </div>
+      </article>
+    </section>
 
     <div v-if="documents.length" class="document-filters">
       <input v-model="searchQuery" type="search" placeholder="搜索文件名或路径">
@@ -270,7 +362,7 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
 
-    <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown、TXT、HTML、DOCX 或文本型 PDF 开始构建知识库</div>
+    <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 开始构建知识库</div>
     <div v-else-if="!filteredDocuments.length && !loading" class="muted-card">没有匹配的文档</div>
     <article
       v-for="document in filteredDocuments"
@@ -299,7 +391,7 @@ onBeforeUnmount(() => {
             <div>
               <p class="eyebrow">知识库文档</p>
               <h2 id="document-upload-title">上传文档</h2>
-              <span>添加到“{{ workspace?.name || '当前空间' }}”，上传后会自动完成索引。</span>
+              <span>添加到“{{ workspace?.name || '当前空间' }}”，文件保存后将在后台自动解析和索引。</span>
             </div>
             <button type="button" class="document-upload-close" :disabled="loading" aria-label="关闭上传窗口" @click="closeUploadDialog">×</button>
           </header>
@@ -317,11 +409,11 @@ onBeforeUnmount(() => {
             @dragleave.prevent="uploadDragActive = false"
             @drop.prevent="handleUploadDrop"
           >
-            <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="handleUploadInput">
+            <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,.png,.jpg,.jpeg,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg" @change="handleUploadInput">
             <span class="document-dropzone-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
             <strong>{{ selectedUploadFiles.length ? `${selectedUploadFiles.length} 个文件已准备好` : '拖拽文件到这里' }}</strong>
             <span>{{ selectedUploadFiles.length ? '可以继续选择以替换文件' : '或点击选择文件' }}</span>
-            <small>支持 Markdown、TXT、HTML、DOCX 和文本型 PDF；单个文件最大 50 MB</small>
+            <small>支持 Markdown、TXT、HTML、DOCX、PDF、PNG 和 JPEG；扫描内容会自动 OCR，单个文件最大 50 MB</small>
           </div>
 
           <ul v-if="selectedUploadFiles.length" class="document-upload-file-list">
@@ -333,7 +425,7 @@ onBeforeUnmount(() => {
 
           <div v-if="loading" class="document-upload-progress" role="status" aria-live="polite">
             <span class="document-upload-spinner" aria-hidden="true"></span>
-            <div><strong>正在处理文档</strong><span>文件上传完成后，系统正在解析并建立知识索引，请稍候。</span></div>
+            <div><strong>正在保存文档</strong><span>保存完成后即可关闭窗口，解析和索引会在后台继续。</span></div>
           </div>
 
           <footer class="document-upload-dialog-actions">

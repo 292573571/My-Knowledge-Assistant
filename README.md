@@ -105,6 +105,21 @@ ORDER BY a.attnum;
 - Maven 3.9+
 - Node.js 20+
 - Docker
+- Tesseract OCR 及简体中文、英文语言包
+
+macOS 可以安装：
+
+```bash
+brew install tesseract tesseract-lang
+```
+
+Debian/Ubuntu 可以安装：
+
+```bash
+sudo apt-get install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
+```
+
+OCR 默认使用 `tesseract` 命令和 `chi_sim+eng` 语言组合。可通过 `OCR_COMMAND`、`OCR_LANGUAGES` 和 `OCR_TIMEOUT_SECONDS` 分别覆盖命令路径、语言与单次识别超时秒数。OCR 前会压白浅色、半透明背景水印，亮度阈值可通过 `OCR_WATERMARK_LIGHTNESS_THRESHOLD` 调整，默认值为 `215`；值越低，水印抑制越强，但过低可能同时削弱浅灰正文。
 
 启动 Chroma：
 
@@ -281,7 +296,7 @@ curl http://localhost:8080
 
 ## 如何导入文档
 
-把 Markdown、UTF-8 文本、HTML、DOCX 或文本型 PDF 文件放到 `docs` 目录：
+把 Markdown、UTF-8 文本、HTML、DOCX、PDF、PNG 或 JPEG 文件放到 `docs` 目录：
 
 ```text
 docs/
@@ -455,14 +470,16 @@ DELETE /api/documents/{id}               Query workspaceId
 ```text
 POST /api/documents/upload?workspaceId=<workspaceId>
 Content-Type: multipart/form-data
-file=<Markdown、TXT、HTML、DOCX 或 PDF 文件>
+file=<Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 文件>
 ```
 
 上传限制与归属规则：
 
-- `.md`、`.txt`、`.html` 和 `.htm` 必须使用 UTF-8 编码；`.pdf` 必须包含可提取的文本层。
+- `.md`、`.txt`、`.html` 和 `.htm` 必须使用 UTF-8 编码；`.pdf` 支持文本层和扫描页；图片支持 `.png`、`.jpg` 和 `.jpeg`。
 - HTML 仅支持上传文件，不抓取网页 URL；解析时删除脚本、样式及嵌入资源，不执行脚本或加载远程资源，并按标题、正文、列表、代码块和表格的 DOM 顺序建立索引。HTML 预览始终显示清洗后的纯文本，不直接渲染上传内容。
-- PDF 按原始页码解析和引用；检测到扫描页时拒绝整份导入，当前版本不执行 OCR。
+- PDF 按原始页码解析和引用；文本页使用原生文本层，扫描页以 300 DPI 渲染后执行 OCR，混合 PDF 会逐页选择解析方式。
+- 至少三页的 PDF 会过滤出现在 60% 以上页面中的重复短行，减少文字水印、重复页眉和页脚进入索引；单行页面和短 PDF 会保守保留，避免把缺少证据的正文当作水印删除。
+- PNG 和 JPEG 图片通过 OCR 提取文字，单张图片不能超过 4000 万像素。
 - DOCX 按主文档中的标题、正文、列表和表格顺序解析；不支持旧 `.doc`，也不提取图片文字。
 - 单个知识库文档最大 50 MB。
 - `VIEWER` 不能上传，`EDITOR` 和 `OWNER` 可以上传。

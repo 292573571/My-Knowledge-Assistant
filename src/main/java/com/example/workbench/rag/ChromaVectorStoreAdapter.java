@@ -90,7 +90,8 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                     .map(this::toSpringAiDocument)
                     .toList());
         } catch (RuntimeException exception) {
-            log.warn("Failed to write documents to Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
+            // 配置了持久向量库时不能把仅内存写入视为成功，否则重启后任务显示成功但文档无法检索。
+            throw new IllegalStateException("Failed to write documents to Chroma", exception);
         }
     }
 

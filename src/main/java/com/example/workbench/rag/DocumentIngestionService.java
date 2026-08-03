@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -243,6 +244,80 @@ public class DocumentIngestionService {
             }
             throw exception;
         }
+    }
+
+    /**
+     * 将上传文件持久化到知识空间目录，解析和索引由异步任务继续执行。
+     *
+     * @param access 空间访问上下文
+     * @param file 上传文件
+     * @return 已持久化的上传文件信息
+     */
+    public PendingWorkspaceUpload saveWorkspaceUpload(WorkspaceAccessContext access, MultipartFile file) {
+        if (!access.canWrite()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色不能上传空间文档");
+        }
+        validateUploadedFile(file);
+        String originalFileName = safeOriginalFileName(file.getOriginalFilename());
+        String extension = originalFileName.substring(originalFileName.lastIndexOf('.')).toLowerCase();
+        Path workspaceDirectory = docsDirectory.resolve("workspaces").resolve(access.workspaceId()).normalize();
+        Path target = workspaceDirectory.resolve(UUID.randomUUID() + extension).normalize();
+        if (!target.startsWith(workspaceDirectory)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件名无效");
+        }
+
+        try {
+            Files.createDirectories(workspaceDirectory);
+            file.transferTo(target);
+            return new PendingWorkspaceUpload(originalFileName, workspaceRelativePath(target).replace('\\', '/'));
+        } catch (IOException exception) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException ignored) {
+                // Preserve the original upload failure.
+            }
+            throw new IllegalStateException("Failed to save workspace document", exception);
+        }
+    }
+
+    /**
+     * 解析并索引已经持久化的空间文档。
+     *
+     * @param access 空间访问上下文
+     * @param sourcePath 源文件相对路径
+     * @param originalFileName 原始文件名
+     * @param progress 任务阶段和进度回调
+     * @return 完成索引后的文档信息
+     */
+    public synchronized WorkspaceDocumentUploadResponse indexWorkspaceUpload(
+            WorkspaceAccessContext access,
+            String sourcePath,
+            String originalFileName,
+            BiConsumer<String, Integer> progress
+    ) {
+        requireWorkspaceWrite(access);
+        Path source = resolveIndexedPath(sourcePath);
+        IngestedFile ingested = ingestWorkspaceFile(source, originalFileName, access, progress);
+        if (ingested.indexEntry() == null || ingested.chunkCount() == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档内容不能为空");
+        }
+        DocumentIndexEntry previousEntry = documentIndexStore.list().stream()
+                .filter(entry -> entry.documentId().equals(ingested.indexEntry().documentId()))
+                .findFirst()
+                .orElse(null);
+        documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
+        documents.addAll(ingested.documents());
+        progress.accept("VECTORIZING", 70);
+        vectorStore.addAll(ingested.documents());
+        progress.accept("PERSISTING_INDEX", 90);
+        documentIndexStore.upsertAll(List.of(ingested.indexEntry()));
+        DocumentIndexEntry entry = ingested.indexEntry();
+        if (previousEntry != null && !previousEntry.path().equals(entry.path())) {
+            // 相同内容重新上传后仅保留最新受管源文件，避免随机文件名不断产生磁盘孤儿。
+            deleteWorkspaceUploadSource(previousEntry);
+        }
+        return new WorkspaceDocumentUploadResponse(entry.documentId(), entry.fileName(), entry.path(),
+                entry.chunkCount(), entry.workspaceId(), entry.visibility());
     }
 
     public List<DocumentIndexEntry> listIndexedDocuments() {
@@ -694,7 +769,7 @@ public class DocumentIngestionService {
         }
 
         String storedFileName = normalizedPath.substring(workspacePrefix.length());
-        if (!storedFileName.matches("[0-9a-fA-F-]{36}\\.(md|txt|pdf|docx|html|htm)")) {
+        if (!storedFileName.matches("[0-9a-fA-F-]{36}\\.(md|txt|pdf|docx|html|htm|png|jpg|jpeg)")) {
             // 只删除系统上传时生成的随机文件，手工维护或全局导入的源文件仍由管理员管理。
             return;
         }
@@ -978,8 +1053,14 @@ public class DocumentIngestionService {
     }
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access) {
+        return ingestWorkspaceFile(path, originalFileName, access, (stage, progress) -> { });
+    }
+
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
+                                             BiConsumer<String, Integer> progress) {
         try {
             byte[] sourceContent = Files.readAllBytes(path);
+            progress.accept(isImageDocument(originalFileName) ? "OCR" : "PARSING", 25);
             ParsedDocument parsedDocument = documentParserRouter.parse(originalFileName, sourceContent);
             String normalizedContent = parsedDocument.content();
             if (normalizedContent.isEmpty()) {
@@ -995,6 +1076,7 @@ public class DocumentIngestionService {
             String scopedHash = sha256(access.workspaceId() + "\n" + contentHash);
             String documentId = scopedHash.substring(0, 16);
             String relativePath = workspaceRelativePath(path).replace('\\', '/');
+            progress.accept("CHUNKING", 50);
             List<DocumentChunk> chunks = documentChunkerRouter.select(parsedDocument).chunk(parsedDocument);
             List<SourceDocument> sourceDocuments = new ArrayList<>();
 
@@ -1016,12 +1098,7 @@ public class DocumentIngestionService {
     }
 
     private byte[] uploadedContent(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要上传的文档");
-        }
-        if (file.getSize() > MAX_WORKSPACE_DOCUMENT_BYTES) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 50 MB");
-        }
+        validateUploadedFile(file);
         try {
             return file.getBytes();
         } catch (IOException exception) {
@@ -1029,13 +1106,29 @@ public class DocumentIngestionService {
         }
     }
 
+    private void validateUploadedFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要上传的文档");
+        }
+        if (file.getSize() > MAX_WORKSPACE_DOCUMENT_BYTES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 50 MB");
+        }
+    }
+
+    /**
+     * 已持久化、等待异步解析的空间上传文件。
+     */
+    public record PendingWorkspaceUpload(String fileName, String sourcePath) {
+    }
+
     private String safeOriginalFileName(String originalFileName) {
         String fileName = originalFileName == null ? "" : Path.of(originalFileName).getFileName().toString().strip();
         String lower = fileName.toLowerCase();
         if (fileName.isBlank() || (!lower.endsWith(".md") && !lower.endsWith(".txt")
                 && !lower.endsWith(".pdf") && !lower.endsWith(".docx")
-                && !lower.endsWith(".html") && !lower.endsWith(".htm"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown、TXT、HTML、PDF 或 DOCX");
+                && !lower.endsWith(".html") && !lower.endsWith(".htm")
+                && !lower.endsWith(".png") && !lower.endsWith(".jpg") && !lower.endsWith(".jpeg"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown、TXT、HTML、PDF、DOCX、PNG 或 JPEG");
         }
         if (fileName.length() > 180) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档文件名过长");
@@ -1089,12 +1182,19 @@ public class DocumentIngestionService {
         String fileName = path.getFileName().toString().toLowerCase();
         return fileName.endsWith(".md") || fileName.endsWith(".txt")
                 || fileName.endsWith(".pdf") || fileName.endsWith(".docx")
-                || fileName.endsWith(".html") || fileName.endsWith(".htm");
+                || fileName.endsWith(".html") || fileName.endsWith(".htm")
+                || fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg");
     }
 
     private boolean isBinaryDocument(String fileName) {
-        String lower = fileName.toLowerCase();
-        return lower.endsWith(".pdf") || lower.endsWith(".docx");
+        String lower = fileName.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".png")
+                || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+    }
+
+    private boolean isImageDocument(String fileName) {
+        String lower = fileName.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
     }
 
     private boolean isIndexableDocument(Path path) {

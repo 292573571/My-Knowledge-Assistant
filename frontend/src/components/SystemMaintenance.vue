@@ -65,7 +65,7 @@ async function importFile() {
     error.value = '请输入 docs 目录下的文件路径。'
     return
   }
-  await run('import-file', () => ingestDocument(path, false, props.workspace?.id), '文件已导入当前空间')
+  await run('import-file', () => ingestDocument(path, false, props.workspace?.id), '文件导入任务已提交')
 }
 
 async function importDirectory() {
@@ -74,14 +74,14 @@ async function importDirectory() {
     error.value = '请输入 docs 目录下的文件夹路径。'
     return
   }
-  await run('import-directory', () => ingestDocuments(path, false, props.workspace?.id), '目录已导入当前空间')
+  await run('import-directory', () => ingestDocuments(path, false, props.workspace?.id), '目录导入任务已提交')
 }
 
 async function confirmMaintenance() {
   const action = pendingAction.value
   pendingAction.value = ''
-  if (action === 'sync') await run('sync', () => syncDocuments(props.workspace?.id), '当前空间同步完成')
-  if (action === 'rebuild') await run('rebuild', () => rebuildDocuments(props.workspace?.id), '当前空间索引重建完成')
+  if (action === 'sync') await run('sync', () => syncDocuments(props.workspace?.id), '空间同步任务已提交')
+  if (action === 'rebuild') await run('rebuild', () => rebuildDocuments(props.workspace?.id), '索引重建任务已提交')
 }
 </script>
 
@@ -114,6 +114,7 @@ async function confirmMaintenance() {
     <p v-if="activeTool === 'maintenance' && error" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ error }}</p>
     <section v-if="activeTool === 'maintenance' && result" :class="['maintenance-message', { error: result.failed }]" role="status">
       <strong>{{ result.title }}</strong>
+      <span v-if="result.taskId">任务已进入后台队列，可在空间文档页查看状态和进度。</span>
       <span v-if="result.imported !== undefined">导入 {{ result.imported }} · 跳过 {{ result.skipped }} · 失败 {{ result.failed }} · {{ result.chunks }} chunks</span>
       <span v-else-if="result.scannedFiles !== undefined">扫描 {{ result.scannedFiles }} · 新增 {{ result.addedFiles }} · 更新 {{ result.updatedFiles }} · 删除 {{ result.deletedFiles }}</span>
       <span v-else-if="result.clearedDocuments !== undefined">清理 {{ result.clearedDocuments }} 个旧文档 · 重建 {{ result.files }} 个文件 · {{ result.chunks }} chunks</span>

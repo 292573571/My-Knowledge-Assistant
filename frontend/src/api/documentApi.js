@@ -44,12 +44,24 @@ export function fetchDocumentContent(documentId, workspaceId = '') {
   return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery(workspaceId)}`)
 }
 
-export function uploadWorkspaceDocument(file, workspaceId = '') {
+export function uploadWorkspaceDocument(file, workspaceId = '', clientRequestId = '') {
   const form = new FormData()
   form.append('file', file)
-  return request(`/api/documents/upload${workspaceQuery(workspaceId)}`, {
+  const workspace = workspaceQuery(workspaceId)
+  const separator = workspace ? '&' : '?'
+  return request(`/api/documents/upload${workspace}${separator}clientRequestId=${encodeURIComponent(clientRequestId)}`, {
     method: 'POST',
     body: form
+  })
+}
+
+export function fetchDocumentTasks(workspaceId = '') {
+  return request(`/api/document-tasks${workspaceQuery(workspaceId)}`)
+}
+
+export function retryDocumentTask(taskId, workspaceId = '') {
+  return request(`/api/document-tasks/${encodeURIComponent(taskId)}/retry${workspaceQuery(workspaceId)}`, {
+    method: 'POST'
   })
 }
 

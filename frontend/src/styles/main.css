@@ -1263,6 +1263,27 @@ textarea:focus-visible,
 .public-document-warning svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: #c1811d; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .public-document-warning strong { margin-right: 5px; color: #875d0b; }
 
+.document-task-list { display: grid; gap: 8px; margin-bottom: 14px; border: 1px solid #dce3f4; border-radius: 12px; padding: 12px; background: #f8faff; }
+.document-task-list > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.document-task-list > header > div { display: grid; gap: 2px; }
+.document-task-list h3 { margin: 0; color: #253454; font-size: 13px; }
+.document-task-list header span { color: #7b879d; font-size: 11px; }
+.document-task-live { border-radius: 999px; padding: 3px 7px; color: #315fd4 !important; background: #e9efff; font-weight: 650; }
+.document-task-item { display: grid; gap: 7px; border: 1px solid #e1e6f0; border-radius: 10px; padding: 10px; background: #fff; }
+.document-task-item.failed { border-color: #efc9c9; background: #fffafa; }
+.document-task-item.succeeded { border-color: #cce8dc; }
+.document-task-main, .document-task-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.document-task-main > div { min-width: 0; display: grid; gap: 2px; }
+.document-task-main strong { overflow: hidden; color: #27334a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.document-task-main span, .document-task-meta small { color: #7a869b; font-size: 11px; }
+.document-task-main b { color: #315fd4; font-size: 12px; }
+.document-task-progress { height: 5px; overflow: hidden; border-radius: 999px; background: #e9edf5; }
+.document-task-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #5878ec, #315fd4); transition: width .25s ease; }
+.document-task-item.failed .document-task-progress span { background: #d45c5c; }
+.document-task-item.succeeded .document-task-progress span { background: #28a275; }
+.document-task-meta small { min-width: 0; overflow-wrap: anywhere; }
+.document-task-meta button { flex: 0 0 auto; border: 1px solid #d7deed; border-radius: 7px; padding: 4px 9px; color: #315fd4; background: #fff; font-size: 11px; }
+
 .document-error {
   display: grid;
   gap: 6px;

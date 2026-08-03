@@ -47,6 +47,7 @@ public class RagController {
     private final AdminAuthorizationService adminAuthorizationService;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final DocumentTaskService documentTaskService;
 
     public RagController(
             DocumentIngestionService documentIngestionService,
@@ -56,7 +57,8 @@ public class RagController {
             ChromaVectorStoreAdapter vectorStore,
             AdminAuthorizationService adminAuthorizationService,
             WorkspaceService workspaceService,
-            AuditService auditService
+            AuditService auditService,
+            DocumentTaskService documentTaskService
     ) {
         this.documentIngestionService = documentIngestionService;
         this.ragService = ragService;
@@ -66,6 +68,7 @@ public class RagController {
         this.adminAuthorizationService = adminAuthorizationService;
         this.workspaceService = workspaceService;
         this.auditService = auditService;
+        this.documentTaskService = documentTaskService;
     }
 
     @PostMapping("/ingest")
@@ -76,41 +79,43 @@ public class RagController {
     }
 
     @PostMapping("/documents/ingest")
-    public IngestResponse ingestDocument(@RequestBody(required = false) IngestDocumentRequest request,
-                                         @RequestParam(required = false) String workspaceId,
-                                         HttpServletRequest httpRequest) throws IOException {
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentTaskResponse ingestDocument(@RequestBody(required = false) IngestDocumentRequest request,
+                                               @RequestParam(required = false) String workspaceId,
+                                               HttpServletRequest httpRequest) {
         requireAdmin(httpRequest);
+        WorkspaceAccessContext workspace = access(httpRequest, workspaceId);
         if (request == null || request.path() == null || request.path().isBlank()) {
-            return documentIngestionService.ingestDirectory(null, false, access(httpRequest, workspaceId));
+            return documentTaskService.createMaintenance(workspace, DocumentTaskType.INGEST_DIRECTORY, null);
         }
 
-        return documentIngestionService.ingestDocument(request.path(), request.force(), access(httpRequest, workspaceId));
+        return documentTaskService.createMaintenance(workspace, DocumentTaskType.INGEST_FILE, request.path());
     }
 
     @PostMapping("/documents/ingest-directory")
-    public IngestResponse ingestDirectory(@RequestBody(required = false) IngestDirectoryRequest request,
-                                          @RequestParam(required = false) String workspaceId,
-                                          HttpServletRequest httpRequest) throws IOException {
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentTaskResponse ingestDirectory(@RequestBody(required = false) IngestDirectoryRequest request,
+                                                @RequestParam(required = false) String workspaceId,
+                                                HttpServletRequest httpRequest) {
         requireAdmin(httpRequest);
-        if (request == null) {
-            return documentIngestionService.ingestDirectory(null, false, access(httpRequest, workspaceId));
-        }
-
-        return documentIngestionService.ingestDirectory(request.path(), request.force(), access(httpRequest, workspaceId));
+        return documentTaskService.createMaintenance(access(httpRequest, workspaceId),
+                DocumentTaskType.INGEST_DIRECTORY, request == null ? null : request.path());
     }
 
     @PostMapping("/documents/rebuild")
-    public RebuildResult rebuildDocuments(@RequestParam(required = false) String workspaceId,
-                                          HttpServletRequest request) throws IOException {
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentTaskResponse rebuildDocuments(@RequestParam(required = false) String workspaceId,
+                                                 HttpServletRequest request) {
         requireAdmin(request);
-        return documentIngestionService.rebuildDocuments(access(request, workspaceId));
+        return documentTaskService.createMaintenance(access(request, workspaceId), DocumentTaskType.REBUILD, null);
     }
 
     @PostMapping("/documents/sync")
-    public SyncResult syncDocuments(@RequestParam(required = false) String workspaceId,
-                                    HttpServletRequest request) throws IOException {
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentTaskResponse syncDocuments(@RequestParam(required = false) String workspaceId,
+                                              HttpServletRequest request) {
         requireAdmin(request);
-        return documentIngestionService.syncWorkspace(access(request, workspaceId));
+        return documentTaskService.createMaintenance(access(request, workspaceId), DocumentTaskType.SYNC, null);
     }
 
     @GetMapping("/documents")
@@ -119,18 +124,19 @@ public class RagController {
     }
 
     @PostMapping(path = "/documents/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
-    public WorkspaceDocumentUploadResponse uploadDocument(
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentTaskResponse uploadDocument(
             @RequestPart("file") MultipartFile file,
+            @RequestParam String clientRequestId,
             @RequestParam(required = false) String workspaceId,
             HttpServletRequest request
     ) {
         AppUser actor = authenticatedUser(request);
         String targetWorkspace = workspaceId == null || workspaceId.isBlank() ? "personal-" + actor.getId() : workspaceId;
         try {
-            WorkspaceDocumentUploadResponse result = documentIngestionService.uploadWorkspaceDocument(
-                    workspaceService.access(actor, workspaceId), file);
-            record(actor, result.workspaceId(), AuditAction.DOCUMENT_UPLOAD, "DOCUMENT", result.documentId(),
+            DocumentTaskResponse result = documentTaskService.createUpload(
+                    workspaceService.access(actor, workspaceId), file, clientRequestId);
+            record(actor, result.workspaceId(), AuditAction.DOCUMENT_UPLOAD, "DOCUMENT_TASK", result.taskId(),
                     AuditOutcome.SUCCESS, "NONE", requestId(request));
             return result;
         } catch (RuntimeException exception) {
@@ -138,6 +144,23 @@ public class RagController {
                     auditService.outcome(exception), auditService.reasonCode(exception), requestId(request));
             throw exception;
         }
+    }
+
+    @GetMapping("/document-tasks")
+    public List<DocumentTaskResponse> documentTasks(@RequestParam(required = false) String workspaceId,
+                                                    HttpServletRequest request) {
+        AppUser actor = authenticatedUser(request);
+        return documentTaskService.list(workspaceService.access(actor, workspaceId),
+                adminAuthorizationService.isAdmin(actor));
+    }
+
+    @PostMapping("/document-tasks/{taskId}/retry")
+    public DocumentTaskResponse retryDocumentTask(@PathVariable String taskId,
+                                                  @RequestParam(required = false) String workspaceId,
+                                                  HttpServletRequest request) {
+        AppUser actor = authenticatedUser(request);
+        return documentTaskService.retry(taskId, workspaceService.access(actor, workspaceId),
+                adminAuthorizationService.isAdmin(actor));
     }
 
     @GetMapping("/documents/{documentId}/content")

@@ -1,6 +1,7 @@
 package com.example.workbench.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 
@@ -93,6 +94,20 @@ class ChromaVectorStoreAdapterTest {
         assertThat(documents.getValue()).singleElement().satisfies(document ->
                 assertThat(document.getMetadata()).containsEntry("pageNumber", 3)
         );
+    }
+
+    @Test
+    void propagatesChromaWriteFailureForTaskRetry() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<org.springframework.ai.vectorstore.VectorStore> provider = Mockito.mock(ObjectProvider.class);
+        org.springframework.ai.vectorstore.VectorStore chroma = Mockito.mock(org.springframework.ai.vectorstore.VectorStore.class);
+        Mockito.when(provider.getIfAvailable()).thenReturn(chroma);
+        Mockito.doThrow(new IllegalStateException("unavailable")).when(chroma).add(Mockito.anyList());
+        ChromaVectorStoreAdapter adapter = new ChromaVectorStoreAdapter(provider, new InMemoryVectorStore());
+
+        assertThatThrownBy(() -> adapter.addAll(List.of(source("one", "", "public-default", DocumentVisibility.PUBLIC))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Chroma");
     }
 
     private SourceDocument source(String id, String owner, String workspaceId, DocumentVisibility visibility) {

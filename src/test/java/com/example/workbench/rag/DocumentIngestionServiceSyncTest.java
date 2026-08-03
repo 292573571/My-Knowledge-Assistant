@@ -114,8 +114,8 @@ class DocumentIngestionServiceSyncTest {
 
     private DocumentParserRouter parserRouter() {
         return new DocumentParserRouter(List.of(
-                new MarkdownDocumentParser(), new TextDocumentParser(), new PdfDocumentParser(),
-                new DocxDocumentParser(), new HtmlDocumentParser()
+                new MarkdownDocumentParser(), new TextDocumentParser(), new PdfDocumentParser(image -> "OCR text"),
+                new DocxDocumentParser(), new HtmlDocumentParser(), new ImageDocumentParser(image -> "OCR text")
         ));
     }
 
@@ -273,18 +273,21 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
-    void rejectsScannedPdfUploadWithoutLeavingSourceFile() throws Exception {
+    void uploadsScannedPdfUsingOcr() throws Exception {
         WorkspaceAccessContext editor = new WorkspaceAccessContext(
                 "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
         );
 
-        assertThatThrownBy(() -> service.uploadWorkspaceDocument(editor,
-                new MockMultipartFile("file", "scan.pdf", "application/pdf", PdfTestDocuments.scannedPdf())))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("扫描页", "不支持 OCR");
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(editor,
+                new MockMultipartFile("file", "scan.pdf", "application/pdf", PdfTestDocuments.scannedPdf()));
+
+        assertThat(response.fileName()).isEqualTo("scan.pdf");
+        assertThat(service.documentContent(response.documentId(), editor).content()).contains("OCR text");
+        assertThat(service.listDocuments()).singleElement()
+                .satisfies(document -> assertThat(document.pageNumber()).isEqualTo(1));
         Path workspaceDirectory = docsDirectory.resolve("workspaces/team-1");
         try (var files = Files.list(workspaceDirectory)) {
-            assertThat(files).isEmpty();
+            assertThat(files).singleElement().satisfies(path -> assertThat(path).exists());
         }
     }
 
