@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
     <div class="document-upload-bar">
       <div class="document-upload-copy">
         <span class="document-upload-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
-        <span><strong>添加文档</strong><small>支持 UTF-8 Markdown、TXT、HTML、DOCX 和含文本层的 PDF；扫描件暂不支持 OCR；单个文件最大 5 MB</small></span>
+        <span><strong>添加文档</strong><small>支持 UTF-8 Markdown、TXT、HTML、DOCX 和含文本层的 PDF；扫描件暂不支持 OCR；单个文件最大 50 MB</small></span>
       </div>
       <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="handleUpload">
       <button type="button" :disabled="loading" @click="uploadInput?.click()">{{ loading ? '正在处理...' : '选择文件' }}</button>

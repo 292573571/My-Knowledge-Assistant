@@ -32,7 +32,7 @@ public class DocumentIngestionService {
     private static final Logger log = LoggerFactory.getLogger(DocumentIngestionService.class);
     private static final Path DEFAULT_DOCS_DIRECTORY = Path.of("docs");
     private static final Path WORKSPACE_DIRECTORY = Path.of("").toAbsolutePath().normalize();
-    private static final long MAX_WORKSPACE_DOCUMENT_BYTES = 5L * 1024 * 1024;
+    private static final long MAX_WORKSPACE_DOCUMENT_BYTES = 50L * 1024 * 1024;
 
     private final List<SourceDocument> documents = new ArrayList<>();
     private final VectorStore vectorStore;
@@ -1020,7 +1020,7 @@ public class DocumentIngestionService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要上传的文档");
         }
         if (file.getSize() > MAX_WORKSPACE_DOCUMENT_BYTES) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 5 MB");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档不能超过 50 MB");
         }
         try {
             return file.getBytes();
