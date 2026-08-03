@@ -1162,6 +1162,13 @@ textarea:focus-visible,
   justify-content: flex-start;
 }
 
+.document-upload-action {
+  color: #fff !important;
+  border-color: #3d63d8 !important;
+  background: #3d63d8 !important;
+}
+.document-upload-action:hover { background: #3156c8 !important; }
+
 .document-ingest-form {
   display: grid;
   gap: 8px;
@@ -1225,15 +1232,36 @@ textarea:focus-visible,
   background: #ececf1;
 }
 
-.document-upload-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; border: 1px solid #dfe6f1; border-radius: 12px; padding: 12px 14px; background: #f8faff; }
-.document-upload-copy { display: flex; min-width: 0; align-items: center; gap: 11px; }
-.document-upload-copy > span:last-child { display: grid; min-width: 0; gap: 3px; }
-.document-upload-copy strong { color: #2b3952; font-size: 13px; }
-.document-upload-copy small { color: #8995a8; font-size: 11px; line-height: 1.45; }
-.document-upload-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 9px; color: #3d65d8; background: #e8efff; }
-.document-upload-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
-.document-upload-bar > button { flex: 0 0 auto; min-width: 88px; border: 0; border-radius: 8px; padding: 9px 13px; color: #fff; background: #3d63d8; font-size: 12px; font-weight: 750; }
-.document-upload-bar > button:hover { background: #3156c8; }
+.document-upload-backdrop { position: fixed; z-index: 410; inset: 0; display: grid; place-items: center; padding: 22px; background: rgba(20, 30, 50, .48); backdrop-filter: blur(6px); }
+.document-upload-dialog { width: min(560px, 100%); overflow: hidden; border: 1px solid #d9e2ef; border-radius: 20px; background: #fff; box-shadow: 0 28px 90px rgba(20,35,66,.28); }
+.document-upload-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e7ebf3; padding: 22px 24px 18px; background: #fbfcff; }
+.document-upload-dialog-header .eyebrow { margin-bottom: 7px; color: #5474cc; font-size: 10px; font-weight: 850; letter-spacing: .14em; }
+.document-upload-dialog-header h2 { margin: 0; color: #202d45; font-size: 21px; }
+.document-upload-dialog-header span { display: block; margin-top: 6px; color: #8996aa; font-size: 12px; line-height: 1.5; }
+.document-upload-close { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid #d9e1ed; border-radius: 9px; padding: 0; color: #637187; background: #fff; font-size: 22px; line-height: 1; }
+.document-dropzone { display: grid; justify-items: center; gap: 8px; margin: 22px 24px 14px; border: 1.5px dashed #c9d5eb; border-radius: 16px; padding: 34px 20px 30px; color: #70809a; background: #f8faff; text-align: center; transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
+.document-dropzone:hover, .document-dropzone.active { border-color: #4c6fe0; background: #f0f4ff; }
+.document-dropzone.active { transform: translateY(-1px); }
+.document-dropzone.selected { border-style: solid; border-color: #9bb0ec; }
+.document-dropzone strong { color: #2b3952; font-size: 15px; }
+.document-dropzone span:not(.document-dropzone-icon) { font-size: 12px; }
+.document-dropzone small { color: #9aa6b8; font-size: 11px; line-height: 1.5; }
+.document-dropzone-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 3px; border-radius: 14px; color: #3d65d8; background: #e8efff; }
+.document-dropzone-icon svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.document-upload-file-list { display: grid; gap: 6px; max-height: 126px; overflow: auto; margin: 0 24px 14px; padding: 0; list-style: none; }
+.document-upload-file-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 8px; padding: 8px 10px; color: #526076; background: #f4f6fa; font-size: 12px; }
+.document-upload-file-list li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.document-upload-file-list small { color: #8b98ab; font-size: 11px; white-space: nowrap; }
+.document-upload-progress { display: flex; align-items: center; gap: 10px; margin: 0 24px 16px; border: 1px solid #cddcff; border-radius: 10px; padding: 10px 12px; color: #3858a9; background: #f3f6ff; }
+.document-upload-progress > div { display: grid; gap: 2px; }
+.document-upload-progress strong { font-size: 12px; }
+.document-upload-progress span:not(.document-upload-spinner) { color: #7183b2; font-size: 11px; line-height: 1.45; }
+.document-upload-spinner { width: 18px; height: 18px; flex: 0 0 18px; border: 2px solid #c8d5fb; border-top-color: #4167dc; border-radius: 50%; animation: document-upload-spin .8s linear infinite; }
+@keyframes document-upload-spin { to { transform: rotate(360deg); } }
+.document-upload-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #e7ebf3; padding: 15px 24px; background: #fbfcff; }
+.document-upload-dialog-actions button { border: 1px solid #d8e0ed; border-radius: 8px; padding: 8px 14px; color: #627087; background: #fff; font-size: 12px; font-weight: 700; }
+.document-upload-dialog-actions .document-upload-submit { border-color: #3d63d8; color: #fff; background: #3d63d8; }
+.document-upload-dialog-actions .document-upload-submit:hover { background: #3156c8; }
 .public-document-warning { display: flex; align-items: flex-start; gap: 9px; margin: -2px 0 14px; border: 1px solid #efd49a; border-radius: 10px; padding: 10px 12px; color: #795613; background: #fff9e9; font-size: 11px; line-height: 1.55; }
 .public-document-warning svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: #c1811d; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .public-document-warning strong { margin-right: 5px; color: #875d0b; }
@@ -3141,6 +3169,13 @@ textarea:focus-visible,
 }
 
 @media (max-width: 760px) {
+  .document-upload-backdrop { align-items: end; padding: 0; }
+  .document-upload-dialog { width: 100%; border-radius: 20px 20px 0 0; }
+  .document-upload-dialog-header, .document-upload-dialog-actions { padding-inline: 18px; }
+  .document-dropzone { margin-inline: 18px; padding-block: 28px 24px; }
+  .document-upload-file-list, .document-upload-progress { margin-inline: 18px; }
+  .document-actions { flex-wrap: nowrap; }
+
   .portal-header {
     position: sticky;
     top: 0;
@@ -3204,8 +3239,6 @@ textarea:focus-visible,
   .knowledge-card .document-panel { margin-bottom: 0; }
   .document-panel-header { align-items: center; }
   .document-ingest-form .document-actions-wide { justify-content: flex-start; }
-  .document-upload-bar { align-items: stretch; flex-direction: column; gap: 12px; }
-  .document-upload-bar > button { width: 100%; min-height: 40px; }
   .document-card { padding: 14px; }
   .document-card-heading { gap: 10px; }
   .document-card-actions button { min-height: 38px; }

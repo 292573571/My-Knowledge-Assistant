@@ -24,6 +24,9 @@ const contentDocument = ref(null)
 const contentLoading = ref(false)
 const contentError = ref('')
 const uploadInput = ref(null)
+const uploadDialogOpen = ref(false)
+const uploadDragActive = ref(false)
+const selectedUploadFiles = ref([])
 let noticeTimer = null
 let errorTimer = null
 
@@ -127,8 +130,33 @@ async function runIngest(action, successText) {
   }
 }
 
-async function handleUpload(event) {
-  const files = [...(event.target.files || [])]
+function openUploadDialog() {
+  clearError()
+  selectedUploadFiles.value = []
+  uploadDragActive.value = false
+  uploadDialogOpen.value = true
+}
+
+function closeUploadDialog() {
+  if (!loading.value) uploadDialogOpen.value = false
+}
+
+function chooseUploadFiles(files) {
+  selectedUploadFiles.value = [...files]
+  uploadDragActive.value = false
+}
+
+function handleUploadInput(event) {
+  chooseUploadFiles(event.target.files || [])
+  event.target.value = ''
+}
+
+function handleUploadDrop(event) {
+  chooseUploadFiles(event.dataTransfer?.files || [])
+}
+
+async function uploadSelectedFiles() {
+  const files = selectedUploadFiles.value
   if (!files.length) return
   const targetWorkspaceId = props.workspace?.id
   const targetWorkspaceName = props.workspace?.name || '当前空间'
@@ -143,7 +171,10 @@ async function handleUpload(event) {
   }, files.length === 1
     ? `文档已上传到“${targetWorkspaceName}”并完成索引`
     : `${files.length} 个文档已上传到“${targetWorkspaceName}”并完成索引`)
-  event.target.value = ''
+  if (!error.value) {
+    selectedUploadFiles.value = []
+    uploadDialogOpen.value = false
+  }
 }
 
 async function openDocument(document) {
@@ -201,17 +232,9 @@ onBeforeUnmount(() => {
         <p>{{ documents.length }} 个文档，{{ totalChunks }} 个 chunks</p>
       </div>
       <div class="document-actions">
+        <button type="button" class="document-upload-action" :disabled="loading" @click="openUploadDialog">上传文档</button>
         <button type="button" :disabled="loading" @click="loadDocuments">刷新</button>
       </div>
-    </div>
-
-    <div class="document-upload-bar">
-      <div class="document-upload-copy">
-        <span class="document-upload-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
-        <span><strong>添加文档</strong><small>支持 UTF-8 Markdown、TXT、HTML、DOCX 和含文本层的 PDF；扫描件暂不支持 OCR；单个文件最大 50 MB</small></span>
-      </div>
-      <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="handleUpload">
-      <button type="button" :disabled="loading" @click="uploadInput?.click()">{{ loading ? '正在处理...' : '选择文件' }}</button>
     </div>
 
     <div v-if="workspace?.type === 'PUBLIC'" class="public-document-warning" role="note">
@@ -249,8 +272,6 @@ onBeforeUnmount(() => {
 
     <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown、TXT、HTML、DOCX 或文本型 PDF 开始构建知识库</div>
     <div v-else-if="!filteredDocuments.length && !loading" class="muted-card">没有匹配的文档</div>
-    <div v-if="loading" class="muted-card">正在处理文档索引...</div>
-
     <article
       v-for="document in filteredDocuments"
       :key="document.documentId"
@@ -270,6 +291,58 @@ onBeforeUnmount(() => {
         <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
       </div>
     </article>
+
+    <Teleport to="body">
+      <div v-if="uploadDialogOpen" class="document-upload-backdrop" role="presentation" @click.self="closeUploadDialog">
+        <section class="document-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="document-upload-title">
+          <header class="document-upload-dialog-header">
+            <div>
+              <p class="eyebrow">知识库文档</p>
+              <h2 id="document-upload-title">上传文档</h2>
+              <span>添加到“{{ workspace?.name || '当前空间' }}”，上传后会自动完成索引。</span>
+            </div>
+            <button type="button" class="document-upload-close" :disabled="loading" aria-label="关闭上传窗口" @click="closeUploadDialog">×</button>
+          </header>
+
+          <div
+            class="document-dropzone"
+            :class="{ active: uploadDragActive, selected: selectedUploadFiles.length }"
+            role="button"
+            tabindex="0"
+            @click="uploadInput?.click()"
+            @keydown.enter.prevent="uploadInput?.click()"
+            @keydown.space.prevent="uploadInput?.click()"
+            @dragenter.prevent="uploadDragActive = true"
+            @dragover.prevent="uploadDragActive = true"
+            @dragleave.prevent="uploadDragActive = false"
+            @drop.prevent="handleUploadDrop"
+          >
+            <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="handleUploadInput">
+            <span class="document-dropzone-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
+            <strong>{{ selectedUploadFiles.length ? `${selectedUploadFiles.length} 个文件已准备好` : '拖拽文件到这里' }}</strong>
+            <span>{{ selectedUploadFiles.length ? '可以继续选择以替换文件' : '或点击选择文件' }}</span>
+            <small>支持 Markdown、TXT、HTML、DOCX 和文本型 PDF；单个文件最大 50 MB</small>
+          </div>
+
+          <ul v-if="selectedUploadFiles.length" class="document-upload-file-list">
+            <li v-for="file in selectedUploadFiles" :key="`${file.name}-${file.size}-${file.lastModified}`">
+              <span>{{ file.name }}</span>
+              <small>{{ (file.size / 1024 / 1024).toFixed(1) }} MB</small>
+            </li>
+          </ul>
+
+          <div v-if="loading" class="document-upload-progress" role="status" aria-live="polite">
+            <span class="document-upload-spinner" aria-hidden="true"></span>
+            <div><strong>正在处理文档</strong><span>文件上传完成后，系统正在解析并建立知识索引，请稍候。</span></div>
+          </div>
+
+          <footer class="document-upload-dialog-actions">
+            <button type="button" class="document-upload-cancel" :disabled="loading" @click="closeUploadDialog">取消</button>
+            <button type="button" class="document-upload-submit" :disabled="loading || !selectedUploadFiles.length" @click="uploadSelectedFiles">{{ loading ? '处理中...' : '开始上传' }}</button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
 
     <ConfirmDialog
       v-if="pendingDeleteDocument"
