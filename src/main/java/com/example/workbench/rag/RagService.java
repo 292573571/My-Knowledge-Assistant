@@ -134,7 +134,7 @@ public class RagService {
 
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(), options);
+        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(), options, history);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
@@ -274,7 +274,7 @@ public class RagService {
         }
 
         List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(),
-                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled), history);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
             String prompt = buildModelFallbackPrompt(formatHistory(history), question);
@@ -462,12 +462,22 @@ public class RagService {
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId) {
-        return retrieveCandidates(question, ownerUserId, null, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return retrieveCandidates(question, ownerUserId, null, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled), List.of());
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, String workspaceId, RagChatOptions options) {
+        return retrieveCandidates(question, ownerUserId, workspaceId, options, List.of());
+    }
+
+    private List<SourceDocument> retrieveCandidates(
+            String question,
+            String ownerUserId,
+            String workspaceId,
+            RagChatOptions options,
+            List<ChatMessage> history
+    ) {
         // 多个查询命中同一分块时累计命中次数，并合并为一个候选，避免重复上下文。
-        List<String> queries = retrievalQueries(question, options);
+        List<String> queries = retrievalQueries(question, options, history);
         LinkedHashMap<String, ScoredCandidate> candidates = new LinkedHashMap<>();
 
         for (String query : queries) {
@@ -507,8 +517,12 @@ public class RagService {
     }
 
     private List<String> retrievalQueries(String question, RagChatOptions options) {
+        return retrievalQueries(question, options, List.of());
+    }
+
+    private List<String> retrievalQueries(String question, RagChatOptions options, List<ChatMessage> history) {
         List<String> queries = new ArrayList<>();
-        queries.add(buildRetrievalQuery(question, options));
+        queries.add(buildRetrievalQuery(question, options, history));
 
         if (!options.multiQueryEnabled()) {
             return queries;
@@ -521,9 +535,12 @@ public class RagService {
                 不要回答问题。
                 每行只输出一个查询，不要编号。
 
+                对话历史：
+                %s
+
                 用户问题：
                 %s
-                """.formatted(question);
+                """.formatted(formatRetrievalHistory(history), question);
             String generated = chatClient.generate(prompt);
             log.info("RAG multi-query generated enabled=true generatedLength={}", generated == null ? 0 : generated.length());
 
@@ -545,6 +562,10 @@ public class RagService {
     }
 
     private String rewriteQuery(String question, RagChatOptions options) {
+        return rewriteQuery(question, options, List.of());
+    }
+
+    private String rewriteQuery(String question, RagChatOptions options, List<ChatMessage> history) {
         if (!options.queryRewriteEnabled()) {
             return question;
         }
@@ -556,9 +577,12 @@ public class RagService {
                 不要回答问题。
                 只输出改写后的查询。
 
+                对话历史：
+                %s
+
                 用户问题：
                 %s
-                """.formatted(question);
+                """.formatted(formatRetrievalHistory(history), question);
         String rewritten = cleanGeneratedQuery(chatClient.generate(prompt));
         log.info("RAG query rewrite completed enabled=true rewritten={} originalLength={}", !rewritten.isBlank(), question == null ? 0 : question.length());
 
@@ -567,6 +591,21 @@ public class RagService {
         }
 
         return rewritten;
+    }
+
+    private String buildRetrievalQuery(String question, RagChatOptions options, List<ChatMessage> history) {
+        return expandRetrievalQuery(rewriteQuery(question, options, history));
+    }
+
+    private String formatRetrievalHistory(List<ChatMessage> history) {
+        if (history == null || history.isEmpty()) {
+            return "无";
+        }
+
+        return history.stream()
+                .skip(Math.max(0, history.size() - 4))
+                .map(message -> message.role() + ": " + truncateHistoryMessage(withoutModelKnowledgeDisclaimer(message.content())))
+                .collect(Collectors.joining("\n"));
     }
 
     private String cleanGeneratedQuery(String query) {

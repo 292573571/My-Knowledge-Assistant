@@ -21,10 +21,38 @@ public class DocxBlockChunker implements DocumentChunker {
     @Override
     public List<DocumentChunk> chunk(ParsedDocument document) {
         List<DocumentChunk> chunks = new ArrayList<>();
+        List<DocumentBlock> section = new ArrayList<>();
         for (DocumentBlock block : document.blocks()) {
-            appendBlock(block, chunks);
+            if ("docx-heading".equals(block.blockType()) && !section.isEmpty()) {
+                appendSection(section, chunks);
+                section.clear();
+            }
+            section.add(block);
+        }
+        if (!section.isEmpty()) {
+            appendSection(section, chunks);
         }
         return chunks;
+    }
+
+    private void appendSection(List<DocumentBlock> blocks, List<DocumentChunk> chunks) {
+        DocumentBlock first = blocks.get(0);
+        String content = blocks.stream()
+                .map(DocumentBlock::content)
+                .filter(value -> value != null && !value.isBlank())
+                .reduce((left, right) -> left + "\n\n" + right)
+                .orElse("");
+        if (!content.isBlank()) {
+            appendBlock(new DocumentBlock(
+                    content,
+                    "docx-section",
+                    first.headingPath(),
+                    first.headingLevel(),
+                    first.startOffset(),
+                    blocks.get(blocks.size() - 1).endOffset(),
+                    first.pageNumber()
+            ), chunks);
+        }
     }
 
     private void appendBlock(DocumentBlock block, List<DocumentChunk> chunks) {

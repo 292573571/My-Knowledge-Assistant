@@ -10,7 +10,7 @@ class DocxBlockChunkerTest {
     private final DocxBlockChunker chunker = new DocxBlockChunker();
 
     @Test
-    void preservesBlockAndHeadingOrderWhenChunking() {
+    void keepsHeadingWithItsSectionContentWhenChunking() {
         ParsedDocument document = new ParsedDocument("docx", "Heading\n\nBody\n\n| A | B |", "Heading", List.of(
                 new DocumentBlock("Heading", "docx-heading", "Heading", 1, 0, 7),
                 new DocumentBlock("Body", "docx-paragraph", "Heading", 1, 9, 13),
@@ -20,10 +20,10 @@ class DocxBlockChunkerTest {
         List<DocumentChunk> chunks = chunker.chunk(document);
 
         assertThat(chunks).extracting(DocumentChunk::content)
-                .containsExactly("Heading", "Body", "| A | B |");
+                .containsExactly("Heading\n\nBody\n\n| A | B |");
         assertThat(chunks).extracting(DocumentChunk::chunkType)
-                .containsExactly("docx-heading", "docx-paragraph", "docx-table");
-        assertThat(chunks).extracting(DocumentChunk::chunkIndex).containsExactly(0, 1, 2);
+                .containsExactly("docx-section");
+        assertThat(chunks).extracting(DocumentChunk::chunkIndex).containsExactly(0);
         assertThat(chunks).extracting(DocumentChunk::headingPath).containsOnly("Heading");
     }
 }

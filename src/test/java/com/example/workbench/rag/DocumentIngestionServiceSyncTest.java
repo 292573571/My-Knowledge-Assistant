@@ -304,9 +304,12 @@ class DocumentIngestionServiceSyncTest {
 
         assertThat(response.fileName()).isEqualTo("architecture.docx");
         assertThat(response.path()).endsWith(".docx");
-        assertThat(service.listDocuments()).extracting(SourceDocument::chunkType).contains(
-                "docx-heading", "docx-paragraph", "docx-list-item", "docx-table"
-        );
+        assertThat(service.listDocuments()).extracting(SourceDocument::chunkType).contains("docx-section");
+        String indexedContent = service.listDocuments().stream()
+                .map(SourceDocument::content)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(indexedContent)
+                .contains("Introduction before table", "Component", "Processing", "Parse blocks");
         assertThat(service.documentContent(response.documentId(), editor).content())
                 .containsSubsequence("Introduction before table", "Component", "Processing", "Parse blocks");
 
