@@ -14,8 +14,17 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 
 class ChromaVectorStoreAdapterTest {
+
+    @Test
+    void declaresExactlyOneAutowiredProductionConstructor() {
+        assertThat(java.util.Arrays.stream(ChromaVectorStoreAdapter.class.getDeclaredConstructors())
+                .filter(constructor -> constructor.isAnnotationPresent(Autowired.class)))
+                .singleElement()
+                .satisfies(constructor -> assertThat(constructor.getParameterCount()).isEqualTo(4));
+    }
 
     @Test
     void clearDeletesAllProjectDocumentsWithoutRelyingOnProcessLocalIds() {

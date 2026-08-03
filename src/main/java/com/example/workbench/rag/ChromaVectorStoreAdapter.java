@@ -13,6 +13,7 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     private final InMemoryVectorStore fallbackVectorStore;
     private List<String> currentDocumentIds = List.of();
 
+    @Autowired
     public ChromaVectorStoreAdapter(
             ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider,
             InMemoryVectorStore fallbackVectorStore,
