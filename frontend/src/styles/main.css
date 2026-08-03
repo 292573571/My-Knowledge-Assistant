@@ -167,22 +167,19 @@ textarea:focus-visible,
   background: #ffffff;
 }
 
-.runtime-status div,
-.detail-sheet-details div {
+.runtime-status div {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
   gap: 8px;
 }
 
-.runtime-status dt,
-.detail-sheet-details dt {
+.runtime-status dt {
   color: #8a94a8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
 }
 
-.runtime-status dd,
-.detail-sheet-details dd {
+.runtime-status dd {
   overflow-wrap: anywhere;
   margin: 0;
   color: #526076;
@@ -1474,66 +1471,6 @@ textarea:focus-visible,
   box-shadow: 0 5px 16px rgba(50, 72, 140, 0.1);
 }
 
-.source-card {
-  cursor: pointer;
-}
-
-.detail-sheet {
-  position: fixed;
-  z-index: 60;
-  inset: 0;
-  display: none;
-  align-items: end;
-  background: rgba(15, 23, 42, 0.35);
-}
-
-.detail-sheet-content {
-  width: 100%;
-  max-height: min(70vh, 520px);
-  overflow-y: auto;
-  border-radius: 18px 18px 0 0;
-  padding: 18px;
-  color: #526076;
-  background: #ffffff;
-  box-shadow: 0 -12px 36px rgba(15, 23, 42, 0.18);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.detail-sheet-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  color: #202938;
-}
-
-.detail-sheet-header strong {
-  overflow-wrap: anywhere;
-}
-
-.detail-sheet-header button {
-  flex: 0 0 auto;
-  border: 1px solid #d9dfe9;
-  border-radius: 8px;
-  padding: 5px 8px;
-  color: #526076;
-  background: #ffffff;
-  font-size: 12px;
-}
-
-.detail-sheet-content p {
-  overflow-wrap: anywhere;
-  margin: 7px 0;
-}
-
-.detail-sheet-details {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-
 .document-hover-tooltip {
   position: fixed;
   z-index: 50;
@@ -2345,10 +2282,6 @@ textarea:focus-visible,
 
   .document-filters {
     grid-template-columns: 1fr;
-  }
-
-  .detail-sheet {
-    display: flex;
   }
 
   .document-hover-tooltip,

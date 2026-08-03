@@ -9,7 +9,6 @@ defineProps({
 })
 
 const hoveredSource = ref(null)
-const selectedSource = ref(null)
 const tooltipPosition = ref({ x: 0, y: 0 })
 
 function getSourceKey(source) {
@@ -66,9 +65,6 @@ function hideSourceTooltip() {
   hoveredSource.value = null
 }
 
-function selectSource(source) {
-  selectedSource.value = source
-}
 </script>
 
 <template>
@@ -85,7 +81,6 @@ function selectSource(source) {
         @mouseenter="showSourceTooltip(source, $event)"
         @mousemove="moveSourceTooltip"
         @mouseleave="hideSourceTooltip"
-        @click="selectSource(source)"
       >
         <div class="source-card-toggle">
           <div class="source-card-header">
@@ -95,7 +90,7 @@ function selectSource(source) {
           <small v-if="getPageLabel(source)" class="source-heading-path">{{ getPageLabel(source) }}</small>
           <small v-else-if="getHeadingPath(source)" class="source-heading-path">{{ getHeadingPath(source) }}</small>
           <small v-else class="source-heading-path">未返回标题路径</small>
-          <small>{{ getPageLabel(source) ? `${getPageLabel(source)} · ` : '' }}chunk #{{ source.chunkIndex ?? '-' }} · 点击查看详情</small>
+          <small>{{ getPageLabel(source) ? `${getPageLabel(source)} · ` : '' }}chunk #{{ source.chunkIndex ?? '-' }}</small>
         </div>
       </article>
 
@@ -128,23 +123,6 @@ function selectSource(source) {
         </aside>
       </Teleport>
 
-      <Teleport to="body">
-        <div v-if="selectedSource" class="detail-sheet" @click.self="selectedSource = null">
-          <section class="detail-sheet-content">
-            <div class="detail-sheet-header">
-              <strong>{{ getFileName(selectedSource) }}</strong>
-              <button type="button" aria-label="关闭来源详情" @click="selectedSource = null">关闭</button>
-            </div>
-            <dl class="detail-sheet-details">
-              <div><dt>path</dt><dd>{{ getPath(selectedSource) }}</dd></div>
-              <div><dt>heading</dt><dd>{{ getHeadingPath(selectedSource) || '-' }}</dd></div>
-              <div><dt>page</dt><dd>{{ getPageLabel(selectedSource) || '-' }}</dd></div>
-              <div><dt>chunk</dt><dd>#{{ selectedSource.chunkIndex ?? '-' }} · score {{ selectedSource.score ?? '-' }}</dd></div>
-            </dl>
-            <p>{{ selectedSource.snippet || selectedSource.excerpt || selectedSource.content || '后端未返回 chunk 内容预览' }}</p>
-          </section>
-        </div>
-      </Teleport>
     </template>
   </div>
 </template>

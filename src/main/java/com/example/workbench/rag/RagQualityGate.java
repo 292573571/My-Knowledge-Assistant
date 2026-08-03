@@ -2,11 +2,15 @@ package com.example.workbench.rag;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class RagQualityGate {
+
+    private static final Logger log = LoggerFactory.getLogger(RagQualityGate.class);
 
     private final LocalChatClient chatClient;
     private final boolean enabled;
@@ -46,8 +50,9 @@ public class RagQualityGate {
         String verdict = chatClient.generate(prompt.toString());
         List<Integer> keptIndexes = parseKeptIndexes(verdict, candidates.size());
         if (keptIndexes == null) {
-            // 评估服务不可用或返回格式异常时保留既有规则结果，不能让评估器阻断问答。
-            return candidates;
+            // 无法确认候选相关时宁可转入通用模型，也不能把可能无关的片段作为本地知识依据。
+            log.warn("RAG source relevance verdict unavailable action=reject_all candidateCount={}", candidates.size());
+            return List.of();
         }
 
         List<SourceDocument> kept = new ArrayList<>();

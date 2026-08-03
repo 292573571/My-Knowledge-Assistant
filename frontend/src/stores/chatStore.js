@@ -252,8 +252,9 @@ export function useChatStore() {
     state.messages.push(createUserMessage(text))
     upsertConversationTitle(text)
 
-    const assistantMessage = createAssistantMessage()
-    state.messages.push(assistantMessage)
+    state.messages.push(createAssistantMessage())
+    // 后续 SSE 更新必须写入数组中的响应式代理，否则右侧信息面板的计算属性不会感知 sources/toolCalls 变化。
+    const assistantMessage = state.messages[state.messages.length - 1]
     touchActiveConversation()
     state.isStreaming = true
 

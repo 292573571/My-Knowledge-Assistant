@@ -34,13 +34,23 @@ class RagQualityGateTest {
     }
 
     @Test
-    void keepsSourcesWhenTheEvaluatorIsUnavailable() {
+    void rejectsSourcesWhenTheEvaluatorIsUnavailable() {
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
         when(chatClient.generate(anyString())).thenReturn(null);
         RagQualityGate gate = new RagQualityGate(chatClient, true);
         SourceDocument source = new SourceDocument("one", "MCP 是协议。", "MCP", "mcp.md", "docs/mcp.md", 0);
 
-        assertThat(gate.relevantSources("MCP是什么？", List.of(source))).containsExactly(source);
+        assertThat(gate.relevantSources("MCP是什么？", List.of(source))).isEmpty();
         assertThat(gate.approvesAnswer("MCP是什么？", "MCP 是协议。", List.of(source))).isTrue();
+    }
+
+    @Test
+    void rejectsAllSourcesWhenTheEvaluatorReturnsMalformedVerdict() {
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        when(chatClient.generate(anyString())).thenReturn("这些资料看起来可能相关");
+        RagQualityGate gate = new RagQualityGate(chatClient, true);
+        SourceDocument source = new SourceDocument("one", "MCP 是协议。", "MCP", "mcp.md", "docs/mcp.md", 0);
+
+        assertThat(gate.relevantSources("MCP是什么？", List.of(source))).isEmpty();
     }
 }

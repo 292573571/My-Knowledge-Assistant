@@ -164,6 +164,51 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void usesModelFallbackWhenRetrievedDocumentsMissExplicitTechnicalAcronym() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument unrelatedKettleChunk = new SourceDocument(
+                "kettle-1", "Kettle 转换控件用于完成 ETL 数据处理。", "Kettle 工具简介",
+                "kettle.docx", "docs/kettle.docx", 1, "kettle", "kettle.docx", "hash",
+                0.2, "功能介绍 > Kettle 的转换", 2, 0, 30, "docx-section", "SOURCE", "",
+                "public-default", com.example.workbench.workspace.DocumentVisibility.PUBLIC, 0
+        );
+        String question = "在AI应用中SSL是啥意思？";
+        when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of(unrelatedKettleChunk));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("SSL 是一种用于保护网络通信的安全协议。");
+        RagService service = service(vectorStore, chatClient, 1.0);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", question));
+
+        assertThat(response.answer()).contains("SSL 是").contains("通用大模型知识");
+        assertThat(response.sources()).isEmpty();
+        verify(chatClient, never()).call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
+    }
+
+    @Test
+    void streamsModelFallbackWithoutSourcesWhenDocumentsMissExplicitTechnicalAcronym() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        SourceDocument unrelatedKettleChunk = new SourceDocument(
+                "kettle-1", "Kettle 转换控件用于完成 ETL 数据处理。", "Kettle 工具简介",
+                "kettle.docx", "docs/kettle.docx", 1, "kettle", "kettle.docx", "hash",
+                0.2, "功能介绍 > Kettle 的转换", 2, 0, 30, "docx-section", "SOURCE", "",
+                "public-default", com.example.workbench.workspace.DocumentVisibility.PUBLIC, 0
+        );
+        String question = "在AI应用中SSL是啥意思？";
+        when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of(unrelatedKettleChunk));
+        when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
+                .thenReturn(reactor.core.publisher.Flux.just("SSL 是网络安全协议。"));
+        RagService service = service(vectorStore, chatClient, 1.0);
+
+        RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", question));
+
+        assertThat(response.tokens().collectList().block())
+                .containsExactly("SSL 是网络安全协议。", "\n\n以上回答基于通用大模型知识，不是当前知识库内容。");
+        assertThat(response.sources()).isEmpty();
+    }
+
+    @Test
     void excludesAutomaticLearningRecordsFromNormalQuestions() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);

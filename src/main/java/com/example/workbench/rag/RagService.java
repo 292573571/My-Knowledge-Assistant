@@ -29,6 +29,8 @@ public class RagService {
     private static final Pattern REPEATED_CHARACTER = Pattern.compile("(?s).*(.)\\1{3,}.*");
     private static final Pattern REPEATED_SEQUENCE = Pattern.compile("(?s).*(.{2,4})\\1{2,}.*");
     private static final Pattern SUSPICIOUS_LATIN_TOKEN = Pattern.compile("(?i)(?<![a-z])[a-z]{8,}(?![a-z])");
+    private static final Pattern EXPLICIT_TECHNICAL_ACRONYM = Pattern.compile("(?<![A-Za-z0-9])[A-Z][A-Z0-9.+#-]{1,}(?![A-Za-z0-9])");
+    private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
@@ -665,7 +667,7 @@ public class RagService {
     }
 
     private boolean matchesExplicitTechnicalTerm(String question, SourceDocument source) {
-        if (question == null || !question.toLowerCase().contains("embedding")) {
+        if (question == null) {
             return true;
         }
 
@@ -675,7 +677,20 @@ public class RagService {
                 source.headingPath() == null ? "" : source.headingPath(),
                 source.fileName() == null ? "" : source.fileName()
         ).toLowerCase();
-        return searchableContent.contains("embedding");
+        if (question.toLowerCase(Locale.ROOT).contains("embedding") && !searchableContent.contains("embedding")) {
+            return false;
+        }
+
+        // 用户明确写出的技术缩写是强检索信号；候选完全不含该缩写时不能作为本地知识来源。
+        var matcher = EXPLICIT_TECHNICAL_ACRONYM.matcher(question);
+        while (matcher.find()) {
+            String term = matcher.group().toUpperCase(Locale.ROOT);
+            if (!GENERIC_TECHNICAL_TERMS.contains(term)
+                    && !searchableContent.contains(term.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean containsModelKnowledgeDisclaimer(SourceDocument source) {
