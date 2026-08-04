@@ -1604,6 +1604,9 @@ textarea:focus-visible,
 .document-name-button { min-width: 0; overflow-wrap: anywhere; border: 0; padding: 0; color: #24324a; background: transparent; text-align: left; font-size: 15px; font-weight: 750; line-height: 1.45; }
 .document-name-button:hover { color: #173eaa; text-decoration: underline; text-underline-offset: 3px; }
 .document-chunk-count { flex: 0 0 auto; border-radius: 8px; padding: 4px 8px; color: #718097; background: #f4f6fa; font-size: 11px; white-space: nowrap; }
+.document-card-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.document-card-status-row .danger { flex: 0 0 auto; width: auto; border: 1px solid #efced1; border-radius: 8px; padding: 5px 12px; color: #aa4650; background: #fff7f7; font-size: 11px; white-space: nowrap; }
+.document-card-status-row .danger:hover { background: #ffedef; }
 .document-card-details { display: grid; gap: 7px; border-top: 1px solid #edf0f5; border-bottom: 1px solid #edf0f5; padding: 11px 0; }
 .document-card-details p { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; margin: 0; font-size: 11px; line-height: 1.55; }
 .document-card-details p > span { color: #96a1b2; }

@@ -267,8 +267,6 @@ public class RagService {
         }
 
         List<RagSource> ragSources = toRagSources(sources);
-        // 在正文末尾附上可读引用，前端同时可使用结构化 sources 展示详情。
-        answer = appendReferenceSources(answer, ragSources);
 
         conversationMemory.addUserMessage(conversationId, question);
         conversationMemory.addAssistantMessage(conversationId, answer);
@@ -339,10 +337,8 @@ public class RagService {
         String context = buildContext(sources);
         List<RagSource> ragSources = toRagSources(sources);
         String prompt = buildPrompt(context, question);
-        String references = appendReferenceSources("", ragSources);
         return new RagStreamResponse(
-                streamWithHistory(prompt, relevantHistory, conversationId)
-                        .concatWithValues(references),
+                streamWithHistory(prompt, relevantHistory, conversationId),
                 ragSources
         );
     }
@@ -1500,9 +1496,10 @@ public class RagService {
     }
 
     private List<RagSource> toRagSources(List<SourceDocument> sources) {
+        List<DocumentIndexEntry> indexedDocuments = documentIngestionService.listIndexedDocuments();
         return sources.stream()
                 .map(source -> new RagSource(
-                        source.fileName(),
+                        originalSourceFileName(source, indexedDocuments),
                         source.chunkIndex(),
                         snippet(source.content()),
                         source.score(),
@@ -1514,42 +1511,24 @@ public class RagService {
                 .toList();
     }
 
+    private String originalSourceFileName(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
+        if (indexedDocuments == null || indexedDocuments.isEmpty()) {
+            return source.fileName();
+        }
+        String normalizedPath = source.path() == null ? "" : source.path().replace('\\', '/');
+        return indexedDocuments.stream()
+                .filter(entry -> entry.documentId().equals(source.documentId())
+                        || entry.path().replace('\\', '/').equals(normalizedPath))
+                .map(DocumentIndexEntry::fileName)
+                .findFirst()
+                .orElse(source.fileName());
+    }
+
     private List<RagSource> toWebSources(List<WebSearchResult> webResults) {
         return webResults.stream()
                 .map(result -> new RagSource("Web: " + result.url(), -1, result.snippet(), 0.0, "Web", result.url()))
                 .distinct()
                 .toList();
-    }
-
-    private String appendReferenceSources(String answer, List<RagSource> sources) {
-        if (sources.isEmpty() || answer.contains("参考来源：")) {
-            return answer;
-        }
-
-        List<String> referenceItems = sources.stream()
-                .map(this::referenceLabel)
-                .distinct()
-                .limit(5)
-                .toList();
-        List<String> numberedReferences = new ArrayList<>();
-
-        for (int index = 0; index < referenceItems.size(); index++) {
-            numberedReferences.add("%d. %s".formatted(index + 1, referenceItems.get(index)));
-        }
-
-        return answer.stripTrailing() + "\n\n参考来源：\n" + String.join("\n", numberedReferences);
-    }
-
-    private String referenceLabel(RagSource source) {
-        List<String> parts = new ArrayList<>();
-        parts.add(source.file());
-        if (source.pageNumber() != null) {
-            parts.add("第 " + source.pageNumber() + " 页");
-        }
-        if (source.headingPath() != null && !source.headingPath().isBlank()) {
-            parts.add(source.headingPath());
-        }
-        return String.join(" / ", parts);
     }
 
     private List<RetrievalDebug> retrievalDebug(

@@ -514,14 +514,14 @@ onBeforeUnmount(() => {
         <button type="button" class="document-name-button" :title="`查看 ${displayFileName(document)}`" @click="openDocument(document)">{{ displayFileName(document) }}</button>
         <span class="document-chunk-count">{{ document.chunkCount }} chunks</span>
       </header>
-      <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ document.indexStatus === 'INDEXED' || !document.indexStatus ? '已索引' : document.indexStatus }}</span></div>
+      <div class="document-card-status-row">
+        <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ document.indexStatus === 'INDEXED' || !document.indexStatus ? '已索引' : document.indexStatus }}</span></div>
+        <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
+      </div>
       <div class="document-card-details">
         <p><span>路径</span><code>{{ document.path }}</code></p>
         <p><span>更新时间</span><time :datetime="document.ingestedAt">{{ formatTime(document.ingestedAt) }}</time></p>
         <p><span>内容指纹</span><code>{{ document.contentHash }}</code></p>
-      </div>
-      <div class="document-card-actions">
-        <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
       </div>
     </article>
 
