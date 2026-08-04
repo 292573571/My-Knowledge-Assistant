@@ -428,6 +428,45 @@ public class DocumentIngestionService {
         return readDocumentContent(entry);
     }
 
+    /**
+     * 读取已经持久化的上传源文件，并阻止目录穿越和符号链接逃逸。
+     *
+     * @param sourcePath 任务中保存的源文件路径
+     * @param fileName 用户上传时的原始文件名
+     * @return 源文件内容
+     */
+    public DocumentSourceFile sourceFile(String sourcePath, String fileName) {
+        Path source = resolveIndexedPath(sourcePath);
+        try {
+            Path realDocsDirectory = docsDirectory.toRealPath();
+            Path realSource = source.toRealPath();
+            if (!realSource.startsWith(realDocsDirectory) || !Files.isRegularFile(realSource)) {
+                throw new IllegalArgumentException("文档源文件不可用：" + fileName);
+            }
+            return new DocumentSourceFile(fileName, Files.readAllBytes(realSource));
+        } catch (java.nio.file.NoSuchFileException exception) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档源文件已缺失：" + fileName);
+        } catch (IOException exception) {
+            throw new IllegalStateException("读取文档源文件失败：" + fileName, exception);
+        }
+    }
+
+    /**
+     * 按文档索引读取当前保留的源文件，供历史上传记录在旧文件已清理时回退使用。
+     *
+     * @param documentId 文档标识
+     * @param fileName 下载时展示的文件名
+     * @param access 空间访问上下文
+     * @return 源文件内容
+     */
+    public DocumentSourceFile sourceFile(String documentId, String fileName, WorkspaceAccessContext access) {
+        DocumentIndexEntry entry = indexedDocument(documentId);
+        if (!canRead(entry, access.userId(), access.workspaceId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档源文件不存在");
+        }
+        return sourceFile(entry.path(), fileName);
+    }
+
     public synchronized void deleteDocument(String documentId, String ownerUserId, boolean canManagePublicDocuments) {
         log.info("Document delete started documentId={}", documentId);
         DocumentIndexEntry entry = documentIndexStore.list().stream()

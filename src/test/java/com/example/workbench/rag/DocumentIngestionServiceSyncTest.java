@@ -86,6 +86,27 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void readsSourceFileOnlyFromDocsDirectory() throws Exception {
+        Path source = Files.writeString(docsDirectory.resolve("用户指南.txt"), "source content");
+
+        DocumentSourceFile result = service.sourceFile(source.toString(), "用户指南.txt");
+
+        assertThat(result.fileName()).isEqualTo("用户指南.txt");
+        assertThat(result.content()).isEqualTo("source content".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> service.sourceFile(tempDir.resolve("outside.txt").toString(), "outside.txt"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("docs directory");
+    }
+
+    @Test
+    void reportsMissingSourceFile() {
+        assertThatThrownBy(() -> service.sourceFile(docsDirectory.resolve("missing.pdf").toString(), "missing.pdf"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((ResponseStatusException) exception).getStatusCode().value()).isEqualTo(404))
+                .hasMessageContaining("文档源文件已缺失");
+    }
+
+    @Test
     void deletesPersistedDocumentByChunkIdsWithoutReplacingUnknownVectors() throws Exception {
         Path document = docsDirectory.resolve("persisted.md");
         Files.writeString(document, "# Persisted\n\nContent that was indexed before the process restarted.");

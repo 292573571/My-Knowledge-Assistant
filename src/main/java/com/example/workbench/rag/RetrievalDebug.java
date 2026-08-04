@@ -9,6 +9,8 @@ public record RetrievalDebug(
         boolean usedInContext,
         String fileName,
         String headingPath,
+        int chunkIndex,
+        Integer pageNumber,
         double score,
         String preview
 ) {

@@ -38,6 +38,13 @@ public class RuleBasedEvaluator {
         boolean headingPathMatched = anyContains(actualHeadingPaths, nullSafe(evalCase.expectedHeadingPaths()));
         boolean keywordMatched = matchedKeywords.size() >= Math.ceil(nullSafe(evalCase.expectedKeywords()).size() / 2.0);
         boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream().anyMatch(answer::contains);
+        List<RetrievalDebug> diagnostics = response.retrievalDebug() == null ? List.of() : response.retrievalDebug();
+        List<RetrievalDebug> scopedDiagnostics = scopedDiagnostics(diagnostics, nullSafe(evalCase.expectedSources()));
+        boolean pageMatched = pageMatched(response, scopedDiagnostics, nullSafeValues(evalCase.expectedPageNumbers()));
+        boolean retrievalKeywordsMatched = retrievalKeywordsMatched(
+                scopedDiagnostics, nullSafe(evalCase.expectedRetrievalKeywords()));
+        boolean forbiddenRetrievalMatched = forbiddenRetrievalMatched(
+                scopedDiagnostics, nullSafe(evalCase.forbiddenRetrievalKeywords()));
         boolean modelFallbackUsed = usesModelFallback(answer);
         boolean localEvidenceSatisfied = sourceMatched
                 && (nullSafe(evalCase.expectedHeadingPaths()).isEmpty() || headingPathMatched);
@@ -54,9 +61,15 @@ public class RuleBasedEvaluator {
             score = Math.max(0, score - 0.3);
         }
 
-        boolean passed = score >= 0.7 && !forbiddenMatched && !evidenceRequiredButMissing && !disallowedModelFallback;
+        boolean diagnosticRulesMatched = pageMatched && retrievalKeywordsMatched && !forbiddenRetrievalMatched;
+        boolean passed = score >= 0.7 && !forbiddenMatched && !evidenceRequiredButMissing
+                && !disallowedModelFallback && diagnosticRulesMatched;
         String reason = reason(sourceMatched, headingPathMatched, keywordMatched, forbiddenMatched,
-                evidenceRequiredButMissing, disallowedModelFallback);
+                evidenceRequiredButMissing, disallowedModelFallback, pageMatched,
+                retrievalKeywordsMatched, forbiddenRetrievalMatched,
+                !nullSafeValues(evalCase.expectedPageNumbers()).isEmpty(),
+                !nullSafe(evalCase.expectedRetrievalKeywords()).isEmpty(),
+                !nullSafe(evalCase.forbiddenRetrievalKeywords()).isEmpty());
 
         return new EvalResult(
                 evalCase.id(),
@@ -81,7 +94,7 @@ public class RuleBasedEvaluator {
                 matchedKeywords,
                 missingKeywords,
                 sourceMatched,
-                !actualSources.isEmpty() && localEvidenceSatisfied,
+                !actualSources.isEmpty() && localEvidenceSatisfied && pageMatched,
                 keyPointCoverage(matchedKeywords, nullSafe(evalCase.expectedKeywords())),
                 hasAnswer && !localEvidenceSatisfied && !modelFallbackUsed,
                 modelFallbackUsed,
@@ -154,6 +167,45 @@ public class RuleBasedEvaluator {
                         .anyMatch(actual -> actual.contains(expected) || expected.contains(actual)));
     }
 
+    private List<RetrievalDebug> scopedDiagnostics(List<RetrievalDebug> diagnostics, List<String> expectedSources) {
+        if (expectedSources.isEmpty()) {
+            return diagnostics;
+        }
+        return diagnostics.stream()
+                .filter(item -> expectedSources.stream().anyMatch(expected ->
+                        item.fileName().contains(expected) || expected.contains(item.fileName())))
+                .toList();
+    }
+
+    private boolean pageMatched(RagChatResponse response, List<RetrievalDebug> diagnostics,
+                                List<Integer> expectedPages) {
+        if (expectedPages.isEmpty()) {
+            return true;
+        }
+        boolean citedPage = response.sources().stream()
+                .anyMatch(source -> source.pageNumber() != null && expectedPages.contains(source.pageNumber()));
+        boolean retrievedPage = diagnostics.stream()
+                .anyMatch(item -> item.pageNumber() != null && expectedPages.contains(item.pageNumber()));
+        return citedPage && retrievedPage;
+    }
+
+    private boolean retrievalKeywordsMatched(List<RetrievalDebug> diagnostics, List<String> expectedKeywords) {
+        if (expectedKeywords.isEmpty()) {
+            return true;
+        }
+        return diagnostics.stream().anyMatch(item -> {
+            String preview = item.preview() == null ? "" : item.preview().toLowerCase();
+            return expectedKeywords.stream().allMatch(keyword -> preview.contains(keyword.toLowerCase()));
+        });
+    }
+
+    private boolean forbiddenRetrievalMatched(List<RetrievalDebug> diagnostics, List<String> forbiddenKeywords) {
+        return diagnostics.stream().anyMatch(item -> {
+            String preview = item.preview() == null ? "" : item.preview().toLowerCase();
+            return forbiddenKeywords.stream().anyMatch(keyword -> preview.contains(keyword.toLowerCase()));
+        });
+    }
+
     private List<String> matchedKeywords(String answer, List<String> expectedKeywords) {
         String normalizedAnswer = answer.toLowerCase();
         return expectedKeywords.stream()
@@ -182,8 +234,15 @@ public class RuleBasedEvaluator {
         return values == null ? List.of() : values;
     }
 
+    private <T> List<T> nullSafeValues(List<T> values) {
+        return values == null ? List.of() : values;
+    }
+
     private String reason(boolean sourceMatched, boolean headingPathMatched, boolean keywordMatched,
-                          boolean forbiddenMatched, boolean evidenceRequiredButMissing, boolean disallowedModelFallback) {
+                          boolean forbiddenMatched, boolean evidenceRequiredButMissing, boolean disallowedModelFallback,
+                          boolean pageMatched, boolean retrievalKeywordsMatched, boolean forbiddenRetrievalMatched,
+                          boolean pageRuleConfigured, boolean retrievalRuleConfigured,
+                          boolean forbiddenRetrievalRuleConfigured) {
         List<String> parts = new ArrayList<>();
 
         if (sourceMatched) {
@@ -206,6 +265,15 @@ public class RuleBasedEvaluator {
         }
         if (disallowedModelFallback) {
             parts.add("model fallback not allowed");
+        }
+        if (pageRuleConfigured) {
+            parts.add(pageMatched ? "page number" : "page number missing");
+        }
+        if (retrievalRuleConfigured) {
+            parts.add(retrievalKeywordsMatched ? "retrieval keywords" : "retrieval keywords missing");
+        }
+        if (forbiddenRetrievalRuleConfigured && forbiddenRetrievalMatched) {
+            parts.add("forbidden retrieval keywords");
         }
 
         if (parts.isEmpty()) {

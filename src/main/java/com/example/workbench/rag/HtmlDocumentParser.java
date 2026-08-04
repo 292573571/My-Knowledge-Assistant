@@ -38,7 +38,7 @@ public class HtmlDocumentParser implements DocumentParser {
         String html = decodeUtf8(content);
         Document document = Jsoup.parse(html);
         validateDeclaredCharset(document);
-        document.select("script,style,noscript,template,iframe,object,embed").remove();
+        document.select("script,style,noscript,template,iframe,object,embed,nav,aside,[role=navigation]").remove();
 
         ParseState state = new ParseState(normalizedText(document.title()));
         visitChildren(document.body(), state, 0, null);

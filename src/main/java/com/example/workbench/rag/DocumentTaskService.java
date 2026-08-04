@@ -143,6 +143,28 @@ public class DocumentTaskService {
         return DocumentTaskResponse.from(saved);
     }
 
+    /**
+     * 读取上传任务对应的原始文件。
+     *
+     * @param taskId 任务标识
+     * @param access 空间访问上下文
+     * @return 原始文件
+     */
+    public DocumentSourceFile sourceFile(String taskId, WorkspaceAccessContext access) {
+        DocumentTaskEntity task = visibleTask(taskId, access);
+        if (task.getType() != DocumentTaskType.UPLOAD) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "上传记录不存在");
+        }
+        try {
+            return ingestionService.sourceFile(task.getSourcePath(), task.getFileName());
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() != 404 || task.getDocumentId() == null) {
+                throw exception;
+            }
+            return ingestionService.sourceFile(task.getDocumentId(), task.getFileName(), access);
+        }
+    }
+
     @Scheduled(fixedDelayString = "${workbench.document-tasks.poll-interval-ms:5000}")
     void pollTasks() {
         renewOwnedLeases();

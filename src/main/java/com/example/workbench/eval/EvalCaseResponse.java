@@ -6,6 +6,8 @@ public record EvalCaseResponse(
         Long id, String caseId, String mode, String type, String question,
         boolean expectNoAnswer, boolean requireLocalEvidence, boolean allowModelFallback,
         List<String> expectedSources, List<String> expectedHeadingPaths,
-        List<String> expectedKeywords, List<String> forbiddenKeywords
+        List<String> expectedKeywords, List<String> forbiddenKeywords,
+        List<Integer> expectedPageNumbers, List<String> expectedRetrievalKeywords,
+        List<String> forbiddenRetrievalKeywords
 ) {
 }

@@ -5,6 +5,7 @@ import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagChatOptions;
+import com.example.workbench.rag.RetrievalDebugResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -124,6 +125,8 @@ public class EvalRunner {
                 : "user-" + ownerUserId + ":eval-" + evalCase.id();
         RagChatResponse response = ragService.chat(new RagChatRequest(conversationId, evalCase.question()),
                 new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled));
+        RetrievalDebugResponse diagnostic = ragService.debugRetrieval(evalCase.question(), ownerUserId);
+        response = new RagChatResponse(response.answer(), response.sources(), diagnostic.candidates());
         EvalResult ruleResult = evaluator.evaluate(evalCase, response);
 
         if (!judgeEnabled) {

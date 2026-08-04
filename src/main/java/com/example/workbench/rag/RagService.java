@@ -260,7 +260,7 @@ public class RagService {
         return new RetrievalDebugResponse(
                 question.strip(),
                 queries,
-                retrievalDebug(question.strip(), candidates, usedSources)
+                retrievalDebugEntries(question.strip(), candidates, usedSources)
         );
     }
 
@@ -1220,6 +1220,15 @@ public class RagService {
             return null;
         }
 
+        return retrievalDebugEntries(question, retrievedSources, contextSources);
+    }
+
+    private List<RetrievalDebug> retrievalDebugEntries(
+            String question,
+            List<SourceDocument> retrievedSources,
+            List<SourceDocument> contextSources
+    ) {
+
         int retrievedChunkCount = retrievedSources.size();
         return retrievedSources.stream()
                 .map(source -> new RetrievalDebug(
@@ -1231,6 +1240,8 @@ public class RagService {
                         containsSource(contextSources, source),
                         source.fileName(),
                         source.headingPath(),
+                        source.chunkIndex(),
+                        source.pageNumber() > 0 ? source.pageNumber() : null,
                         source.score(),
                         snippet(source.content())
                 ))

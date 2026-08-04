@@ -23,6 +23,7 @@ public class EvalCaseService {
     private static final int SEED_CASE_LIMIT = 30;
     private static final Pattern FLOW_CASE_ID = Pattern.compile("flow-(\\d+)", Pattern.CASE_INSENSITIVE);
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() { };
+    private static final TypeReference<List<Integer>> INTEGER_LIST = new TypeReference<>() { };
 
     private final EvalCaseRepository repository;
     private final ObjectMapper objectMapper;
@@ -96,9 +97,11 @@ public class EvalCaseService {
             EvalCaseEntity entity = new EvalCaseEntity(user);
             entity.update(new EvalCaseRequest(template.id(), template.mode(), template.type(), template.question(),
                     template.expectNoAnswer(), template.requireLocalEvidence(), template.allowModelFallback(),
-                    template.expectedSources(), template.expectedHeadingPaths(), template.expectedKeywords(), template.forbiddenKeywords()),
+                    template.expectedSources(), template.expectedHeadingPaths(), template.expectedKeywords(), template.forbiddenKeywords(),
+                    template.expectedPageNumbers(), template.expectedRetrievalKeywords(), template.forbiddenRetrievalKeywords()),
                     json(template.expectedSources()), json(template.expectedHeadingPaths()),
-                    json(template.expectedKeywords()), json(template.forbiddenKeywords()));
+                    json(template.expectedKeywords()), json(template.forbiddenKeywords()), json(template.expectedPageNumbers()),
+                    json(template.expectedRetrievalKeywords()), json(template.forbiddenRetrievalKeywords()));
             return entity;
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to read eval case template", exception);
@@ -125,12 +128,14 @@ public class EvalCaseService {
     private EvalCaseRequest withCaseId(EvalCaseRequest request, String caseId) {
         return new EvalCaseRequest(caseId, request.mode(), request.type(), request.question(),
                 request.expectNoAnswer(), request.requireLocalEvidence(), request.allowModelFallback(),
-                request.expectedSources(), request.expectedHeadingPaths(), request.expectedKeywords(), request.forbiddenKeywords());
+                request.expectedSources(), request.expectedHeadingPaths(), request.expectedKeywords(), request.forbiddenKeywords(),
+                request.expectedPageNumbers(), request.expectedRetrievalKeywords(), request.forbiddenRetrievalKeywords());
     }
 
     private void update(EvalCaseEntity entity, EvalCaseRequest request) {
         entity.update(request, json(request.expectedSources()), json(request.expectedHeadingPaths()),
-                json(request.expectedKeywords()), json(request.forbiddenKeywords()));
+                json(request.expectedKeywords()), json(request.forbiddenKeywords()), json(request.expectedPageNumbers()),
+                json(request.expectedRetrievalKeywords()), json(request.forbiddenRetrievalKeywords()));
     }
 
     private EvalCaseEntity owned(AppUser user, Long id) {
@@ -142,17 +147,21 @@ public class EvalCaseService {
         return new EvalCaseResponse(entity.getId(), entity.getCaseId(), entity.getMode(), entity.getType(), entity.getQuestion(),
                 entity.isExpectNoAnswer(), entity.isRequireLocalEvidence(), entity.isAllowModelFallback(),
                 list(entity.getExpectedSources()), list(entity.getExpectedHeadingPaths()),
-                list(entity.getExpectedKeywords()), list(entity.getForbiddenKeywords()));
+                list(entity.getExpectedKeywords()), list(entity.getForbiddenKeywords()),
+                integerList(entity.getExpectedPageNumbers()), list(entity.getExpectedRetrievalKeywords()),
+                list(entity.getForbiddenRetrievalKeywords()));
     }
 
     private EvalCase evalCase(EvalCaseEntity entity) {
         return new EvalCase(entity.getCaseId(), entity.getMode(), entity.getType(), entity.getQuestion(),
                 entity.isExpectNoAnswer(), entity.isRequireLocalEvidence(), entity.isAllowModelFallback(),
                 list(entity.getExpectedSources()), list(entity.getExpectedHeadingPaths()),
-                list(entity.getExpectedKeywords()), list(entity.getForbiddenKeywords()));
+                list(entity.getExpectedKeywords()), list(entity.getForbiddenKeywords()),
+                integerList(entity.getExpectedPageNumbers()), list(entity.getExpectedRetrievalKeywords()),
+                list(entity.getForbiddenRetrievalKeywords()));
     }
 
-    private String json(List<String> values) {
+    private String json(List<?> values) {
         try {
             return objectMapper.writeValueAsString(values == null ? List.of() : values);
         } catch (JsonProcessingException exception) {
@@ -161,10 +170,24 @@ public class EvalCaseService {
     }
 
     private List<String> list(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
         try {
             return objectMapper.readValue(value, STRING_LIST);
         } catch (IOException exception) {
             throw new IllegalStateException("Invalid stored eval case list", exception);
+        }
+    }
+
+    private List<Integer> integerList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, INTEGER_LIST);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Invalid stored eval case page list", exception);
         }
     }
 }

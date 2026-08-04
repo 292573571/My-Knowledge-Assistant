@@ -65,7 +65,10 @@ function newCaseForm(caseItem = {}) {
     expectedSources: arrayText(caseItem.expectedSources),
     expectedHeadingPaths: arrayText(caseItem.expectedHeadingPaths),
     expectedKeywords: arrayText(caseItem.expectedKeywords),
-    forbiddenKeywords: arrayText(caseItem.forbiddenKeywords)
+    forbiddenKeywords: arrayText(caseItem.forbiddenKeywords),
+    expectedPageNumbers: Array.isArray(caseItem.expectedPageNumbers) ? caseItem.expectedPageNumbers.join('\n') : '',
+    expectedRetrievalKeywords: arrayText(caseItem.expectedRetrievalKeywords),
+    forbiddenRetrievalKeywords: arrayText(caseItem.forbiddenRetrievalKeywords)
   }
 }
 
@@ -84,8 +87,15 @@ function listText(value) {
 function ruleSummary(item) {
   return [
     ['来源', item.expectedSources], ['路径', item.expectedHeadingPaths],
-    ['关键词', item.expectedKeywords], ['禁用', item.forbiddenKeywords]
+    ['答案关键词', item.expectedKeywords], ['答案禁用', item.forbiddenKeywords],
+    ['页码', item.expectedPageNumbers], ['候选关键词', item.expectedRetrievalKeywords],
+    ['候选禁用', item.forbiddenRetrievalKeywords]
   ].filter(([, value]) => Array.isArray(value) && value.length).map(([label, value]) => `${label}: ${listText(value)}`).join(' | ') || '未配置规则'
+}
+
+function candidateLocation(candidate) {
+  return [candidate.fileName, candidate.pageNumber ? `第 ${candidate.pageNumber} 页` : '',
+    candidate.headingPath, Number.isInteger(candidate.chunkIndex) ? `分块 ${candidate.chunkIndex}` : ''].filter(Boolean).join(' · ')
 }
 
 function casePayload() {
@@ -94,7 +104,10 @@ function casePayload() {
     mode: form.mode.trim(), type: form.type.trim(), question: form.question.trim(),
     expectNoAnswer: form.expectNoAnswer, requireLocalEvidence: form.requireLocalEvidence, allowModelFallback: form.allowModelFallback,
     expectedSources: textArray(form.expectedSources), expectedHeadingPaths: textArray(form.expectedHeadingPaths),
-    expectedKeywords: textArray(form.expectedKeywords), forbiddenKeywords: textArray(form.forbiddenKeywords)
+    expectedKeywords: textArray(form.expectedKeywords), forbiddenKeywords: textArray(form.forbiddenKeywords),
+    expectedPageNumbers: textArray(form.expectedPageNumbers).map(Number),
+    expectedRetrievalKeywords: textArray(form.expectedRetrievalKeywords),
+    forbiddenRetrievalKeywords: textArray(form.forbiddenRetrievalKeywords)
   }
 }
 
@@ -315,7 +328,7 @@ onMounted(loadEvalCases)
 
     <Teleport to="body">
       <div v-if="caseFormOpen" class="retrieval-eval-modal-backdrop" @click.self="cancelCaseEdit">
-        <form class="retrieval-eval-form retrieval-eval-modal" @submit.prevent="saveEvalCase"><header><h3>{{ editingCaseId === null ? '新增 Eval Case' : '编辑 Eval Case' }}</h3><button type="button" class="retrieval-eval-secondary" :disabled="caseSaving" @click="cancelCaseEdit">关闭</button></header><div class="retrieval-eval-form-grid"><label>模式<input v-model="caseForm.mode" placeholder="例如 LOCAL"></label><label>类型<input v-model="caseForm.type" placeholder="例如 retrieval"></label><label class="wide">问题<textarea v-model="caseForm.question" required placeholder="输入评测问题"></textarea></label><label>期望来源<textarea v-model="caseForm.expectedSources" placeholder="每行或逗号分隔"></textarea></label><label>期望标题路径<textarea v-model="caseForm.expectedHeadingPaths" placeholder="每行或逗号分隔"></textarea></label><label>期望关键词<textarea v-model="caseForm.expectedKeywords" placeholder="每行或逗号分隔"></textarea></label><label>禁用关键词<textarea v-model="caseForm.forbiddenKeywords" placeholder="每行或逗号分隔"></textarea></label></div><div class="retrieval-eval-checkboxes"><label><input v-model="caseForm.expectNoAnswer" type="checkbox">期望无回答</label><label><input v-model="caseForm.requireLocalEvidence" type="checkbox">要求本地证据</label><label><input v-model="caseForm.allowModelFallback" type="checkbox">允许模型兜底</label></div><div class="retrieval-eval-modal-actions"><button type="button" class="retrieval-eval-secondary" :disabled="caseSaving" @click="cancelCaseEdit">取消</button><button type="submit" class="retrieval-eval-primary" :disabled="caseSaving || !caseForm.question.trim()">{{ caseSaving ? '保存中...' : editingCaseId === null ? '新增评测题' : '保存修改' }}</button></div></form>
+        <form class="retrieval-eval-form retrieval-eval-modal" @submit.prevent="saveEvalCase"><header><h3>{{ editingCaseId === null ? '新增 Eval Case' : '编辑 Eval Case' }}</h3><button type="button" class="retrieval-eval-secondary" :disabled="caseSaving" @click="cancelCaseEdit">关闭</button></header><div class="retrieval-eval-form-grid"><label>模式<input v-model="caseForm.mode" placeholder="例如 LOCAL"></label><label>类型<input v-model="caseForm.type" placeholder="例如 retrieval"></label><label class="wide">问题<textarea v-model="caseForm.question" required placeholder="输入评测问题"></textarea></label><label>期望来源<textarea v-model="caseForm.expectedSources" placeholder="每行或逗号分隔"></textarea></label><label>期望标题路径<textarea v-model="caseForm.expectedHeadingPaths" placeholder="每行或逗号分隔"></textarea></label><label>答案期望关键词<textarea v-model="caseForm.expectedKeywords" placeholder="每行或逗号分隔"></textarea></label><label>答案禁用关键词<textarea v-model="caseForm.forbiddenKeywords" placeholder="每行或逗号分隔"></textarea></label><label>期望 PDF 页码<textarea v-model="caseForm.expectedPageNumbers" placeholder="例如 2，每行一个页码"></textarea></label><label>同一候选期望关键词<textarea v-model="caseForm.expectedRetrievalKeywords" placeholder="所有关键词必须出现在同一检索候选"></textarea></label><label class="wide">候选禁用关键词<textarea v-model="caseForm.forbiddenRetrievalKeywords" placeholder="用于检查 HTML 导航等解析噪音"></textarea></label></div><div class="retrieval-eval-checkboxes"><label><input v-model="caseForm.expectNoAnswer" type="checkbox">期望无回答</label><label><input v-model="caseForm.requireLocalEvidence" type="checkbox">要求本地证据</label><label><input v-model="caseForm.allowModelFallback" type="checkbox">允许模型兜底</label></div><div class="retrieval-eval-modal-actions"><button type="button" class="retrieval-eval-secondary" :disabled="caseSaving" @click="cancelCaseEdit">取消</button><button type="submit" class="retrieval-eval-primary" :disabled="caseSaving || !caseForm.question.trim()">{{ caseSaving ? '保存中...' : editingCaseId === null ? '新增评测题' : '保存修改' }}</button></div></form>
       </div>
     </Teleport>
 
@@ -343,6 +356,10 @@ onMounted(loadEvalCases)
       <div class="retrieval-eval-cases">
         <article v-for="item in evalSummary.results || []" :key="item.id" :class="{ failed: !item.passed }">
           <span>{{ item.passed ? '通过' : '失败' }}</span><strong>{{ item.id }}</strong><p>{{ item.question }}</p><small>{{ item.reason || '-' }}</small>
+          <details v-if="item.retrievalDebug?.length" class="retrieval-eval-diagnostics">
+            <summary>查看 {{ item.retrievalDebug.length }} 个检索候选</summary>
+            <div><article v-for="(candidate, index) in item.retrievalDebug" :key="`${candidate.fileName}-${candidate.chunkIndex}-${index}`"><strong>{{ candidateLocation(candidate) }}</strong><small>得分 {{ Number(candidate.score).toFixed(4) }} · {{ candidate.usedInContext ? '已用于回答' : '未用于回答' }}</small><p>{{ candidate.preview }}</p></article></div>
+          </details>
         </article>
       </div>
     </section>

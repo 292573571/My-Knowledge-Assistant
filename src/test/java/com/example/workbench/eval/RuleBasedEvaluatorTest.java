@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagSource;
+import com.example.workbench.rag.RetrievalDebug;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -140,5 +141,81 @@ class RuleBasedEvaluatorTest {
         assertThat(result.passed()).isFalse();
         assertThat(result.reason()).contains("model fallback not allowed");
         assertThat(result.modelFallbackUsed()).isTrue();
+    }
+
+    @Test
+    void validatesPdfPageAgainstCitationAndRetrievalCandidate() {
+        EvalCase evalCase = diagnosticCase("pdf_page", List.of(2), List.of("恢复时间", "十五分钟"), List.of());
+        RagSource source = new RagSource("quality-page.pdf", 1, "恢复时间是十五分钟", 0.1, "", "docs/quality-page.pdf", 2);
+        RetrievalDebug debug = debug("quality-page.pdf", "", 1, 2, "恢复时间是十五分钟");
+
+        EvalResult result = evaluator.evaluate(evalCase,
+                new RagChatResponse("恢复时间是十五分钟。", List.of(source), List.of(debug)));
+
+        assertThat(result.passed()).isTrue();
+        assertThat(result.reason()).contains("page number", "retrieval keywords");
+    }
+
+    @Test
+    void failsWhenPdfCitationUsesWrongPage() {
+        EvalCase evalCase = diagnosticCase("pdf_page", List.of(2), List.of(), List.of());
+        RagSource source = new RagSource("quality-page.pdf", 0, "恢复时间", 0.1, "", "docs/quality-page.pdf", 1);
+
+        EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse(
+                "恢复时间是十五分钟。", List.of(source),
+                List.of(debug("quality-page.pdf", "", 0, 1, "恢复时间是十五分钟"))));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.reason()).contains("page number missing");
+    }
+
+    @Test
+    void requiresTableHeaderAndRowInSameCandidateAndRejectsHtmlNoise() {
+        EvalCase evalCase = diagnosticCase("table", List.of(),
+                List.of("服务名称", "恢复目标", "订单服务", "十五分钟"), List.of("产品中心"));
+        RetrievalDebug valid = debug("quality-table.html", "数据表", 2, null,
+                "| 服务名称 | 恢复目标 |\n| 订单服务 | 十五分钟 |");
+
+        EvalResult passed = evaluator.evaluate(evalCase,
+                new RagChatResponse("订单服务恢复目标是十五分钟。",
+                        List.of(new RagSource("quality-table.html", 2, "", 0.1, "数据表")), List.of(valid)));
+        EvalResult split = evaluator.evaluate(evalCase,
+                new RagChatResponse("订单服务恢复目标是十五分钟。",
+                        List.of(new RagSource("quality-table.html", 2, "", 0.1, "数据表")),
+                        List.of(debug("quality-table.html", "数据表", 1, null, "服务名称 恢复目标"),
+                                debug("quality-table.html", "数据表", 2, null, "订单服务 十五分钟"))));
+
+        assertThat(passed.passed()).isTrue();
+        assertThat(split.passed()).isFalse();
+        assertThat(split.reason()).contains("retrieval keywords missing");
+    }
+
+    @Test
+    void failsWhenForbiddenNavigationTextEntersRetrievalCandidate() {
+        EvalCase evalCase = diagnosticCase("html_noise", List.of(), List.of("恢复时间"), List.of("产品中心"));
+        RetrievalDebug debug = debug("quality-clean.html", "运维手册", 1, null,
+                "产品中心 订单服务恢复时间是十五分钟");
+
+        EvalResult result = evaluator.evaluate(evalCase,
+                new RagChatResponse("恢复时间是十五分钟。",
+                        List.of(new RagSource("quality-clean.html", 1, "", 0.1, "运维手册")), List.of(debug)));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.reason()).contains("forbidden retrieval keywords");
+    }
+
+    private EvalCase diagnosticCase(String type, List<Integer> pages, List<String> retrievalKeywords,
+                                    List<String> forbiddenRetrievalKeywords) {
+        String source = type.equals("pdf_page") ? "quality-page.pdf"
+                : type.equals("table") ? "quality-table.html" : "quality-clean.html";
+        return new EvalCase("multi-001", "rag", type, "恢复时间是多少？", false, true, false,
+                List.of(source), type.equals("pdf_page") ? List.of() : List.of("运维手册", "数据表"),
+                List.of("十五分钟"), List.of(), pages, retrievalKeywords, forbiddenRetrievalKeywords);
+    }
+
+    private RetrievalDebug debug(String fileName, String headingPath, int chunkIndex, Integer pageNumber,
+                                 String preview) {
+        return new RetrievalDebug("恢复时间是多少？", 5, 0.85, "distance", 1, true,
+                fileName, headingPath, chunkIndex, pageNumber, 0.1, preview);
     }
 }

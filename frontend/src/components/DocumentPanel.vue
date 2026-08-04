@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
-import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTasks, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
+import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
 import { createUuid } from '../utils/uuid'
@@ -32,6 +32,9 @@ const uploadDragActive = ref(false)
 const selectedUploadFiles = ref([])
 const documentTasks = ref([])
 const retryingTaskId = ref('')
+const openingTaskId = ref('')
+const dismissedLatestTaskId = ref('')
+const uploadHistoryOpen = ref(false)
 let noticeTimer = null
 let errorTimer = null
 let taskPollTimer = null
@@ -59,7 +62,11 @@ const filteredDocuments = computed(() => {
   })
 })
 
-const visibleTasks = computed(() => documentTasks.value.slice(0, 10))
+const uploadTasks = computed(() => documentTasks.value.filter((task) => task.type === 'UPLOAD'))
+const latestUploadTask = computed(() => uploadTasks.value[0] || null)
+const visibleLatestUploadTask = computed(() => latestUploadTask.value?.taskId === dismissedLatestTaskId.value
+  ? null
+  : latestUploadTask.value)
 const hasPendingTasks = computed(() => documentTasks.value.some((task) => ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(task.status)))
 
 const taskStatusLabels = {
@@ -140,6 +147,18 @@ async function loadDocumentTasks() {
 function scheduleTaskPoll() {
   if (taskPollTimer) window.clearTimeout(taskPollTimer)
   taskPollTimer = window.setTimeout(loadDocumentTasks, hasPendingTasks.value ? 2000 : 5000)
+}
+
+function dismissLatestUploadTask() {
+  dismissedLatestTaskId.value = latestUploadTask.value?.taskId || ''
+}
+
+function closeUploadHistory() {
+  uploadHistoryOpen.value = false
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key === 'Escape' && uploadHistoryOpen.value) closeUploadHistory()
 }
 
 function showNotice(message) {
@@ -288,6 +307,32 @@ async function retryTask(task) {
   }
 }
 
+async function openTaskSource(task) {
+  openingTaskId.value = task.taskId
+  clearError()
+  const previewWindow = window.open('', '_blank')
+  try {
+    const blob = await fetchDocumentTaskSource(task.taskId, props.workspace?.id)
+    const url = URL.createObjectURL(blob)
+    if (previewWindow) {
+      previewWindow.opener = null
+      previewWindow.location.replace(url)
+    } else {
+      const link = document.createElement('a')
+      link.href = url
+      link.target = '_blank'
+      link.rel = 'noopener'
+      link.click()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch (exception) {
+    previewWindow?.close()
+    showError(`源文件打开失败：${formatApiError(exception)}`, 'error', '无法打开源文件')
+  } finally {
+    openingTaskId.value = ''
+  }
+}
+
 async function openDocument(document) {
   contentDocument.value = { ...document, content: '' }
   contentLoading.value = true
@@ -329,11 +374,13 @@ async function confirmDelete() {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown)
   loadDocuments()
   loadDocumentTasks()
 })
 onBeforeUnmount(() => {
   disposed = true
+  window.removeEventListener('keydown', handleGlobalKeydown)
   if (noticeTimer) window.clearTimeout(noticeTimer)
   if (errorTimer) window.clearTimeout(errorTimer)
   if (taskPollTimer) window.clearTimeout(taskPollTimer)
@@ -348,6 +395,7 @@ onBeforeUnmount(() => {
         <p>{{ documents.length }} 个文档，{{ totalChunks }} 个 chunks</p>
       </div>
       <div class="document-actions">
+        <button type="button" class="document-history-action" @click="uploadHistoryOpen = true">上传历史</button>
         <button type="button" class="document-upload-action" :disabled="loading" @click="openUploadDialog">上传文档</button>
         <button type="button" :disabled="loading" @click="loadDocuments">刷新</button>
       </div>
@@ -358,21 +406,50 @@ onBeforeUnmount(() => {
       <span><strong>全局可见</strong>上传到“{{ workspace.name }}”的文档会成为平台公共知识，可被所有用户在个人或团队空间提问时检索。</span>
     </div>
 
-    <section v-if="visibleTasks.length" class="document-task-list" aria-label="文档处理任务">
-      <header><div><h3>处理任务</h3><span>解析和索引在后台执行</span></div><span v-if="hasPendingTasks" class="document-task-live">自动更新</span></header>
-      <article v-for="task in visibleTasks" :key="task.taskId" class="document-task-item" :class="task.status.toLowerCase()">
+    <section v-if="visibleLatestUploadTask" class="document-task-list document-latest-task" aria-label="最近一次上传任务">
+      <header>
+        <div><h3>最近上传</h3><span>解析和索引在后台执行</span></div>
+        <div class="document-task-header-actions"><span v-if="hasPendingTasks" class="document-task-live">自动更新</span><button type="button" class="document-task-dismiss" aria-label="关闭最近上传任务" @click="dismissLatestUploadTask">×</button></div>
+      </header>
+      <article class="document-task-item" :class="visibleLatestUploadTask.status.toLowerCase()">
         <div class="document-task-main">
-          <div><strong>{{ task.fileName }}</strong><span>{{ taskTypeLabels[task.type] || task.type }} · {{ taskStatusLabels[task.status] || task.status }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
-          <b>{{ task.progress }}%</b>
+          <div><strong>{{ visibleLatestUploadTask.fileName }}</strong><span>{{ taskTypeLabels[visibleLatestUploadTask.type] || visibleLatestUploadTask.type }} · {{ taskStatusLabels[visibleLatestUploadTask.status] || visibleLatestUploadTask.status }} · {{ taskStageLabels[visibleLatestUploadTask.stage] || visibleLatestUploadTask.stage }}</span></div>
+          <b>{{ visibleLatestUploadTask.progress }}%</b>
         </div>
-        <div class="document-task-progress" :aria-label="`处理进度 ${task.progress}%`"><span :style="{ width: `${task.progress}%` }"></span></div>
+        <div class="document-task-progress" :aria-label="`处理进度 ${visibleLatestUploadTask.progress}%`"><span :style="{ width: `${visibleLatestUploadTask.progress}%` }"></span></div>
         <div class="document-task-meta">
-          <small v-if="task.errorMessage">{{ task.errorMessage }}</small>
-          <small v-else>尝试 {{ task.attemptCount }}/{{ task.maxAttempts }} · {{ formatTime(task.createdAt) }}</small>
-          <button v-if="task.status === 'FAILED'" type="button" :disabled="retryingTaskId === task.taskId" @click="retryTask(task)">{{ retryingTaskId === task.taskId ? '重试中...' : '重试' }}</button>
+          <small v-if="visibleLatestUploadTask.errorMessage">{{ visibleLatestUploadTask.errorMessage }}</small>
+          <small v-else>尝试 {{ visibleLatestUploadTask.attemptCount }}/{{ visibleLatestUploadTask.maxAttempts }} · {{ formatTime(visibleLatestUploadTask.createdAt) }}</small>
+          <button v-if="visibleLatestUploadTask.status === 'FAILED'" type="button" :disabled="retryingTaskId === visibleLatestUploadTask.taskId" @click="retryTask(visibleLatestUploadTask)">{{ retryingTaskId === visibleLatestUploadTask.taskId ? '重试中...' : '重试' }}</button>
         </div>
       </article>
     </section>
+
+    <Teleport to="body">
+      <div v-if="uploadHistoryOpen" class="document-task-history-backdrop" @click.self="closeUploadHistory">
+        <section class="document-task-history-dialog" role="dialog" aria-modal="true" aria-labelledby="document-task-history-title">
+          <header>
+            <div><p>UPLOAD HISTORY</p><h2 id="document-task-history-title">上传历史</h2><span>最近 {{ uploadTasks.length }} 条上传与索引任务</span></div>
+            <button type="button" aria-label="关闭上传历史" @click="closeUploadHistory">×</button>
+          </header>
+          <div class="document-task-history-list">
+            <div v-if="!uploadTasks.length" class="document-task-history-empty">当前空间暂无上传记录</div>
+            <article v-for="task in uploadTasks" :key="task.taskId" class="document-task-item" :class="task.status.toLowerCase()">
+              <div class="document-task-main">
+                <div><button type="button" class="document-task-file-link" :disabled="openingTaskId === task.taskId" :title="`打开源文件 ${task.fileName}`" @click="openTaskSource(task)">{{ openingTaskId === task.taskId ? '正在打开...' : task.fileName }}</button><span>{{ taskStatusLabels[task.status] || task.status }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
+                <b>{{ task.progress }}%</b>
+              </div>
+              <div class="document-task-progress" :aria-label="`处理进度 ${task.progress}%`"><span :style="{ width: `${task.progress}%` }"></span></div>
+              <div class="document-task-meta">
+                <small v-if="task.errorMessage">{{ task.errorMessage }}</small>
+                <small v-else>尝试 {{ task.attemptCount }}/{{ task.maxAttempts }} · {{ formatTime(task.createdAt) }}</small>
+                <button v-if="task.status === 'FAILED'" type="button" :disabled="retryingTaskId === task.taskId" @click="retryTask(task)">{{ retryingTaskId === task.taskId ? '重试中...' : '重试' }}</button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <div v-if="documents.length" class="document-filters">
       <input v-model="searchQuery" type="search" placeholder="搜索文件名或路径">

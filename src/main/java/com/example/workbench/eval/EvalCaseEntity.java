@@ -71,6 +71,18 @@ public class EvalCaseEntity {
     @Comment("禁用关键词规则")
     private String forbiddenKeywords;
 
+    @Column(name = "expected_page_numbers", columnDefinition = "TEXT")
+    @Comment("期望命中的 PDF 页码")
+    private String expectedPageNumbers;
+
+    @Column(name = "expected_retrieval_keywords", columnDefinition = "TEXT")
+    @Comment("同一检索候选必须包含的关键词")
+    private String expectedRetrievalKeywords;
+
+    @Column(name = "forbidden_retrieval_keywords", columnDefinition = "TEXT")
+    @Comment("检索候选正文不得包含的噪音关键词")
+    private String forbiddenRetrievalKeywords;
+
     protected EvalCaseEntity() {
     }
 
@@ -91,9 +103,13 @@ public class EvalCaseEntity {
     public String getExpectedHeadingPaths() { return expectedHeadingPaths; }
     public String getExpectedKeywords() { return expectedKeywords; }
     public String getForbiddenKeywords() { return forbiddenKeywords; }
+    public String getExpectedPageNumbers() { return expectedPageNumbers; }
+    public String getExpectedRetrievalKeywords() { return expectedRetrievalKeywords; }
+    public String getForbiddenRetrievalKeywords() { return forbiddenRetrievalKeywords; }
 
     public void update(EvalCaseRequest request, String expectedSources, String expectedHeadingPaths,
-                       String expectedKeywords, String forbiddenKeywords) {
+                       String expectedKeywords, String forbiddenKeywords, String expectedPageNumbers,
+                       String expectedRetrievalKeywords, String forbiddenRetrievalKeywords) {
         this.caseId = request.caseId();
         this.mode = request.mode();
         this.type = request.type();
@@ -105,5 +121,14 @@ public class EvalCaseEntity {
         this.expectedHeadingPaths = expectedHeadingPaths;
         this.expectedKeywords = expectedKeywords;
         this.forbiddenKeywords = forbiddenKeywords;
+        this.expectedPageNumbers = expectedPageNumbers;
+        this.expectedRetrievalKeywords = expectedRetrievalKeywords;
+        this.forbiddenRetrievalKeywords = forbiddenRetrievalKeywords;
+    }
+
+    void update(EvalCaseRequest request, String expectedSources, String expectedHeadingPaths,
+                String expectedKeywords, String forbiddenKeywords) {
+        update(request, expectedSources, expectedHeadingPaths, expectedKeywords, forbiddenKeywords,
+                "[]", "[]", "[]");
     }
 }

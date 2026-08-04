@@ -163,6 +163,28 @@ public class RagController {
                 adminAuthorizationService.isAdmin(actor));
     }
 
+    @GetMapping("/document-tasks/{taskId}/source")
+    public org.springframework.http.ResponseEntity<byte[]> documentTaskSource(
+            @PathVariable String taskId,
+            @RequestParam(required = false) String workspaceId,
+            HttpServletRequest request
+    ) {
+        AppUser actor = authenticatedUser(request);
+        DocumentSourceFile source = documentTaskService.sourceFile(
+                taskId, workspaceService.access(actor, workspaceId));
+        org.springframework.http.MediaType mediaType = org.springframework.http.MediaTypeFactory
+                .getMediaType(source.fileName())
+                .orElse(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM);
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(source.content().length)
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        org.springframework.http.ContentDisposition.inline()
+                                .filename(source.fileName(), java.nio.charset.StandardCharsets.UTF_8)
+                                .build().toString())
+                .body(source.content());
+    }
+
     @GetMapping("/documents/{documentId}/content")
     public DocumentContentResponse documentContent(@PathVariable String documentId,
                                                    @RequestParam(required = false) String workspaceId,

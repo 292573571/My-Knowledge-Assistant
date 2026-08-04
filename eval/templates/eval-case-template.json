@@ -9,7 +9,10 @@
     "expectedSources": ["normal-chat-data-flow.md"],
     "expectedHeadingPaths": ["普通问答数据流"],
     "expectedKeywords": ["POST /api/workbench/chat", "conversationId", "message"],
-    "forbiddenKeywords": []
+    "forbiddenKeywords": [],
+    "expectedPageNumbers": [],
+    "expectedRetrievalKeywords": [],
+    "forbiddenRetrievalKeywords": []
   },
   {
     "mode": "rag",
@@ -21,6 +24,9 @@
     "expectedSources": [],
     "expectedHeadingPaths": [],
     "expectedKeywords": [],
-    "forbiddenKeywords": ["密码", "具体值"]
+    "forbiddenKeywords": ["密码", "具体值"],
+    "expectedPageNumbers": [],
+    "expectedRetrievalKeywords": [],
+    "forbiddenRetrievalKeywords": []
   }
 ]

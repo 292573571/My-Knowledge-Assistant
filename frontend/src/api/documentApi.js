@@ -65,6 +65,20 @@ export function retryDocumentTask(taskId, workspaceId = '') {
   })
 }
 
+export async function fetchDocumentTaskSource(taskId, workspaceId = '') {
+  let response
+  try {
+    response = await fetch(`/api/document-tasks/${encodeURIComponent(taskId)}/source${workspaceQuery(workspaceId)}`, {
+      credentials: 'include',
+      headers: authHeaders()
+    })
+  } catch (error) {
+    throw apiErrorFromException(error, '无法读取文档源文件。')
+  }
+  if (!response.ok) throw await apiErrorFromResponse(response, '文档源文件不可用。')
+  return response.blob()
+}
+
 export function ingestDocuments(path = '', force = false, workspaceId = '') {
   return request(`/api/documents/ingest-directory${workspaceQuery(workspaceId)}`, {
     method: 'POST',

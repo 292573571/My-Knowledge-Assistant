@@ -61,6 +61,17 @@ class HtmlDocumentParserTest {
     }
 
     @Test
+    void removesNavigationAndSidebarNoise() {
+        ParsedDocument document = parser.parse("""
+                <body><nav>首页 产品中心 联系我们</nav><aside>热门推荐 广告入口</aside>
+                <main><h1>运维手册</h1><p>订单服务的恢复时间目标是十五分钟。</p></main></body>
+                """);
+
+        assertThat(document.content()).contains("运维手册", "恢复时间目标")
+                .doesNotContain("首页", "产品中心", "热门推荐", "广告入口");
+    }
+
+    @Test
     void rejectsNonUtf8DeclarationAndInvalidUtf8Bytes() {
         assertThatThrownBy(() -> parser.parse("<meta charset='GBK'><p>text</p>"))
                 .isInstanceOf(IllegalArgumentException.class)

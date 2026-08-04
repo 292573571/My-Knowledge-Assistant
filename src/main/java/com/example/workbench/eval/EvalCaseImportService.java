@@ -157,17 +157,22 @@ public class EvalCaseImportService {
                 value(values, "type", "类型"), value(values, "question", "问题", "评测问题"), bool(values, "expectnoanswer", "expect_no_answer", "期望无回答"),
                 bool(values, "requirelocalevidence", "require_local_evidence", "要求本地证据"), bool(values, "allowmodelfallback", "allow_model_fallback", "允许模型兜底"),
                 list(value(values, "expectedsources", "expected_sources", "期望来源")), list(value(values, "expectedheadingpaths", "expected_heading_paths", "期望标题路径")),
-                list(value(values, "expectedkeywords", "expected_keywords", "期望关键词")), list(value(values, "forbiddenkeywords", "forbidden_keywords", "禁用关键词")));
+                list(value(values, "expectedkeywords", "expected_keywords", "期望关键词")), list(value(values, "forbiddenkeywords", "forbidden_keywords", "禁用关键词")),
+                integers(value(values, "expectedpagenumbers", "expected_page_numbers", "期望页码")),
+                list(value(values, "expectedretrievalkeywords", "expected_retrieval_keywords", "期望检索关键词")),
+                list(value(values, "forbiddenretrievalkeywords", "forbidden_retrieval_keywords", "禁用检索关键词")));
     }
 
     private EvalCaseRequest normalize(EvalCaseRequest request) {
         if (request.question() == null || request.question().isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "每条导入题目都必须填写问题");
         return new EvalCaseRequest(null, request.mode(), request.type() == null || request.type().isBlank() ? "fact" : request.type(), request.question().trim(),
-                request.expectNoAnswer(), request.requireLocalEvidence(), request.allowModelFallback(), request.expectedSources(), request.expectedHeadingPaths(), request.expectedKeywords(), request.forbiddenKeywords());
+                request.expectNoAnswer(), request.requireLocalEvidence(), request.allowModelFallback(), request.expectedSources(), request.expectedHeadingPaths(), request.expectedKeywords(), request.forbiddenKeywords(),
+                request.expectedPageNumbers(), request.expectedRetrievalKeywords(), request.forbiddenRetrievalKeywords());
     }
 
     private String key(String value) { return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace(" ", ""); }
     private String value(Map<String, String> values, String... keys) { for (String key : keys) if (values.containsKey(key(key))) return values.get(key(key)); return ""; }
     private boolean bool(Map<String, String> values, String... keys) { String value = value(values, keys); return List.of("true", "1", "yes", "是").contains(value.trim().toLowerCase(Locale.ROOT)); }
     private List<String> list(String value) { return value == null || value.isBlank() ? List.of() : List.of(value.split("[，,、\\n]")) .stream().map(String::trim).filter(item -> !item.isBlank()).toList(); }
+    private List<Integer> integers(String value) { return list(value).stream().map(item -> { try { return Integer.parseInt(item); } catch (NumberFormatException exception) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "期望页码必须是整数"); } }).toList(); }
 }
