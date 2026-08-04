@@ -13,6 +13,7 @@ import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AppUserRepository;
 import com.example.workbench.workspace.WorkspaceService;
 import java.util.Optional;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -107,10 +108,48 @@ class DocumentTaskServiceTest {
         when(ingestionService.sourceFile(task.getSourcePath(), task.getFileName()))
                 .thenThrow(new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "文档源文件已缺失"));
+        when(ingestionService.isIndexedDocumentAvailable("document-1", access)).thenReturn(true);
         when(ingestionService.sourceFile("document-1", task.getFileName(), access)).thenReturn(source);
         DocumentTaskService service = service(repository, ingestionService);
 
         assertThat(service.sourceFile("task-1", access)).isSameAs(source);
+    }
+
+    @Test
+    void marksSucceededUploadAsDeletedWhenIndexNoLongerExists() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        DocumentTaskEntity task = task();
+        task.succeed("document-1");
+        WorkspaceAccessContext access = new WorkspaceAccessContext(
+                "viewer-1", "team-1", WorkspaceRole.VIEWER, WorkspaceType.TEAM);
+        when(repository.findTop20ByWorkspaceIdOrderByCreatedAtDesc("team-1")).thenReturn(List.of(task));
+
+        List<DocumentTaskResponse> result = service(repository, ingestionService).list(access, false);
+
+        assertThat(result).singleElement().satisfies(response -> {
+            assertThat(response.documentId()).isEqualTo("document-1");
+            assertThat(response.documentDeleted()).isTrue();
+        });
+    }
+
+    @Test
+    void refusesToOpenDeletedKnowledgeDocumentEvenWhenSourcePathRemains() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        DocumentTaskEntity task = task();
+        task.succeed("document-1");
+        WorkspaceAccessContext access = new WorkspaceAccessContext(
+                "viewer-1", "team-1", WorkspaceRole.VIEWER, WorkspaceType.TEAM);
+        when(repository.findById("task-1")).thenReturn(Optional.of(task));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service(repository, ingestionService).sourceFile("task-1", access))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((org.springframework.web.server.ResponseStatusException) exception)
+                        .getStatusCode().value()).isEqualTo(410))
+                .hasMessageContaining("知识库文档已删除");
+        Mockito.verify(ingestionService, Mockito.never()).sourceFile(task.getSourcePath(), task.getFileName());
     }
 
     private DocumentTaskEntity task() {

@@ -34,6 +34,7 @@ const documentTasks = ref([])
 const retryingTaskId = ref('')
 const openingTaskId = ref('')
 const dismissedLatestTaskId = ref('')
+const currentUploadTaskId = ref('')
 const uploadHistoryOpen = ref(false)
 let noticeTimer = null
 let errorTimer = null
@@ -63,10 +64,10 @@ const filteredDocuments = computed(() => {
 })
 
 const uploadTasks = computed(() => documentTasks.value.filter((task) => task.type === 'UPLOAD'))
-const latestUploadTask = computed(() => uploadTasks.value[0] || null)
-const visibleLatestUploadTask = computed(() => latestUploadTask.value?.taskId === dismissedLatestTaskId.value
-  ? null
-  : latestUploadTask.value)
+const visibleLatestUploadTask = computed(() => {
+  if (!currentUploadTaskId.value || currentUploadTaskId.value === dismissedLatestTaskId.value) return null
+  return uploadTasks.value.find((task) => task.taskId === currentUploadTaskId.value) || null
+})
 const hasPendingTasks = computed(() => documentTasks.value.some((task) => ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(task.status)))
 
 const taskStatusLabels = {
@@ -150,7 +151,7 @@ function scheduleTaskPoll() {
 }
 
 function dismissLatestUploadTask() {
-  dismissedLatestTaskId.value = latestUploadTask.value?.taskId || ''
+  dismissedLatestTaskId.value = currentUploadTaskId.value
 }
 
 function closeUploadHistory() {
@@ -281,6 +282,8 @@ async function uploadSelectedFiles() {
       const pending = pendingFiles[0]
       const result = await uploadWorkspaceDocument(pending.file, targetWorkspaceId, pending.clientRequestId)
       if (result.workspaceId !== targetWorkspaceId) throw new Error('服务端返回的任务归属与当前空间不一致')
+      currentUploadTaskId.value = result.taskId
+      dismissedLatestTaskId.value = ''
       pendingFiles.shift()
     }
     await loadDocumentTasks()
@@ -436,7 +439,7 @@ onBeforeUnmount(() => {
             <div v-if="!uploadTasks.length" class="document-task-history-empty">当前空间暂无上传记录</div>
             <article v-for="task in uploadTasks" :key="task.taskId" class="document-task-item" :class="task.status.toLowerCase()">
               <div class="document-task-main">
-                <div><button type="button" class="document-task-file-link" :disabled="openingTaskId === task.taskId" :title="`打开源文件 ${task.fileName}`" @click="openTaskSource(task)">{{ openingTaskId === task.taskId ? '正在打开...' : task.fileName }}</button><span>{{ taskStatusLabels[task.status] || task.status }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
+                <div><button v-if="!task.documentDeleted" type="button" class="document-task-file-link" :disabled="openingTaskId === task.taskId" :title="`打开源文件 ${task.fileName}`" @click="openTaskSource(task)">{{ openingTaskId === task.taskId ? '正在打开...' : task.fileName }}</button><strong v-else class="document-task-file-deleted">{{ task.fileName }}<em>已删除</em></strong><span>{{ task.documentDeleted ? '知识库文档已删除' : (taskStatusLabels[task.status] || task.status) }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
                 <b>{{ task.progress }}%</b>
               </div>
               <div class="document-task-progress" :aria-label="`处理进度 ${task.progress}%`"><span :style="{ width: `${task.progress}%` }"></span></div>

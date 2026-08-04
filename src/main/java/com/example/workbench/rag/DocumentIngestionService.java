@@ -350,6 +350,22 @@ public class DocumentIngestionService {
                 .toList();
     }
 
+    /**
+     * 判断指定文档是否仍存在于当前空间的知识库索引中。
+     *
+     * @param documentId 文档标识
+     * @param access 空间访问上下文
+     * @return 文档仍存在且当前用户可读时返回 true
+     */
+    public boolean isIndexedDocumentAvailable(String documentId, WorkspaceAccessContext access) {
+        if (documentId == null || documentId.isBlank()) {
+            return false;
+        }
+        return documentIndexStore.list().stream()
+                .filter(entry -> entry.documentId().equals(documentId))
+                .anyMatch(entry -> canRead(entry, access.userId(), access.workspaceId()));
+    }
+
     public List<DocumentIndexEntry> listPublicIndexedDocuments() {
         return listVisibleIndexedDocuments("");
     }

@@ -1280,6 +1280,8 @@ textarea:focus-visible,
 .document-task-main strong { overflow: hidden; color: #27334a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .document-task-file-link { min-width: 0; overflow: hidden; width: fit-content; max-width: 100%; border: 0; padding: 0; color: #27334a; background: transparent; font-size: 12px; font-weight: 700; text-align: left; text-decoration: underline; text-decoration-color: #aebddd; text-underline-offset: 3px; text-overflow: ellipsis; white-space: nowrap; }
 .document-task-file-link:hover { color: #315fd4; text-decoration-color: currentColor; }
+.document-task-file-deleted { display: flex; align-items: center; gap: 7px; color: #7c8799 !important; }
+.document-task-file-deleted em { flex: 0 0 auto; border: 1px solid #e3c6c9; border-radius: 999px; padding: 2px 6px; color: #a55058; background: #fff3f4; font-size: 9px; font-style: normal; line-height: 1.2; }
 .document-task-main span, .document-task-meta small { color: #7a869b; font-size: 11px; }
 .document-task-main b { color: #315fd4; font-size: 12px; }
 .document-task-progress { height: 5px; overflow: hidden; border-radius: 999px; background: #e9edf5; }

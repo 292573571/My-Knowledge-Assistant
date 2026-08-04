@@ -19,12 +19,17 @@ public record DocumentTaskResponse(
         String errorMessage,
         Instant createdAt,
         Instant startedAt,
-        Instant finishedAt
+        Instant finishedAt,
+        boolean documentDeleted
 ) {
     static DocumentTaskResponse from(DocumentTaskEntity task) {
+        return from(task, false);
+    }
+
+    static DocumentTaskResponse from(DocumentTaskEntity task, boolean documentDeleted) {
         return new DocumentTaskResponse(task.getTaskId(), task.getType(), task.getStatus(), task.getStage(),
                 task.getProgress(), task.getWorkspaceId(), task.getFileName(), task.getDocumentId(),
                 task.getAttemptCount(), task.getMaxAttempts(), task.getErrorMessage(), task.getCreatedAt(),
-                task.getStartedAt(), task.getFinishedAt());
+                task.getStartedAt(), task.getFinishedAt(), documentDeleted);
     }
 }

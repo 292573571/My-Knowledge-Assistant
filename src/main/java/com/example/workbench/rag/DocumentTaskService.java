@@ -115,7 +115,7 @@ public class DocumentTaskService {
     public List<DocumentTaskResponse> list(WorkspaceAccessContext access, boolean systemAdmin) {
         return repository.findTop20ByWorkspaceIdOrderByCreatedAtDesc(access.workspaceId()).stream()
                 .filter(task -> systemAdmin || task.getType() == DocumentTaskType.UPLOAD)
-                .map(DocumentTaskResponse::from)
+                .map(task -> DocumentTaskResponse.from(task, documentDeleted(task, access)))
                 .toList();
     }
 
@@ -154,6 +154,9 @@ public class DocumentTaskService {
         DocumentTaskEntity task = visibleTask(taskId, access);
         if (task.getType() != DocumentTaskType.UPLOAD) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "上传记录不存在");
+        }
+        if (documentDeleted(task, access)) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.GONE, "知识库文档已删除，源文件不可打开");
         }
         try {
             return ingestionService.sourceFile(task.getSourcePath(), task.getFileName());
@@ -325,6 +328,13 @@ public class DocumentTaskService {
         return repository.findById(taskId)
                 .filter(task -> task.getWorkspaceId().equals(access.workspaceId()))
                 .orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "文档任务不存在"));
+    }
+
+    private boolean documentDeleted(DocumentTaskEntity task, WorkspaceAccessContext access) {
+        return task.getType() == DocumentTaskType.UPLOAD
+                && task.getStatus() == DocumentTaskStatus.SUCCEEDED
+                && task.getDocumentId() != null
+                && !ingestionService.isIndexedDocumentAvailable(task.getDocumentId(), access);
     }
 
     private boolean isRetryable(Exception exception) {
