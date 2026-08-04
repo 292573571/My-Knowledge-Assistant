@@ -505,6 +505,26 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void workspaceSyncAndRebuildPreserveTheOriginalUploadFileName() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext("2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
+        WorkspaceDocumentUploadResponse upload = service.uploadWorkspaceDocument(editor,
+                new MockMultipartFile("file", "架构设计.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        DocxTestDocuments.simpleDocument("Workspace architecture content.")));
+        Path source = docsDirectory.resolve(upload.path().substring("docs/".length()));
+
+        Files.write(source, DocxTestDocuments.simpleDocument("Updated workspace architecture content."));
+        service.syncWorkspace(editor);
+        assertThat(service.listVisibleIndexedDocuments(editor)).singleElement()
+                .extracting(DocumentIndexEntry::fileName)
+                .isEqualTo("架构设计.docx");
+
+        service.rebuildDocuments(editor);
+        assertThat(service.listVisibleIndexedDocuments(editor)).singleElement()
+                .extracting(DocumentIndexEntry::fileName)
+                .isEqualTo("架构设计.docx");
+    }
+
+    @Test
     void deletingWorkspaceUploadRemovesSourceAndCannotBeReimportedBySync() throws Exception {
         WorkspaceAccessContext editor = new WorkspaceAccessContext("2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
         WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(editor,

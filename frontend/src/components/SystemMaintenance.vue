@@ -114,7 +114,7 @@ async function confirmMaintenance() {
     <p v-if="activeTool === 'maintenance' && error" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ error }}</p>
     <section v-if="activeTool === 'maintenance' && result" :class="['maintenance-message', { error: result.failed }]" role="status">
       <strong>{{ result.title }}</strong>
-      <span v-if="result.taskId">任务已进入后台队列，可在空间文档页查看状态和进度。</span>
+      <span v-if="result.taskId">任务已进入后台队列，可前往「知识库管理」查看状态和进度。</span>
       <span v-if="result.imported !== undefined">导入 {{ result.imported }} · 跳过 {{ result.skipped }} · 失败 {{ result.failed }} · {{ result.chunks }} chunks</span>
       <span v-else-if="result.scannedFiles !== undefined">扫描 {{ result.scannedFiles }} · 新增 {{ result.addedFiles }} · 更新 {{ result.updatedFiles }} · 删除 {{ result.deletedFiles }}</span>
       <span v-else-if="result.clearedDocuments !== undefined">清理 {{ result.clearedDocuments }} 个旧文档 · 重建 {{ result.files }} 个文件 · {{ result.chunks }} chunks</span>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -14,7 +14,11 @@ const props = defineProps({
   }
 })
 
-const html = computed(() => renderMarkdown(props.message.content))
+const copiedCode = ref('')
+const displayContent = computed(() => (props.message.content || '')
+  .replace(/^\s*以上回答基于通用大模型知识，不是当前知识库内容。\s*$/gm, '')
+  .trim())
+const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
 const isModelSupplement = computed(() => isAssistant.value && !props.message.error && !props.message.sources?.length
@@ -34,6 +38,24 @@ const timeLabel = computed(() => {
     minute: '2-digit'
   }).format(new Date(props.message.createdAt))
 })
+
+async function copyCode(event) {
+  const button = event.target.closest('.code-copy-button')
+  if (!button) return
+  const code = button.closest('.code-block')?.querySelector('code')?.textContent || ''
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    copiedCode.value = code
+    button.textContent = '已复制'
+    window.setTimeout(() => {
+      if (button.isConnected) button.textContent = '复制'
+      if (copiedCode.value === code) copiedCode.value = ''
+    }, 1500)
+  } catch {
+    button.textContent = '复制失败'
+  }
+}
 </script>
 
 <template>
@@ -45,7 +67,7 @@ const timeLabel = computed(() => {
         <time v-if="timeLabel" :datetime="message.createdAt">{{ timeLabel }}</time>
       </div>
       <LoadingDots v-if="streaming && !message.content" />
-      <div v-if="message.content" class="markdown-body" v-html="html"></div>
+      <div v-if="message.content" class="markdown-body" @click="copyCode" v-html="html"></div>
       <div v-if="isAssistant && message.error" class="message-alert error">
         <strong>模型或后端调用失败</strong>
         <span>{{ message.error }}</span>

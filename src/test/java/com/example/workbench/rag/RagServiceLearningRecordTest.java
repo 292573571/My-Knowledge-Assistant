@@ -239,15 +239,34 @@ class RagServiceLearningRecordTest {
         );
         String question = "在AI应用中SSL是啥意思？";
         when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of(unrelatedKettleChunk));
-        when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
-                .thenReturn(reactor.core.publisher.Flux.just("SSL 是网络安全协议。"));
+        when(chatClient.generate(Mockito.anyString())).thenReturn("SSL 是网络安全协议。");
         RagService service = service(vectorStore, chatClient, 1.0);
 
         RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", question));
 
         assertThat(response.tokens().collectList().block())
-                .containsExactly("SSL 是网络安全协议。", "\n\n以上回答基于通用大模型知识，不是当前知识库内容。");
+                .containsExactly("SSL 是网络安全协议。\n\n以上回答基于通用大模型知识，不是当前知识库内容。");
         assertThat(response.sources()).isEmpty();
+    }
+
+    @Test
+    void retriesModelFallbackWhenCodeContainsTranslatedIdentifierFragments() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        String question = "PostgreSQL 查询当前库所有表名";
+        when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString()))
+                .thenReturn("```sql\nSELECT table_name FROM information_信息_schema.tables;\n```")
+                .thenReturn("```sql\nSELECT schemaname, tablename FROM pg_catalog.pg_tables "
+                        + "WHERE schemaname NOT IN ('pg_catalog', 'information_schema');\n```");
+        RagService service = service(vectorStore, chatClient);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", question));
+
+        assertThat(response.answer())
+                .contains("pg_catalog.pg_tables")
+                .doesNotContain("information_信息_schema");
+        verify(chatClient, times(2)).generate(Mockito.anyString());
     }
 
     @Test

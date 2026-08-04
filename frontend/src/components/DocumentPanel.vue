@@ -50,15 +50,15 @@ const totalChunks = computed(() => {
   return documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0)
 })
 
-const availableFileTypes = computed(() => [...new Set(documents.value.map((document) => fileExtension(document.fileName)))].filter(Boolean).sort())
+const availableFileTypes = computed(() => [...new Set(documents.value.map((document) => fileExtension(displayFileName(document))))].filter(Boolean).sort())
 
 const filteredDocuments = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
   return documents.value.filter((document) => {
-    const matchesType = fileType.value === 'all' || fileExtension(document.fileName) === fileType.value
+    const matchesType = fileType.value === 'all' || fileExtension(displayFileName(document)) === fileType.value
     const matchesCategory = category.value === 'all' || (document.category || 'SOURCE') === category.value
-    const text = `${document.fileName || ''} ${document.path || ''}`.toLowerCase()
+    const text = `${displayFileName(document) || ''} ${document.path || ''}`.toLowerCase()
     return matchesType && matchesCategory && (!query || text.includes(query))
   })
 })
@@ -69,6 +69,11 @@ const visibleLatestUploadTask = computed(() => {
   return uploadTasks.value.find((task) => task.taskId === currentUploadTaskId.value) || null
 })
 const hasPendingTasks = computed(() => documentTasks.value.some((task) => ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(task.status)))
+const originalFileNames = computed(() => new Map(
+  uploadTasks.value
+    .filter((task) => task.status === 'SUCCEEDED' && task.documentId && task.fileName)
+    .map((task) => [task.documentId, task.fileName])
+))
 
 const taskStatusLabels = {
   QUEUED: '等待处理',
@@ -105,6 +110,10 @@ const maxUploadBytes = 50 * 1024 * 1024
 function fileExtension(fileName = '') {
   const index = fileName.lastIndexOf('.')
   return index < 0 ? '' : fileName.slice(index + 1).toLowerCase()
+}
+
+function displayFileName(document) {
+  return originalFileNames.value.get(document.documentId) || document.fileName
 }
 
 function formatTime(value) {
@@ -341,7 +350,10 @@ async function openDocument(document) {
   contentLoading.value = true
   contentError.value = ''
   try {
-    contentDocument.value = await fetchDocumentContent(document.documentId, props.workspace?.id)
+    contentDocument.value = {
+      ...await fetchDocumentContent(document.documentId, props.workspace?.id),
+      fileName: displayFileName(document)
+    }
   } catch (exception) {
     contentError.value = formatApiError(exception, '文件内容加载失败。')
   } finally {
@@ -351,7 +363,9 @@ async function openDocument(document) {
 
 async function handleDelete(documentId) {
   const document = documents.value.find((item) => item.documentId === documentId)
-  pendingDeleteDocument.value = document || { documentId, fileName: '这个文档' }
+  pendingDeleteDocument.value = document
+    ? { ...document, fileName: displayFileName(document) }
+    : { documentId, fileName: '这个文档' }
 }
 
 async function confirmDelete() {
@@ -497,7 +511,7 @@ onBeforeUnmount(() => {
       class="document-card"
     >
       <header class="document-card-heading">
-        <button type="button" class="document-name-button" :title="`查看 ${document.fileName}`" @click="openDocument(document)">{{ document.fileName }}</button>
+        <button type="button" class="document-name-button" :title="`查看 ${displayFileName(document)}`" @click="openDocument(document)">{{ displayFileName(document) }}</button>
         <span class="document-chunk-count">{{ document.chunkCount }} chunks</span>
       </header>
       <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ document.indexStatus === 'INDEXED' || !document.indexStatus ? '已索引' : document.indexStatus }}</span></div>

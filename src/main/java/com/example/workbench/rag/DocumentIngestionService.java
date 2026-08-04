@@ -606,9 +606,16 @@ public class DocumentIngestionService {
                 .toList();
         existingEntries.forEach(this::removeIndexedDocument);
 
+        Map<String, String> originalNamesByPath = existingEntries.stream()
+                .collect(Collectors.toMap(
+                        entry -> entry.path().replace('\\', '/'),
+                        DocumentIndexEntry::fileName,
+                        (left, right) -> left));
         List<IngestDocumentResult> results = new ArrayList<>();
         for (Path source : existingSources) {
-            results.add(ingestWorkspacePath(source, true, access));
+            String sourcePath = workspaceRelativePath(source).replace('\\', '/');
+            results.add(ingestWorkspacePath(
+                    source, true, access, originalNamesByPath.getOrDefault(sourcePath, source.getFileName().toString())));
         }
         for (Path source : supportedFiles(workspaceDirectory(access))) {
             if (!existingSources.contains(source)) {
@@ -789,8 +796,9 @@ public class DocumentIngestionService {
 
         for (Path file : files) {
             String relativePath = workspaceRelativePath(file);
-            IngestedFile candidate = ingestWorkspaceFile(file, file.getFileName().toString(), access);
             DocumentIndexEntry existing = entriesByPath.get(relativePath);
+            String originalFileName = existing == null ? file.getFileName().toString() : existing.fileName();
+            IngestedFile candidate = ingestWorkspaceFile(file, originalFileName, access);
             if (candidate.indexEntry() == null) {
                 if (existing != null) {
                     deletedChunks += removeIndexedDocument(existing);
@@ -980,11 +988,15 @@ public class DocumentIngestionService {
     }
 
     private IngestDocumentResult ingestWorkspacePath(Path path, boolean force, WorkspaceAccessContext access) {
+        return ingestWorkspacePath(path, force, access, path.getFileName().toString());
+    }
+
+    private IngestDocumentResult ingestWorkspacePath(
+            Path path, boolean force, WorkspaceAccessContext access, String originalFileName) {
         if (!isIndexableDocument(path)) {
             return new IngestDocumentResult(path.getFileName().toString(), workspaceRelativePath(path), null,
                     "failed", 0, "Unsupported document type");
         }
-        String originalFileName = path.getFileName().toString();
         IngestedFile sourceCandidate = ingestWorkspaceFile(path, originalFileName, access);
         if (sourceCandidate.indexEntry() == null) {
             return new IngestDocumentResult(originalFileName, workspaceRelativePath(path), null,
