@@ -1,0 +1,63 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as Vue Chat
+    participant API as RagController
+    participant RAG as RagService
+    participant MEM as ConversationMemory
+    participant LLM as LocalChatClient
+    participant VS as ChromaVectorStoreAdapter
+    participant EM as BGE-M3 Embedding API
+    participant CH as Chroma
+    participant QG as RagQualityGate
+
+    U->>FE: 提问
+    FE->>API: POST /api/rag/chat
+    API->>RAG: chat(question, workspaceId)
+    RAG->>MEM: 读取短期对话历史
+    opt 查询改写已开启
+        RAG->>LLM: 生成适合检索的短查询
+        LLM-->>RAG: 改写查询，失败则使用原问题
+    end
+    opt 多查询已开启，最多 3 条
+        RAG->>LLM: 生成补充检索查询
+        LLM-->>RAG: 补充查询列表
+    end
+    loop 每条检索查询
+        RAG->>VS: similaritySearch(query, 15, userId, workspaceId)
+        VS->>EM: 查询 Embedding
+        EM-->>VS: BGE-M3 查询向量
+        VS->>CH: 带 visibility/workspace/owner 过滤检索
+        CH-->>VS: 文本、元数据、L2 distance
+        VS-->>RAG: SourceDocument 候选
+    end
+    RAG->>RAG: 按 documentId+chunkIndex 去重
+    RAG->>RAG: 多查询重复命中加分并按距离初排
+    RAG->>RAG: 排除学习记录/免责声明/空内容/术语不匹配
+    RAG->>RAG: distance <= 0.85
+    RAG->>RAG: 规则重排并截取 Top-5
+    RAG->>QG: LLM 候选相关性门禁
+    QG->>LLM: KEEP: 编号列表
+    LLM-->>QG: 保留的候选编号
+    QG-->>RAG: 最终上下文来源
+    alt 没有可靠本地来源
+        RAG->>LLM: 通用模型回退 Prompt
+        LLM-->>RAG: 通用知识回答
+        RAG-->>API: 回答 + 无本地 sources + 免责声明
+    else 有可靠本地来源
+        RAG->>RAG: 拼接带文件、路径、分块、页码和标题的上下文
+        RAG->>LLM: 系统提示 + 历史 + 文档上下文 + 问题
+        LLM-->>RAG: 候选回答
+        RAG->>QG: 回答依据校验
+        QG->>LLM: PASS / FAIL
+        alt FAIL
+            RAG->>LLM: 转通用模型回退
+            LLM-->>RAG: 回退回答
+        else PASS
+            RAG->>RAG: 追加可读引用并构造 RagSource
+            RAG->>MEM: 写入本轮问答
+            RAG-->>API: answer + sources + retrievalDebug
+        end
+    end
+    API-->>FE: RAG 响应
+    FE-->>U: 答案、文件、页码和标题路径引用

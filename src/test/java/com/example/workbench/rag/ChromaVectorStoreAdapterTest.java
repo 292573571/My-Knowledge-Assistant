@@ -23,7 +23,7 @@ class ChromaVectorStoreAdapterTest {
         assertThat(java.util.Arrays.stream(ChromaVectorStoreAdapter.class.getDeclaredConstructors())
                 .filter(constructor -> constructor.isAnnotationPresent(Autowired.class)))
                 .singleElement()
-                .satisfies(constructor -> assertThat(constructor.getParameterCount()).isEqualTo(4));
+                .satisfies(constructor -> assertThat(constructor.getParameterCount()).isEqualTo(5));
     }
 
     @Test

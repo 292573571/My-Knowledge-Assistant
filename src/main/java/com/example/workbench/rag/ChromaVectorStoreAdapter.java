@@ -28,6 +28,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     private final ObjectProvider<ChromaApi> chromaApiProvider;
     private final ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider;
     private final InMemoryVectorStore fallbackVectorStore;
+    private final Optional<PostgresSparseRetriever> sparseRetriever;
     private List<String> currentDocumentIds = List.of();
 
     @Autowired
@@ -35,12 +36,14 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider,
             InMemoryVectorStore fallbackVectorStore,
             ObjectProvider<ChromaApi> chromaApiProvider,
-            ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider
+            ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider,
+            Optional<PostgresSparseRetriever> sparseRetriever
     ) {
         this.chromaVectorStoreProvider = chromaVectorStoreProvider;
         this.fallbackVectorStore = fallbackVectorStore;
         this.chromaApiProvider = chromaApiProvider;
         this.chromaPropertiesProvider = chromaPropertiesProvider;
+        this.sparseRetriever = sparseRetriever;
     }
 
     ChromaVectorStoreAdapter(
@@ -48,7 +51,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             InMemoryVectorStore fallbackVectorStore
     ) {
         this(chromaVectorStoreProvider, fallbackVectorStore, emptyProvider(ChromaApi.class),
-                emptyProvider(ChromaVectorStoreProperties.class));
+                emptyProvider(ChromaVectorStoreProperties.class), Optional.empty());
     }
 
     public boolean isChromaConfigured() {
@@ -61,6 +64,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
             currentDocumentIds = List.of();
+            sparseRetriever.ifPresent(PostgresSparseRetriever::clear);
             return;
         }
 
@@ -68,6 +72,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             // 全量重建不能依赖当前进程记住的 ID；按写入时必备的 id metadata 清除集合内全部项目向量。
             chromaVectorStore.delete(new FilterExpressionBuilder().ne("id", "").build());
             currentDocumentIds = List.of();
+            sparseRetriever.ifPresent(PostgresSparseRetriever::clear);
         } catch (RuntimeException exception) {
             throw new IllegalStateException("Failed to clear all documents from Chroma", exception);
         }
@@ -79,11 +84,13 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
 
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null || ids.isEmpty()) {
+            sparseRetriever.ifPresent(retriever -> retriever.deleteByIds(ids));
             return;
         }
 
         try {
             chromaVectorStore.delete(ids);
+            sparseRetriever.ifPresent(retriever -> retriever.deleteByIds(ids));
         } catch (RuntimeException exception) {
             throw new IllegalStateException("Failed to delete documents from Chroma", exception);
         }
@@ -102,6 +109,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
             log.warn("Spring AI Chroma VectorStore is not available, using in-memory vector store only");
+            sparseRetriever.ifPresent(retriever -> retriever.addAll(documents));
             return;
         }
 
@@ -109,6 +117,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             chromaVectorStore.add(documents.stream()
                     .map(this::toSpringAiDocument)
                     .toList());
+            sparseRetriever.ifPresent(retriever -> retriever.addAll(documents));
         } catch (RuntimeException exception) {
             // 配置了持久向量库时不能把仅内存写入视为成功，否则重启后任务显示成功但文档无法检索。
             throw new IllegalStateException("Failed to write documents to Chroma", exception);
@@ -196,10 +205,14 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     }
 
     private List<SourceDocument> fallbackSearch(String query, int topK, String ownerUserId, String workspaceId,
-                                                boolean scoped) {
-        return scoped
+                                                 boolean scoped) {
+        List<SourceDocument> results = scoped
                 ? fallbackVectorStore.similaritySearch(query, topK, ownerUserId, workspaceId)
                 : fallbackVectorStore.similaritySearch(query, topK);
+        // 内存实现返回余弦相似度，适配器统一转换为与生产 Chroma 相同的“越小越好”距离语义。
+        return results.stream()
+                .map(source -> source.withScore(Math.max(0.0, 1.0 - source.score())))
+                .toList();
     }
 
     private Filter.Expression visibilityFilter(String ownerUserId, String workspaceId) {
@@ -265,7 +278,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                 metadataValue(metadata, "documentId", source),
                 metadataValue(metadata, "fileName", source),
                 metadataValue(metadata, "contentHash", ""),
-                metadataDouble(metadata, "distance"),
+                document.getScore() != null ? document.getScore() : metadataDouble(metadata, "distance"),
                 metadataValue(metadata, "headingPath", null),
                 metadataInt(metadata, "headingLevel"),
                 metadataInt(metadata, "startOffset"),

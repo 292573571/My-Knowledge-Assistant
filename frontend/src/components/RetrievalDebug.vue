@@ -358,7 +358,7 @@ onMounted(loadEvalCases)
           <span>{{ item.passed ? '通过' : '失败' }}</span><strong>{{ item.id }}</strong><p>{{ item.question }}</p><small>{{ item.reason || '-' }}</small>
           <details v-if="item.retrievalDebug?.length" class="retrieval-eval-diagnostics">
             <summary>查看 {{ item.retrievalDebug.length }} 个检索候选</summary>
-            <div><article v-for="(candidate, index) in item.retrievalDebug" :key="`${candidate.fileName}-${candidate.chunkIndex}-${index}`"><strong>{{ candidateLocation(candidate) }}</strong><small>得分 {{ Number(candidate.score).toFixed(4) }} · {{ candidate.usedInContext ? '已用于回答' : '未用于回答' }}</small><p>{{ candidate.preview }}</p></article></div>
+            <div><article v-for="(candidate, index) in item.retrievalDebug" :key="`${candidate.fileName}-${candidate.chunkIndex}-${index}`"><strong>{{ candidateLocation(candidate) }}</strong><small>{{ candidate.retrievalChannel || 'DENSE' }} · 原始得分 {{ Number(candidate.score).toFixed(4) }} · 融合排名 {{ candidate.finalRank ?? '-' }} · {{ candidate.usedInContext ? '已用于回答' : '未用于回答' }}</small><small v-if="candidate.fusionScore != null">Dense {{ candidate.denseRank ?? '-' }} / {{ candidate.denseScore == null ? '-' : Number(candidate.denseScore).toFixed(4) }} · Sparse {{ candidate.sparseRank ?? '-' }} / {{ candidate.sparseScore == null ? '-' : Number(candidate.sparseScore).toFixed(4) }} · RRF {{ Number(candidate.fusionScore).toFixed(6) }}</small><p>{{ candidate.preview }}</p></article></div>
           </details>
         </article>
       </div>

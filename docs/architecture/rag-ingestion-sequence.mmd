@@ -1,0 +1,41 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as Vue DocumentPanel
+    participant API as RagController
+    participant TS as DocumentTaskService
+    participant DB as PostgreSQL 任务表
+    participant IS as DocumentIngestionService
+    participant FS as docs 源文件目录
+    participant PR as ParserRouter / Parser
+    participant CR as ChunkerRouter / Chunker
+    participant VS as ChromaVectorStoreAdapter
+    participant EM as BGE-M3 Embedding API
+    participant CH as Chroma
+    participant IDX as DocumentIndexStore
+
+    U->>FE: 选择 PDF/DOCX/HTML/图片/文本
+    FE->>API: POST /api/documents/upload
+    API->>TS: createUpload(access, file, clientRequestId)
+    TS->>IS: saveWorkspaceUpload
+    IS->>FS: 校验并持久化原始文件
+    TS->>DB: 保存 QUEUED 任务
+    TS-->>FE: taskId + QUEUED
+    TS->>TS: 后台线程 claim 任务
+    TS->>DB: RUNNING
+    TS->>IS: indexWorkspaceUpload
+    IS->>PR: parse(fileName, bytes)
+    Note over PR: PDF 按页，扫描页 OCR；DOCX 保留标题路径；HTML 清洗 DOM；图片 OCR
+    PR-->>IS: ParsedDocument + DocumentBlock
+    IS->>CR: chunk(parsedDocument)
+    Note over CR: 最大 1200 字符，重叠 120；保留 pageNumber/headingPath/chunkType
+    CR-->>IS: DocumentChunk 列表
+    IS->>VS: addAll(SourceDocument)
+    VS->>EM: 文档分块 Embedding
+    EM-->>VS: BGE-M3 向量
+    VS->>CH: 写入文本、向量和元数据
+    IS->>IDX: upsert DocumentIndexEntry
+    IS-->>TS: documentId
+    TS->>DB: SUCCEEDED / DONE / 100%
+    FE->>API: 轮询 GET /api/document-tasks
+    API-->>FE: 最新任务状态

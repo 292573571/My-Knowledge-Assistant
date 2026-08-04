@@ -18,6 +18,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -59,7 +61,16 @@ public class RagService {
     private final int multiQueryMaxQueries;
     private final boolean modelFallbackEnabled;
     private final boolean webSearchEnabled;
+    private final SparseRetriever sparseRetriever;
+    private final boolean hybridEnabled;
+    private final int rrfK;
+    private final int contextMaxTokens;
+    private final int maxChunksPerDocument;
+    private final boolean adjacentEnabled;
+    private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
+    private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
 
+    @Autowired
     public RagService(
             DocumentIngestionService documentIngestionService,
             VectorStore vectorStore,
@@ -75,7 +86,13 @@ public class RagService {
             @Value("${workbench.rag.multi-query.enabled:false}") boolean multiQueryEnabled,
             @Value("${workbench.rag.multi-query.max-queries:4}") int multiQueryMaxQueries,
             @Value("${workbench.rag.model-fallback.enabled:true}") boolean modelFallbackEnabled,
-            @Value("${workbench.rag.web-search.enabled:false}") boolean webSearchEnabled
+            @Value("${workbench.rag.web-search.enabled:false}") boolean webSearchEnabled,
+            ObjectProvider<SparseRetriever> sparseRetrieverProvider,
+            @Value("${workbench.rag.hybrid.enabled:true}") boolean hybridEnabled,
+            @Value("${workbench.rag.hybrid.rrf-k:60}") int rrfK,
+            @Value("${workbench.rag.context.max-tokens:3000}") int contextMaxTokens,
+            @Value("${workbench.rag.context.max-chunks-per-document:2}") int maxChunksPerDocument,
+            @Value("${workbench.rag.context.adjacent-enabled:true}") boolean adjacentEnabled
     ) {
         this.documentIngestionService = documentIngestionService;
         this.vectorStore = vectorStore;
@@ -92,6 +109,26 @@ public class RagService {
         this.multiQueryMaxQueries = multiQueryMaxQueries;
         this.modelFallbackEnabled = modelFallbackEnabled;
         this.webSearchEnabled = webSearchEnabled;
+        this.sparseRetriever = sparseRetrieverProvider.getIfAvailable();
+        this.hybridEnabled = hybridEnabled;
+        this.rrfK = Math.max(1, rrfK);
+        this.contextMaxTokens = Math.max(256, contextMaxTokens);
+        this.maxChunksPerDocument = Math.max(1, maxChunksPerDocument);
+        this.adjacentEnabled = adjacentEnabled;
+    }
+
+    RagService(
+            DocumentIngestionService documentIngestionService, VectorStore vectorStore, LocalChatClient chatClient,
+            ConversationMemory conversationMemory, WebSearchService webSearchService, RagQualityGate qualityGate,
+            boolean retrievalDebugEnabled, int topK, double similarityThreshold, String scoreDirection,
+            boolean queryRewriteEnabled, boolean multiQueryEnabled, int multiQueryMaxQueries,
+            boolean modelFallbackEnabled, boolean webSearchEnabled
+    ) {
+        this(documentIngestionService, vectorStore, chatClient, conversationMemory, webSearchService, qualityGate,
+                retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
+                multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
+                new org.springframework.beans.factory.support.StaticListableBeanFactory().getBeanProvider(SparseRetriever.class),
+                false, 60, 3000, 2, false);
     }
 
     public RagChatResponse chat(RagChatRequest request) {
@@ -193,9 +230,7 @@ public class RagService {
                 sources.size()
         );
         // 只有阈值合格的片段会被拼入上下文，降低无关内容诱发幻觉的概率。
-        String context = sources.stream()
-                .map(this::formatContext)
-                .collect(Collectors.joining("\n\n"));
+        String context = buildContext(sources);
         String prompt = buildPrompt(context, formatHistory(history), question);
         String answer = chatClient.call(
                 prompt,
@@ -254,8 +289,7 @@ public class RagService {
         }
 
         List<String> queries = retrievalQueries(question.strip());
-        List<SourceDocument> candidates = retrieveCandidates(question.strip(), ownerUserId, workspaceId,
-                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        List<SourceDocument> candidates = retrieveCandidates(queries, ownerUserId, workspaceId);
         List<SourceDocument> usedSources = filterByThreshold(question.strip(), candidates);
         return new RetrievalDebugResponse(
                 question.strip(),
@@ -288,7 +322,7 @@ public class RagService {
             );
         }
 
-        String context = sources.stream().map(this::formatContext).collect(Collectors.joining("\n\n"));
+        String context = buildContext(sources);
         List<RagSource> ragSources = toRagSources(sources);
         String prompt = buildPrompt(context, formatHistory(history), question);
         String references = appendReferenceSources("", ragSources);
@@ -479,33 +513,56 @@ public class RagService {
             RagChatOptions options,
             List<ChatMessage> history
     ) {
-        // 多个查询命中同一分块时累计命中次数，并合并为一个候选，避免重复上下文。
         List<String> queries = retrievalQueries(question, options, history);
-        LinkedHashMap<String, ScoredCandidate> candidates = new LinkedHashMap<>();
+        return retrieveCandidates(queries, ownerUserId, workspaceId);
+    }
+
+    private List<SourceDocument> retrieveCandidates(List<String> queries, String ownerUserId, String workspaceId) {
+        LinkedHashMap<String, CandidateAccumulator> candidates = new LinkedHashMap<>();
+        int candidateLimit = Math.max(topK, topK * 3);
 
         for (String query : queries) {
-            // 先扩大向量候选集，再用正文质量和问题词命中重排，避免标题片段占满最终上下文。
-            int candidateLimit = Math.max(topK, topK * 3);
-            for (SourceDocument source : similaritySearch(query, candidateLimit, ownerUserId, workspaceId)) {
+            List<SourceDocument> denseResults = similaritySearch(query, candidateLimit, ownerUserId, workspaceId);
+            for (int index = 0; index < denseResults.size(); index++) {
+                SourceDocument source = denseResults.get(index);
                 if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
                     continue;
                 }
-                String key = stableSourceKey(source);
-                ScoredCandidate existing = candidates.get(key);
-                if (existing == null) {
-                    candidates.put(key, new ScoredCandidate(source, 1));
-                    continue;
+                candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
+                        .addDense(source, query, index + 1, reciprocalRank(index + 1));
+            }
+            if (hybridEnabled && sparseRetriever != null) {
+                List<SourceDocument> sparseResults = sparseRetriever.search(query, candidateLimit, ownerUserId, workspaceId);
+                for (int index = 0; index < sparseResults.size(); index++) {
+                    SourceDocument source = sparseResults.get(index);
+                    if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
+                        continue;
+                    }
+                    candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
+                            .addSparse(source, query, index + 1, reciprocalRank(index + 1));
                 }
-
-                candidates.put(key, new ScoredCandidate(bestSource(existing.source(), source), existing.hitCount() + 1));
             }
         }
 
-        return candidates.values().stream()
-                // 多查询重复命中可获得小幅加分，但不改变向量库分数方向的语义。
-                .map(candidate -> candidate.source().withScore(finalScore(candidate.source().score(), candidate.hitCount())))
-                .sorted(Comparator.comparingDouble(this::rankingScore).reversed())
+        List<CandidateAccumulator> ranked = candidates.values().stream()
+                .sorted(Comparator.comparingDouble(CandidateAccumulator::fusionScore).reversed()
+                        .thenComparing(candidate -> stableSourceKey(candidate.source())))
                 .toList();
+        LinkedHashMap<String, CandidateTrace> traces = new LinkedHashMap<>();
+        List<SourceDocument> sources = new ArrayList<>();
+        for (int index = 0; index < ranked.size(); index++) {
+            CandidateAccumulator candidate = ranked.get(index);
+            SourceDocument source = candidate.resultSource();
+            sources.add(source);
+            traces.put(stableSourceKey(source), candidate.trace(index + 1));
+        }
+        retrievalTrace.set(traces);
+        retrievalScope.set(new RetrievalScope(ownerUserId, workspaceId));
+        return sources;
+    }
+
+    private double reciprocalRank(int rank) {
+        return 1.0 / (rrfK + rank);
     }
 
     private List<SourceDocument> similaritySearch(String query, int limit, String ownerUserId, String workspaceId) {
@@ -637,11 +694,12 @@ public class RagService {
         }
 
         // 先按距离/相似度阈值去掉低质量候选，再执行项目中的轻量规则重排。
-        List<SourceDocument> thresholdSources = rerankSources(question, eligibleSources.stream()
+        List<SourceDocument> thresholdSources = diversify(rerankSources(question, eligibleSources.stream()
                 .filter(this::hasSubstantiveContent)
                 .filter(this::passesThreshold)
-                .toList());
-        return qualityGate.relevantSources(question, thresholdSources);
+                .toList()));
+        List<SourceDocument> relevantSources = qualityGate.relevantSources(question, thresholdSources);
+        return applyContextPolicy(expandAdjacent(relevantSources));
     }
 
     private boolean hasSubstantiveContent(SourceDocument source) {
@@ -727,25 +785,16 @@ public class RagService {
     }
 
     private boolean passesThreshold(SourceDocument source) {
+        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
+        if (trace != null && trace.sparseScore() != null) {
+            return true;
+        }
         // 不同向量库的 score 语义不同：similarity 越大越好，distance 越小越好。
         if ("similarity".equals(scoreDirection)) {
             return source.score() >= similarityThreshold;
         }
 
         return source.score() <= similarityThreshold;
-    }
-
-    private SourceDocument bestSource(SourceDocument left, SourceDocument right) {
-        return rankingScore(left) >= rankingScore(right) ? left : right;
-    }
-
-    private double finalScore(double score, int hitCount) {
-        double bonus = 0.05 * Math.max(0, hitCount - 1);
-        if ("similarity".equals(scoreDirection)) {
-            return score + bonus;
-        }
-
-        return Math.max(0, score - bonus);
     }
 
     private double rankingScore(SourceDocument source) {
@@ -861,22 +910,42 @@ public class RagService {
     }
 
     private List<SourceDocument> rerankSources(String question, List<SourceDocument> sources) {
-        // 规则重排同时保留向量距离，并优先正文质量，避免标题片段压过真正的解释内容。
+        // 融合分只用于排序，原始 Dense 距离仍用于阈值和诊断。
         return sources.stream()
                 .sorted(Comparator.comparingDouble((SourceDocument source) -> rerankScore(question, source)).reversed())
-                .limit(topK)
                 .toList();
     }
 
     private double rerankScore(String question, SourceDocument source) {
-        double vectorScore = "similarity".equals(scoreDirection)
-                ? source.score()
-                : Math.max(0.0, 1.0 - source.score());
-        return vectorScore * 10
+        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
+        double vectorScore = trace != null && trace.denseScore() == null ? 0.0
+                : "similarity".equals(scoreDirection) ? source.score() : Math.max(0.0, 1.0 - source.score());
+        double fusionScore = trace == null ? 0.0 : trace.fusionScore() * 100.0;
+        return vectorScore * 10 + fusionScore
                 + lexicalMatchScore(question, source.content())
+                + structuredMatchScore(question, source)
                 + contentQualityScore(source)
                 + documentPriority(source)
                 + sourceBoost(question, source);
+    }
+
+    private int structuredMatchScore(String question, SourceDocument source) {
+        if (question == null || question.isBlank()) {
+            return 0;
+        }
+        String normalizedQuestion = question.toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (source.fileName() != null && normalizedQuestion.contains(source.fileName().toLowerCase(Locale.ROOT))) {
+            score += 8;
+        }
+        if (source.headingPath() != null && !source.headingPath().isBlank()
+                && normalizedQuestion.contains(source.headingPath().toLowerCase(Locale.ROOT))) {
+            score += 6;
+        }
+        if (source.chunkType() != null && source.chunkType().contains("table")) {
+            score += 2;
+        }
+        return score;
     }
 
     private int lexicalMatchScore(String question, String content) {
@@ -1116,21 +1185,66 @@ public class RagService {
         return content.substring(0, 600) + "...";
     }
 
+    private String buildContext(List<SourceDocument> sources) {
+        int usedTokens = 0;
+        List<String> blocks = new ArrayList<>();
+        for (SourceDocument source : sources) {
+            String block = formatContext(source);
+            int tokens = estimatedTokens(block);
+            if (!blocks.isEmpty() && usedTokens + tokens > contextMaxTokens) {
+                continue;
+            }
+            if (blocks.isEmpty() && tokens > contextMaxTokens) {
+                block = truncateToTokenBudget(block, contextMaxTokens);
+                tokens = estimatedTokens(block);
+            }
+            blocks.add(block);
+            usedTokens += tokens;
+        }
+        return String.join("\n\n", blocks);
+    }
+
+    private int estimatedTokens(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        int han = 0;
+        for (int offset = 0; offset < text.length();) {
+            int codePoint = text.codePointAt(offset);
+            if (Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN) {
+                han++;
+            }
+            offset += Character.charCount(codePoint);
+        }
+        return (int) Math.ceil(han / 1.5 + (text.length() - han) / 4.0);
+    }
+
+    private String truncateToTokenBudget(String text, int tokenBudget) {
+        int maxChars = Math.min(text.length(), tokenBudget * 2);
+        return text.substring(0, maxChars) + "\n[上下文已按 Token 预算截断]";
+    }
+
     private String formatContext(SourceDocument document) {
         return """
                 source: %s
                 path: %s
+                documentId: %s
                 chunkIndex: %d
                 pageNumber: %s
                 title: %s
+                headingPath: %s
+                chunkType: %s
                 content:
                 %s
                 """.formatted(
                 document.source(),
                 document.path(),
+                document.documentId(),
                 document.chunkIndex(),
                 document.pageNumber() > 0 ? document.pageNumber() : "-",
                 document.title(),
+                document.headingPath(),
+                document.chunkType(),
                 document.content()
         );
     }
@@ -1230,8 +1344,11 @@ public class RagService {
     ) {
 
         int retrievedChunkCount = retrievedSources.size();
+        Map<String, CandidateTrace> traces = retrievalTrace.get();
         return retrievedSources.stream()
-                .map(source -> new RetrievalDebug(
+                .map(source -> {
+                    CandidateTrace trace = traces.get(stableSourceKey(source));
+                    return new RetrievalDebug(
                         question,
                         topK,
                         similarityThreshold,
@@ -1243,12 +1360,146 @@ public class RagService {
                         source.chunkIndex(),
                         source.pageNumber() > 0 ? source.pageNumber() : null,
                         source.score(),
-                        snippet(source.content())
-                ))
+                        snippet(source.content()),
+                        trace == null ? "DENSE" : trace.channel(),
+                        trace == null ? Double.valueOf(source.score()) : trace.denseScore(),
+                        trace == null ? null : trace.sparseScore(),
+                        trace == null ? null : trace.fusionScore(),
+                        trace == null ? null : trace.denseRank(),
+                        trace == null ? null : trace.sparseRank(),
+                        trace == null ? null : trace.finalRank(),
+                        trace == null ? List.of() : trace.matchedQueries()
+                    );
+                })
                 .toList();
     }
 
-    private record ScoredCandidate(SourceDocument source, int hitCount) {
+    private List<SourceDocument> diversify(List<SourceDocument> rankedSources) {
+        List<SourceDocument> selected = new ArrayList<>();
+        Map<String, Integer> documentCounts = new LinkedHashMap<>();
+        for (SourceDocument source : rankedSources) {
+            String documentId = source.documentId() == null ? source.source() : source.documentId();
+            if (documentCounts.getOrDefault(documentId, 0) >= maxChunksPerDocument) {
+                continue;
+            }
+            selected.add(source);
+            documentCounts.merge(documentId, 1, Integer::sum);
+            if (selected.size() >= topK) {
+                break;
+            }
+        }
+        return selected;
+    }
+
+    private List<SourceDocument> expandAdjacent(List<SourceDocument> sources) {
+        if (!adjacentEnabled || sparseRetriever == null || sources.isEmpty()) {
+            return sources;
+        }
+        RetrievalScope scope = retrievalScope.get();
+        String owner = scope == null ? "" : scope.ownerUserId();
+        String workspace = scope == null ? null : scope.workspaceId();
+        List<SourceDocument> expanded = new ArrayList<>(sources);
+        for (SourceDocument source : sources) {
+            for (SourceDocument adjacent : sparseRetriever.adjacent(
+                    source.documentId(), source.chunkIndex(), owner, workspace)) {
+                boolean sameHeading = source.headingPath() == null || source.headingPath().isBlank()
+                        || source.headingPath().equals(adjacent.headingPath());
+                boolean samePage = source.pageNumber() <= 0 || source.pageNumber() == adjacent.pageNumber();
+                if (sameHeading && samePage) {
+                    expanded.add(adjacent);
+                }
+            }
+        }
+        return expanded;
+    }
+
+    private List<SourceDocument> applyContextPolicy(List<SourceDocument> sources) {
+        LinkedHashMap<String, SourceDocument> byContent = new LinkedHashMap<>();
+        Map<String, Integer> documentCounts = new LinkedHashMap<>();
+        int usedTokens = 0;
+        for (SourceDocument source : sources) {
+            String normalized = source.content() == null ? "" : source.content().replaceAll("\\s+", " ").strip().toLowerCase(Locale.ROOT);
+            if (normalized.isBlank() || byContent.containsKey(normalized)) {
+                continue;
+            }
+            String documentId = source.documentId() == null ? source.source() : source.documentId();
+            if (documentCounts.getOrDefault(documentId, 0) >= maxChunksPerDocument) {
+                continue;
+            }
+            int tokens = estimatedTokens(formatContext(source));
+            if (!byContent.isEmpty() && usedTokens + tokens > contextMaxTokens) {
+                continue;
+            }
+            byContent.put(normalized, source);
+            documentCounts.merge(documentId, 1, Integer::sum);
+            usedTokens += tokens;
+        }
+        return List.copyOf(byContent.values());
+    }
+
+    private final class CandidateAccumulator {
+        private SourceDocument source;
+        private Double denseScore;
+        private Double sparseScore;
+        private Integer denseRank;
+        private Integer sparseRank;
+        private double fusionScore;
+        private final LinkedHashMap<String, Boolean> matchedQueries = new LinkedHashMap<>();
+
+        private CandidateAccumulator(SourceDocument source) {
+            this.source = source;
+        }
+
+        private void addDense(SourceDocument candidate, String query, int rank, double contribution) {
+            if (denseScore == null || ("similarity".equals(scoreDirection)
+                    ? candidate.score() > denseScore : candidate.score() < denseScore)) {
+                source = candidate;
+                denseScore = candidate.score();
+            }
+            denseRank = denseRank == null ? rank : Math.min(denseRank, rank);
+            fusionScore += contribution;
+            matchedQueries.put(query, true);
+        }
+
+        private void addSparse(SourceDocument candidate, String query, int rank, double contribution) {
+            if (sparseScore == null || candidate.score() > sparseScore) {
+                sparseScore = candidate.score();
+            }
+            sparseRank = sparseRank == null ? rank : Math.min(sparseRank, rank);
+            fusionScore += contribution;
+            matchedQueries.put(query, true);
+            if (denseScore == null) {
+                source = candidate;
+            }
+        }
+
+        private SourceDocument source() {
+            return source;
+        }
+
+        private double fusionScore() {
+            return fusionScore;
+        }
+
+        private SourceDocument resultSource() {
+            return source.withScore(denseScore == null ? sparseScore : denseScore);
+        }
+
+        private CandidateTrace trace(int finalRank) {
+            String channel = denseScore != null && sparseScore != null ? "HYBRID"
+                    : denseScore != null ? "DENSE" : "SPARSE";
+            return new CandidateTrace(channel, denseScore, sparseScore, fusionScore, denseRank, sparseRank,
+                    finalRank, List.copyOf(matchedQueries.keySet()));
+        }
+    }
+
+    private record CandidateTrace(
+            String channel, Double denseScore, Double sparseScore, double fusionScore,
+            Integer denseRank, Integer sparseRank, int finalRank, List<String> matchedQueries
+    ) {
+    }
+
+    private record RetrievalScope(String ownerUserId, String workspaceId) {
     }
 
     private String snippet(String content) {
