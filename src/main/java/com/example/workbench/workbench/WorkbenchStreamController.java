@@ -158,7 +158,7 @@ public class WorkbenchStreamController {
                         })
                         .blockLast();
                 if (!execution.isCancelled()) {
-                    String answerContent = content.toString();
+                    String answerContent = ragService.sanitizePresentedAnswer(content.toString());
                     ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
                     boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
                             normalizedMode, answerContent, answer.sources(), List.of());

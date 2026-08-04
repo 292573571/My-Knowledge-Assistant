@@ -280,6 +280,10 @@ export function useChatStore() {
               return
             }
             if (type === 'done') {
+              assistantMessage.content = assistantMessage.content
+                .replace(/\uFFFD/g, '')
+                .replace(/^\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)(?:\r?\n|$)/gm, '')
+                .trim()
               settled = true
               close()
               resolve()

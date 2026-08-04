@@ -87,7 +87,7 @@ public class LocalChatClient {
             List<ChatMessage> history,
             Map<String, String> options
     ) {
-        String aiAnswer = callSpringAi(prompt, options);
+        String aiAnswer = sanitizeModelText(callSpringAi(prompt, options));
 
         if (aiAnswer != null && !aiAnswer.isBlank()) {
             return aiAnswer;
@@ -109,7 +109,7 @@ public class LocalChatClient {
             List<ChatMessage> history,
             Map<String, String> options
     ) {
-        String aiAnswer = callSpringAi(prompt, options);
+        String aiAnswer = sanitizeModelText(callSpringAi(prompt, options));
 
         if (aiAnswer != null && !aiAnswer.isBlank()) {
             return "知识库没有足够信息，我将使用搜索工具...\n\n" + aiAnswer + "\n\n来自 Web";
@@ -123,7 +123,7 @@ public class LocalChatClient {
     }
 
     public String generate(String prompt) {
-        return callSpringAi(prompt, Map.of());
+        return sanitizeModelText(callSpringAi(prompt, Map.of()));
     }
 
     public Flux<String> stream(String prompt, Map<String, String> options) {
@@ -134,10 +134,23 @@ public class LocalChatClient {
         String conversationId = options.getOrDefault("conversationId", "default");
         AtomicBoolean receivedToken = new AtomicBoolean(false);
         return streamModel(prompt, conversationId, chatModel, requestTimeout)
+                .map(this::sanitizeModelText)
+                .filter(token -> !token.isEmpty())
                 .doOnNext(token -> receivedToken.set(true))
                 .onErrorResume(error -> !receivedToken.get() && !fallbackModels.isEmpty()
                         ? streamModel(prompt, conversationId, fallbackModels.get(0), fallbackRequestTimeout)
+                                .map(this::sanitizeModelText)
+                                .filter(token -> !token.isEmpty())
                         : Flux.error(error));
+    }
+
+    String sanitizeModelText(String text) {
+        if (text == null || text.indexOf('\uFFFD') < 0) {
+            return text;
+        }
+        int replacements = (int) text.chars().filter(character -> character == '\uFFFD').count();
+        log.warn("AI model response contained invalid Unicode replacement characters count={}", replacements);
+        return text.replace("\uFFFD", "");
     }
 
     private Flux<String> streamModel(String prompt, String conversationId, String model, Duration timeout) {

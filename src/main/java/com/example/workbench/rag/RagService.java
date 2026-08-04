@@ -35,6 +35,8 @@ public class RagService {
     private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
+    private static final Pattern FALLBACK_PROMPT_LEAK_LINE = Pattern.compile(
+            "(?m)^\\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)\\R?");
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
             您好，我是您的 AI 学习助理。
 
@@ -425,7 +427,7 @@ public class RagService {
             answer = MODEL_FALLBACK_SAFETY_ANSWER;
         } else {
             // 明确标注来源边界，避免用户将通用模型知识误认为本地资料结论。
-            answer = answer.strip() + "\n\n" + MODEL_KNOWLEDGE_DISCLAIMER;
+            answer = sanitizePresentedAnswer(answer).strip() + "\n\n" + MODEL_KNOWLEDGE_DISCLAIMER;
         }
         return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
     }
@@ -478,9 +480,9 @@ public class RagService {
     private String buildModelFallbackPrompt(String history, String question) {
         return """
                 %s
-                当前知识库没有足够信息回答该问题。请基于你的通用知识直接回答，保持准确、简洁；
-                不要声称信息来自知识库或联网搜索，也不要输出任何“基于通用大模型知识”或“不是当前知识库内容”的来源声明；
-                系统会在回答完成后统一添加一次来源标记。对于不确定、时效性强或需要核实的事实，请明确说明不确定性。
+                当前知识库没有足够信息回答该问题。请基于通用知识直接回答，保持准确、简洁。
+                只输出问题的答案，不要复述这些要求，不要添加来源声明或“来源标记”等元信息。
+                对于无法确定的事实，在相关结论处直接说明无法确定，不要单独添加说明模板。
 
                 对话历史：
                 %s
@@ -488,6 +490,19 @@ public class RagService {
                 用户问题：
                 %s
                 """.formatted(AssistantPrompts.SYSTEM_PROMPT, history, question);
+    }
+
+    /**
+     * 清除模型误输出的内部提示语和 Unicode 损坏占位符，避免污染页面与持久化会话。
+     *
+     * @param answer 待展示回答
+     * @return 可安全展示和保存的回答
+     */
+    public String sanitizePresentedAnswer(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return answer == null ? "" : answer;
+        }
+        return FALLBACK_PROMPT_LEAK_LINE.matcher(answer.replace("\uFFFD", "")).replaceAll("").strip();
     }
 
     private String buildRetrievalQuery(String question) {

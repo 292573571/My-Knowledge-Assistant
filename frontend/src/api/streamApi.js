@@ -18,7 +18,8 @@ export function streamChat({ conversationId, mode, message, onEvent }) {
   }).then(async response => {
     if (!response.ok || !response.body) throw new Error(`SSE request failed: ${response.status}`)
     const reader = response.body.getReader()
-    const decoder = new TextDecoder()
+    // 非法 UTF-8 必须失败并进入统一错误处理，不能静默生成会污染回答的“�”。
+    const decoder = new TextDecoder('utf-8', { fatal: true })
     let buffer = ''
 
     while (true) {
