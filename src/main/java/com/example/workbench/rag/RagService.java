@@ -7,6 +7,7 @@ import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
 import com.example.workbench.workspace.DocumentVisibility;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,8 @@ public class RagService {
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
     private static final Pattern FALLBACK_PROMPT_LEAK_LINE = Pattern.compile(
             "(?m)^\\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)\\R?");
+    private static final double WEAK_DENSE_DISTANCE = 0.72;
+    private static final double STRONG_SPARSE_SCORE = 2.0;
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
             您好，我是您的 AI 学习助理。
 
@@ -535,9 +538,14 @@ public class RagService {
     private List<SourceDocument> retrieveCandidates(List<String> queries, String ownerUserId, String workspaceId) {
         LinkedHashMap<String, CandidateAccumulator> candidates = new LinkedHashMap<>();
         int candidateLimit = Math.max(topK, topK * 3);
+        List<CompletableFuture<QueryRetrievalResult>> retrievals = queries.stream()
+                .map(query -> retrieveQueryInParallel(query, candidateLimit, ownerUserId, workspaceId))
+                .toList();
 
-        for (String query : queries) {
-            List<SourceDocument> denseResults = similaritySearch(query, candidateLimit, ownerUserId, workspaceId);
+        for (CompletableFuture<QueryRetrievalResult> retrieval : retrievals) {
+            QueryRetrievalResult queryResult = retrieval.join();
+            String query = queryResult.query();
+            List<SourceDocument> denseResults = queryResult.denseResults();
             for (int index = 0; index < denseResults.size(); index++) {
                 SourceDocument source = denseResults.get(index);
                 if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
@@ -547,7 +555,7 @@ public class RagService {
                         .addDense(source, query, index + 1, reciprocalRank(index + 1));
             }
             if (hybridEnabled && sparseRetriever != null) {
-                List<SourceDocument> sparseResults = sparseRetriever.search(query, candidateLimit, ownerUserId, workspaceId);
+                List<SourceDocument> sparseResults = queryResult.sparseResults();
                 for (int index = 0; index < sparseResults.size(); index++) {
                     SourceDocument source = sparseResults.get(index);
                     if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
@@ -574,6 +582,30 @@ public class RagService {
         retrievalTrace.set(traces);
         retrievalScope.set(new RetrievalScope(ownerUserId, workspaceId));
         return sources;
+    }
+
+    private CompletableFuture<QueryRetrievalResult> retrieveQueryInParallel(
+            String query, int candidateLimit, String ownerUserId, String workspaceId
+    ) {
+        CompletableFuture<List<SourceDocument>> dense = CompletableFuture.supplyAsync(
+                () -> similaritySearch(query, candidateLimit, ownerUserId, workspaceId));
+        CompletableFuture<List<SourceDocument>> sparse = hybridEnabled && sparseRetriever != null
+                ? CompletableFuture.supplyAsync(() -> safeSparseSearch(query, candidateLimit, ownerUserId, workspaceId))
+                : CompletableFuture.completedFuture(List.of());
+        return dense.thenCombine(sparse, (denseResults, sparseResults) ->
+                new QueryRetrievalResult(query, denseResults, sparseResults));
+    }
+
+    private List<SourceDocument> safeSparseSearch(
+            String query, int candidateLimit, String ownerUserId, String workspaceId
+    ) {
+        try {
+            return sparseRetriever.search(query, candidateLimit, ownerUserId, workspaceId);
+        } catch (RuntimeException exception) {
+            log.warn("RAG sparse retrieval failed, continuing with Dense only errorType={}",
+                    exception.getClass().getSimpleName());
+            return List.of();
+        }
     }
 
     private double reciprocalRank(int rank) {
@@ -712,9 +744,24 @@ public class RagService {
         List<SourceDocument> thresholdSources = diversify(rerankSources(question, eligibleSources.stream()
                 .filter(this::hasSubstantiveContent)
                 .filter(this::passesThreshold)
+                .filter(source -> hasStrongRetrievalSignal(question, source))
                 .toList()));
         List<SourceDocument> relevantSources = qualityGate.relevantSources(question, thresholdSources);
         return applyContextPolicy(expandAdjacent(relevantSources));
+    }
+
+    private boolean hasStrongRetrievalSignal(String question, SourceDocument source) {
+        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
+        if (trace == null) {
+            return true;
+        }
+        if (trace.sparseScore() != null && trace.sparseScore() >= STRONG_SPARSE_SCORE
+                || lexicalMatchScore(question, source.content()) > 0
+                || structuredMatchScore(question, source) > 0) {
+            return true;
+        }
+        return trace.denseScore() != null && ("similarity".equals(scoreDirection)
+                || trace.denseScore() <= WEAK_DENSE_DISTANCE);
     }
 
     private boolean hasSubstantiveContent(SourceDocument source) {
@@ -1515,6 +1562,11 @@ public class RagService {
     }
 
     private record RetrievalScope(String ownerUserId, String workspaceId) {
+    }
+
+    private record QueryRetrievalResult(
+            String query, List<SourceDocument> denseResults, List<SourceDocument> sparseResults
+    ) {
     }
 
     private String snippet(String content) {
