@@ -283,6 +283,7 @@ export function useChatStore() {
               assistantMessage.content = assistantMessage.content
                 .replace(/\uFFFD/g, '')
                 .replace(/^\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)(?:\r?\n|$)/gm, '')
+                .replace(new RegExp(`^\\s*\\d+\\s*\\r?\\n\\s*user\\s*\\r?\\n\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:\\r?\\n|$)`, 'gmi'), '')
                 .trim()
               settled = true
               close()

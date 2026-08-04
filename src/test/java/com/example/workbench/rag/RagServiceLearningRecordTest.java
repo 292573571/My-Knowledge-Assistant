@@ -10,9 +10,51 @@ import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.tools.WebSearchService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 class RagServiceLearningRecordTest {
+
+    @Test
+    void retrievesOriginalAndStandaloneQuestionsAndKeepsHistoryOutOfPromptText() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        ConversationMemory memory = new ConversationMemory();
+        memory.addUserMessage("conversation-1", "VPN 客户端是什么？");
+        memory.addAssistantMessage("conversation-1", "它用于连接公司网络。");
+        String question = "它支持什么操作系统版本？";
+        String standalone = "VPN 客户端支持什么操作系统版本？";
+        SourceDocument source = new SourceDocument(
+                "vpn-1", "VPN 客户端支持 macOS 10.13 及以上版本。", "系统要求", "vpn.pdf",
+                "docs/vpn.pdf", 0).withScore(0.1);
+        when(chatClient.generate(Mockito.anyString(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("RELATED: " + standalone);
+        when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of(source));
+        when(vectorStore.similaritySearch(standalone, 15)).thenReturn(List.of(source));
+        when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("VPN 客户端支持 macOS 10.13 及以上版本。");
+        RagQualityGate qualityGate = Mockito.mock(RagQualityGate.class);
+        when(qualityGate.relevantSources(Mockito.anyString(), Mockito.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(qualityGate.approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList())).thenReturn(true);
+        RagService service = new RagService(
+                Mockito.mock(DocumentIngestionService.class), vectorStore, chatClient, memory,
+                Mockito.mock(WebSearchService.class), qualityGate, false, 5, 0.45, "distance",
+                false, false, 4, true, false);
+
+        RagChatResponse response = service.chat(new RagChatRequest("conversation-1", question));
+
+        assertThat(response.answer()).contains("macOS 10.13");
+        verify(vectorStore).similaritySearch(question, 15);
+        verify(vectorStore).similaritySearch(standalone, 15);
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<com.example.workbench.memory.ChatMessage>> history = ArgumentCaptor.forClass(List.class);
+        verify(chatClient).call(prompt.capture(), Mockito.anyList(), history.capture(), Mockito.anyMap());
+        assertThat(prompt.getValue()).doesNotContain("user:", "assistant:", "VPN 客户端是什么？");
+        assertThat(history.getValue()).extracting(com.example.workbench.memory.ChatMessage::role)
+                .containsExactly("user", "assistant");
+    }
 
     @Test
     void answersLearningAssistantIntroductionWithoutModelOrRetrieval() {

@@ -1,6 +1,5 @@
 package com.example.workbench.rag;
 
-import com.example.workbench.config.AssistantPrompts;
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.tools.WebSearchResult;
@@ -40,6 +39,7 @@ public class RagService {
             "(?m)^\\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)\\R?");
     private static final double WEAK_DENSE_DISTANCE = 0.72;
     private static final double STRONG_SPARSE_SCORE = 2.0;
+    private static final int RECENT_CONVERSATION_ROUNDS = 4;
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
             您好，我是您的 AI 学习助理。
 
@@ -145,7 +145,7 @@ public class RagService {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
         // 历史仅用于补足当前问题语境；最终事实依据仍应来自本次检索到的文档。
-        List<ChatMessage> history = conversationMemory.get(conversationId);
+        List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
         log.info(
                 "RAG chat started conversationId={} questionLength={} historyMessages={} topK={} threshold={} scoreDirection={}",
                 conversationId,
@@ -177,9 +177,12 @@ public class RagService {
             return new RagChatResponse(answer, List.of(), retrievalDebug(question, List.of(), List.of()));
         }
 
+        ConversationContext conversationContext = resolveConversationContext(conversationId, question, history);
+        List<ChatMessage> relevantHistory = conversationContext.history();
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(), options, history);
+        List<SourceDocument> retrievedSources = retrieveCandidates(
+                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId), request.workspaceId(), options);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
@@ -193,7 +196,7 @@ public class RagService {
 
         if (sources.isEmpty()) {
             // 无可靠本地证据时可选模型补充，返回结果不带本地来源以避免伪造引用。
-            RagChatResponse response = answerWithModelFallback(conversationId, question, history, retrievedSources, sources);
+            RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
             conversationMemory.addUserMessage(conversationId, question);
             conversationMemory.addAssistantMessage(conversationId, response.answer());
             log.info(
@@ -215,8 +218,8 @@ public class RagService {
                     sources.size()
             );
             RagChatResponse response = webSearchEnabled
-                    ? answerWithWebSearch(conversationId, question, history, retrievedSources, sources)
-                    : answerWithModelFallback(conversationId, question, history, retrievedSources, sources);
+                    ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
+                    : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
             conversationMemory.addUserMessage(conversationId, question);
             conversationMemory.addAssistantMessage(conversationId, response.answer());
             log.info(
@@ -236,11 +239,11 @@ public class RagService {
         );
         // 只有阈值合格的片段会被拼入上下文，降低无关内容诱发幻觉的概率。
         String context = buildContext(sources);
-        String prompt = buildPrompt(context, formatHistory(history), question);
+        String prompt = buildPrompt(context, question);
         String answer = chatClient.call(
                 prompt,
                 sources,
-                history,
+                relevantHistory,
                 Map.of(ConversationMemory.CONVERSATION_ID, conversationId)
         );
         if (!qualityGate.approvesAnswer(question, answer, sources)) {
@@ -250,7 +253,7 @@ public class RagService {
                     conversationId,
                     sources.size()
             );
-            RagChatResponse response = answerWithModelFallback(conversationId, question, history, retrievedSources, List.of());
+            RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, List.of());
             conversationMemory.addUserMessage(conversationId, question);
             conversationMemory.addAssistantMessage(conversationId, response.answer());
             return response;
@@ -306,7 +309,7 @@ public class RagService {
     public RagStreamResponse stream(RagChatRequest request) {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
-        List<ChatMessage> history = conversationMemory.get(conversationId);
+        List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
 
         if (isLearningAssistantIntroductionQuestion(question)) {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION), List.of());
@@ -315,13 +318,16 @@ public class RagService {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER), List.of());
         }
 
-        List<SourceDocument> retrievedSources = retrieveCandidates(question, ownerUserId(conversationId), request.workspaceId(),
-                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled), history);
+        ConversationContext conversationContext = resolveConversationContext(conversationId, question, history);
+        List<ChatMessage> relevantHistory = conversationContext.history();
+        List<SourceDocument> retrievedSources = retrieveCandidates(
+                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId), request.workspaceId(),
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
-            String prompt = buildModelFallbackPrompt(formatHistory(history), question);
+            String prompt = buildModelFallbackPrompt(question);
             return new RagStreamResponse(
-                    chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
+                    streamWithHistory(prompt, relevantHistory, conversationId)
                             .concatWithValues("\n\n" + MODEL_KNOWLEDGE_DISCLAIMER),
                     List.of()
             );
@@ -329,10 +335,10 @@ public class RagService {
 
         String context = buildContext(sources);
         List<RagSource> ragSources = toRagSources(sources);
-        String prompt = buildPrompt(context, formatHistory(history), question);
+        String prompt = buildPrompt(context, question);
         String references = appendReferenceSources("", ragSources);
         return new RagStreamResponse(
-                chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
+                streamWithHistory(prompt, relevantHistory, conversationId)
                         .concatWithValues(references),
                 ragSources
         );
@@ -343,27 +349,22 @@ public class RagService {
         conversationMemory.addAssistantMessage(conversationId, answer);
     }
 
-    private String buildPrompt(String context, String history, String question) {
+    private String buildPrompt(String context, String question) {
         return """
-                %s
                 你现在负责知识库问答。请先理解用户真正想问的意图，再组织答案，不要只做关键词匹配。
-                用户问题可能是口语化表达、缩写、代词或省略句；请结合对话历史理解“它、这个、刚才、上面”等指代。
-                对话历史只用于补足当前问题语境，历史中的助手回答不能作为事实依据；事实依据必须来自下面的上下文。
+                已提供的角色消息只用于补足当前问题语境，历史中的助手回答不能作为事实依据；事实依据必须来自下面的上下文。
                 使用上下文前先判断每个片段是否与当前问题直接相关，忽略主题不一致、只有标题、重复问题或无法支持结论的片段。
                 如果多个片段分别提供定义、原因、步骤或示例，请综合整理，不要机械拼接或逐字复述。
                 回答先给出直接结论，再用简洁的分点解释；涉及流程、比较或步骤时使用清晰的列表。
                 不要把文档标题、用户问题或上下文中的提问句误当成答案，不要补充上下文没有依据的具体事实。
                 如果上下文确实没有足够答案，请明确说明当前知识库依据不足，并指出还缺少哪类信息；不要为了回答而猜测。
 
-                对话历史：
-                %s
-
                 上下文：
                 %s
 
                 用户问题：
                 %s
-                """.formatted(AssistantPrompts.SYSTEM_PROMPT, history, context, question);
+                """.formatted(context, question);
     }
 
     private RagChatResponse answerWithWebSearch(
@@ -379,7 +380,7 @@ public class RagService {
         String webContext = webResults.stream()
                 .map(this::formatWebContext)
                 .collect(Collectors.joining("\n\n"));
-        String prompt = buildWebPrompt(webContext, formatHistory(history), question);
+        String prompt = buildWebPrompt(webContext, question);
         String answer = chatClient.callWithWebResults(
                 prompt,
                 webResults,
@@ -414,8 +415,9 @@ public class RagService {
             return new RagChatResponse(NO_CONTEXT_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
         }
 
-        String prompt = buildModelFallbackPrompt(formatHistory(history), question);
-        String answer = chatClient.generate(prompt);
+        String prompt = buildModelFallbackPrompt(question);
+        Map<String, String> options = Map.of(ConversationMemory.CONVERSATION_ID, conversationId);
+        String answer = generateWithHistory(prompt, history, options);
         if (answer == null || answer.isBlank()) {
             log.warn("RAG model fallback answer rejected reason=empty_or_unavailable action=safety_answer conversationId={}", conversationId);
             return new RagChatResponse(MODEL_FALLBACK_SAFETY_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
@@ -423,14 +425,15 @@ public class RagService {
         if (!isUsableModelFallbackAnswer(answer)) {
             // 模型请求成功但内容异常时，再尝试一次；这与网络错误重试是不同的保护层。
             log.warn("RAG model fallback answer rejected reason=invalid_content action=retry_once conversationId={}", conversationId);
-            answer = chatClient.generate(prompt + "\n\n请重新生成回答：不要输出乱码、无意义字符或重复内容。");
+            answer = generateWithHistory(
+                    prompt + "\n\n请重新生成回答：不要输出乱码、无意义字符或重复内容。", history, options);
         }
         if (!isUsableModelFallbackAnswer(answer)) {
             log.warn("RAG model fallback answer rejected reason=invalid_content action=safety_answer conversationId={}", conversationId);
             answer = MODEL_FALLBACK_SAFETY_ANSWER;
         } else {
             // 明确标注来源边界，避免用户将通用模型知识误认为本地资料结论。
-            answer = sanitizePresentedAnswer(answer).strip() + "\n\n" + MODEL_KNOWLEDGE_DISCLAIMER;
+            answer = sanitizePresentedAnswer(answer, question).strip() + "\n\n" + MODEL_KNOWLEDGE_DISCLAIMER;
         }
         return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
     }
@@ -457,42 +460,50 @@ public class RagService {
         return true;
     }
 
+    private String generateWithHistory(String prompt, List<ChatMessage> history, Map<String, String> options) {
+        return history == null || history.isEmpty()
+                ? chatClient.generate(prompt)
+                : chatClient.generate(prompt, history, options);
+    }
+
+    private reactor.core.publisher.Flux<String> streamWithHistory(
+            String prompt, List<ChatMessage> history, String conversationId) {
+        Map<String, String> options = Map.of(ConversationMemory.CONVERSATION_ID, conversationId);
+        return history == null || history.isEmpty()
+                ? chatClient.stream(prompt, options)
+                : chatClient.stream(prompt, history, options);
+    }
+
     private boolean isLikelyGibberishToken(String token) {
         // 长英文词在技术回答中很常见，不能靠固定白名单判断；只拦截字符种类极少的重复乱码串。
         long distinctCharacters = token.chars().distinct().count();
         return token.length() >= 9 && distinctCharacters <= 4;
     }
 
-    private String buildWebPrompt(String webContext, String history, String question) {
+    private String buildWebPrompt(String webContext, String question) {
         return """
-                %s
                 知识库没有足够信息时，可以使用搜索结果回答。
                 回答时必须说明信息来自 Web。
-
-                对话历史：
-                %s
 
                 Web 搜索结果：
                 %s
 
                 用户问题：
                 %s
-                """.formatted(AssistantPrompts.SYSTEM_PROMPT, history, webContext, question);
+                """.formatted(webContext, question);
     }
 
-    private String buildModelFallbackPrompt(String history, String question) {
+    private String buildModelFallbackPrompt(String question) {
         return """
-                %s
                 当前知识库没有足够信息回答该问题。请基于通用知识直接回答，保持准确、简洁。
                 只输出问题的答案，不要复述这些要求，不要添加来源声明或“来源标记”等元信息。
                 对于无法确定的事实，在相关结论处直接说明无法确定，不要单独添加说明模板。
-
-                对话历史：
-                %s
+                回答应形成完整闭环：如果使用“包括、如下、步骤”等引导语，必须完整列出对应内容；不要在标题、冒号或列表序号后结束。
+                一般问题控制在 300 到 800 个中文字符，复杂问题可以适当增加，但不要为了简短而省略关键步骤。
 
                 用户问题：
                 %s
-                """.formatted(AssistantPrompts.SYSTEM_PROMPT, history, question);
+                """.formatted(question);
     }
 
     /**
@@ -502,10 +513,27 @@ public class RagService {
      * @return 可安全展示和保存的回答
      */
     public String sanitizePresentedAnswer(String answer) {
+        return sanitizePresentedAnswer(answer, null);
+    }
+
+    /**
+     * 清除模型误输出的内部提示语、问题回显和 Unicode 损坏占位符。
+     *
+     * @param answer 待展示回答
+     * @param question 当前用户问题
+     * @return 可安全展示和保存的回答
+     */
+    public String sanitizePresentedAnswer(String answer, String question) {
         if (answer == null || answer.isBlank()) {
             return answer == null ? "" : answer;
         }
-        return FALLBACK_PROMPT_LEAK_LINE.matcher(answer.replace("\uFFFD", "")).replaceAll("").strip();
+        String sanitized = FALLBACK_PROMPT_LEAK_LINE.matcher(answer.replace("\uFFFD", "")).replaceAll("");
+        if (question != null && !question.isBlank()) {
+            Pattern promptEcho = Pattern.compile("(?is)^\\s*\\d+\\s*\\R\\s*user\\s*\\R\\s*"
+                    + Pattern.quote(question.strip()) + "\\s*\\R?");
+            sanitized = promptEcho.matcher(sanitized).replaceFirst("");
+        }
+        return sanitized.strip();
     }
 
     private String buildRetrievalQuery(String question) {
@@ -517,21 +545,28 @@ public class RagService {
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId) {
-        return retrieveCandidates(question, ownerUserId, null, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled), List.of());
+        return retrieveCandidates(question, null, ownerUserId, null,
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, String workspaceId, RagChatOptions options) {
-        return retrieveCandidates(question, ownerUserId, workspaceId, options, List.of());
+        return retrieveCandidates(question, null, ownerUserId, workspaceId, options);
     }
 
     private List<SourceDocument> retrieveCandidates(
             String question,
+            String standaloneQuestion,
             String ownerUserId,
             String workspaceId,
-            RagChatOptions options,
-            List<ChatMessage> history
+            RagChatOptions options
     ) {
-        List<String> queries = retrievalQueries(question, options, history);
+        List<String> queries = new ArrayList<>(retrievalQueries(question, options));
+        if (standaloneQuestion != null && !standaloneQuestion.isBlank()
+                && !standaloneQuestion.equalsIgnoreCase(question)) {
+            retrievalQueries(standaloneQuestion, options).stream()
+                    .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
+                    .forEach(queries::add);
+        }
         return retrieveCandidates(queries, ownerUserId, workspaceId);
     }
 
@@ -625,12 +660,13 @@ public class RagService {
     }
 
     private List<String> retrievalQueries(String question, RagChatOptions options) {
-        return retrievalQueries(question, options, List.of());
-    }
-
-    private List<String> retrievalQueries(String question, RagChatOptions options, List<ChatMessage> history) {
         List<String> queries = new ArrayList<>();
-        queries.add(buildRetrievalQuery(question, options, history));
+        // 原问题始终保留；查询改写和多查询只能补充召回，不能替代用户原始表达。
+        queries.add(expandRetrievalQuery(question));
+        String rewritten = buildRetrievalQuery(question, options);
+        if (!rewritten.equalsIgnoreCase(queries.get(0))) {
+            queries.add(rewritten);
+        }
 
         if (!options.multiQueryEnabled()) {
             return queries;
@@ -643,12 +679,9 @@ public class RagService {
                 不要回答问题。
                 每行只输出一个查询，不要编号。
 
-                对话历史：
-                %s
-
                 用户问题：
                 %s
-                """.formatted(formatRetrievalHistory(history), question);
+                """.formatted(question);
             String generated = chatClient.generate(prompt);
             log.info("RAG multi-query generated enabled=true generatedLength={}", generated == null ? 0 : generated.length());
 
@@ -660,7 +693,7 @@ public class RagService {
                 .map(this::cleanGeneratedQuery)
                 .filter(query -> !query.isBlank())
                 .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
-                .limit(Math.max(1, multiQueryMaxQueries - 1))
+                .limit(Math.max(0, multiQueryMaxQueries - queries.size()))
                 .forEach(queries::add);
         return queries;
     }
@@ -670,10 +703,6 @@ public class RagService {
     }
 
     private String rewriteQuery(String question, RagChatOptions options) {
-        return rewriteQuery(question, options, List.of());
-    }
-
-    private String rewriteQuery(String question, RagChatOptions options, List<ChatMessage> history) {
         if (!options.queryRewriteEnabled()) {
             return question;
         }
@@ -685,12 +714,9 @@ public class RagService {
                 不要回答问题。
                 只输出改写后的查询。
 
-                对话历史：
-                %s
-
                 用户问题：
                 %s
-                """.formatted(formatRetrievalHistory(history), question);
+                """.formatted(question);
         String rewritten = cleanGeneratedQuery(chatClient.generate(prompt));
         log.info("RAG query rewrite completed enabled=true rewritten={} originalLength={}", !rewritten.isBlank(), question == null ? 0 : question.length());
 
@@ -699,21 +725,6 @@ public class RagService {
         }
 
         return rewritten;
-    }
-
-    private String buildRetrievalQuery(String question, RagChatOptions options, List<ChatMessage> history) {
-        return expandRetrievalQuery(rewriteQuery(question, options, history));
-    }
-
-    private String formatRetrievalHistory(List<ChatMessage> history) {
-        if (history == null || history.isEmpty()) {
-            return "无";
-        }
-
-        return history.stream()
-                .skip(Math.max(0, history.size() - 4))
-                .map(message -> message.role() + ": " + truncateHistoryMessage(withoutModelKnowledgeDisclaimer(message.content())))
-                .collect(Collectors.joining("\n"));
     }
 
     private String cleanGeneratedQuery(String query) {
@@ -726,6 +737,63 @@ public class RagService {
                 .replace("\"", "")
                 .replace("'", "")
                 .trim();
+    }
+
+    private ConversationContext resolveConversationContext(
+            String conversationId, String question, List<ChatMessage> history) {
+        if (history == null || history.isEmpty()) {
+            return new ConversationContext(List.of(), null);
+        }
+
+        String prompt = """
+                判断当前用户问题是否依赖之前的对话才能正确理解。
+                如果不依赖，严格只输出：INDEPENDENT
+                如果依赖，严格只输出一行：RELATED: 后面跟补全指代和省略信息后的独立问题。
+                独立问题必须保留当前用户的真实意图和关键技术词，不要回答问题，不要添加解释。
+
+                当前用户问题：
+                %s
+                """.formatted(question);
+        String generated = chatClient.generate(
+                prompt, sanitizeHistory(history), Map.of(ConversationMemory.CONVERSATION_ID, conversationId));
+        String standaloneQuestion = parseStandaloneQuestion(generated, question);
+        if (standaloneQuestion != null) {
+            log.info("RAG conversation context resolved conversationId={} related=true standaloneLength={}",
+                    conversationId, standaloneQuestion.length());
+            return new ConversationContext(sanitizeHistory(history), standaloneQuestion);
+        }
+        if (generated != null && generated.strip().equalsIgnoreCase("INDEPENDENT")) {
+            log.info("RAG conversation context resolved conversationId={} related=false", conversationId);
+            return new ConversationContext(List.of(), null);
+        }
+
+        boolean likelyRelated = containsAny(question, List.of(
+                "它", "这个", "那个", "刚才", "上面", "前面", "继续", "上一", "其中", "该方案", "还有呢", "然后呢"));
+        log.info("RAG conversation context fallback conversationId={} related={}", conversationId, likelyRelated);
+        return new ConversationContext(likelyRelated ? sanitizeHistory(history) : List.of(), null);
+    }
+
+    private String parseStandaloneQuestion(String generated, String originalQuestion) {
+        if (generated == null || generated.isBlank()) {
+            return null;
+        }
+        String normalized = generated.strip();
+        if (!normalized.regionMatches(true, 0, "RELATED:", 0, "RELATED:".length())) {
+            return null;
+        }
+        String standalone = cleanGeneratedQuery(normalized.substring("RELATED:".length()));
+        if (standalone.isBlank() || standalone.equalsIgnoreCase(originalQuestion)) {
+            return null;
+        }
+        return standalone;
+    }
+
+    private List<ChatMessage> sanitizeHistory(List<ChatMessage> history) {
+        return history.stream()
+                .map(message -> new ChatMessage(
+                        message.role(), truncateHistoryMessage(withoutModelKnowledgeDisclaimer(message.content()))))
+                .filter(message -> !message.content().isBlank())
+                .toList();
     }
 
     private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources) {
@@ -1219,19 +1287,6 @@ public class RagService {
         return keywords.stream().anyMatch(value::contains);
     }
 
-    private String formatHistory(List<ChatMessage> history) {
-        if (history.isEmpty()) {
-            return "无";
-        }
-
-        // 只保留最近六条，控制 Prompt 长度和上下文成本。
-        return history.stream()
-                .skip(Math.max(0, history.size() - 6))
-                // 历史只用于理解指代，过长的旧答案会拖慢后续模型请求且容易干扰当前问题。
-                .map(message -> message.role() + ": " + truncateHistoryMessage(withoutModelKnowledgeDisclaimer(message.content())))
-                .collect(Collectors.joining("\n"));
-    }
-
     private String withoutModelKnowledgeDisclaimer(String content) {
         if (content == null || content.isBlank()) {
             return "";
@@ -1562,6 +1617,9 @@ public class RagService {
     }
 
     private record RetrievalScope(String ownerUserId, String workspaceId) {
+    }
+
+    private record ConversationContext(List<ChatMessage> history, String standaloneQuestion) {
     }
 
     private record QueryRetrievalResult(
