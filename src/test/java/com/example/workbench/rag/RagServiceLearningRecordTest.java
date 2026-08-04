@@ -256,7 +256,7 @@ class RagServiceLearningRecordTest {
         String question = "PostgreSQL 查询当前库所有表名";
         when(vectorStore.similaritySearch(question, 15)).thenReturn(List.of());
         when(chatClient.generate(Mockito.anyString()))
-                .thenReturn("```sql\nSELECT table_name FROM information_信息_schema.tables;\n```")
+                .thenReturn("```sql\nSELECT table_name\nFROM information,\n信息_schema.tables;")
                 .thenReturn("```sql\nSELECT schemaname, tablename FROM pg_catalog.pg_tables "
                         + "WHERE schemaname NOT IN ('pg_catalog', 'information_schema');\n```");
         RagService service = service(vectorStore, chatClient);
@@ -265,7 +265,7 @@ class RagServiceLearningRecordTest {
 
         assertThat(response.answer())
                 .contains("pg_catalog.pg_tables")
-                .doesNotContain("information_信息_schema");
+                .doesNotContain("信息_schema");
         verify(chatClient, times(2)).generate(Mockito.anyString());
     }
 

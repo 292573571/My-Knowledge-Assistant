@@ -33,6 +33,9 @@ public class RagService {
     private static final Pattern SUSPICIOUS_LATIN_TOKEN = Pattern.compile("(?i)(?<![a-z])[a-z]{8,}(?![a-z])");
     private static final Pattern MIXED_LANGUAGE_IDENTIFIER = Pattern.compile(
             "(?U)(?:[A-Za-z][A-Za-z0-9]*_[\\p{IsHan}]+(?:_[A-Za-z][A-Za-z0-9]*)?|[\\p{IsHan}]+_[A-Za-z][A-Za-z0-9_]*)");
+    private static final Pattern HAN_CHARACTER = Pattern.compile("\\p{IsHan}");
+    private static final Pattern SQL_STATEMENT = Pattern.compile(
+            "(?is).*\\b(?:select|insert|update|delete|create|alter|drop|with)\\b.*");
     private static final Pattern EXPLICIT_TECHNICAL_ACRONYM = Pattern.compile("(?<![A-Za-z0-9])[A-Z][A-Z0-9.+#-]{1,}(?![A-Za-z0-9])");
     private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
@@ -426,7 +429,8 @@ public class RagService {
             // 模型请求成功但内容异常时，再尝试一次；这与网络错误重试是不同的保护层。
             log.warn("RAG model fallback answer rejected reason=invalid_content action=retry_once conversationId={}", conversationId);
             answer = generateWithHistory(
-                    prompt + "\n\n请重新生成回答：不要输出乱码、无意义字符或重复内容。", history, options);
+                    prompt + "\n\n上一次回答未通过代码正确性校验。请重新生成完整答案：代码围栏必须闭合；SQL 中不得出现翻译成中文的关键字、系统视图名、表名或字段名；不要输出乱码、无意义字符或重复内容。",
+                    history, options);
         }
         if (!isUsableModelFallbackAnswer(question, answer)) {
             log.warn("RAG model fallback answer rejected reason=invalid_content action=safety_answer conversationId={}", conversationId);
@@ -450,7 +454,7 @@ public class RagService {
         if (REPEATED_CHARACTER.matcher(normalized).matches() || REPEATED_SEQUENCE.matcher(normalized).matches()) {
             return false;
         }
-        if (containsInvalidCodeIdentifier(normalized)) {
+        if (containsInvalidCodeIdentifier(question, normalized)) {
             return false;
         }
         if (asksForAllPostgresTables(question)
@@ -480,14 +484,87 @@ public class RagService {
         return Character.isISOControl(character) && character != '\n' && character != '\r' && character != '\t';
     }
 
-    private boolean containsInvalidCodeIdentifier(String answer) {
-        var fence = Pattern.compile("(?s)```[^\\r\\n]*\\R(.*?)```").matcher(answer);
-        while (fence.find()) {
-            if (MIXED_LANGUAGE_IDENTIFIER.matcher(fence.group(1)).find()) {
+    private boolean containsInvalidCodeIdentifier(String question, String answer) {
+        ParsedCode parsed = parseCodeBlocks(answer);
+        if (parsed.unclosedFence()) {
+            return true;
+        }
+
+        boolean sqlFound = false;
+        for (CodeBlock block : parsed.blocks()) {
+            String language = block.language();
+            String code = block.code();
+            if (MIXED_LANGUAGE_IDENTIFIER.matcher(code).find()) {
+                return true;
+            }
+            boolean sqlCode = language.equals("sql") || language.equals("postgresql") || language.equals("postgres")
+                    || language.equals("pgsql") || SQL_STATEMENT.matcher(code).matches();
+            sqlFound |= sqlCode;
+            if (sqlCode && containsHanOutsideSqlText(code)) {
                 return true;
             }
         }
-        return false;
+
+        if (!asksForSql(question)) {
+            return false;
+        }
+        if (!sqlFound && SQL_STATEMENT.matcher(answer).matches()) {
+            sqlFound = true;
+            if (containsHanOutsideSqlText(answer)) {
+                return true;
+            }
+        }
+        return !sqlFound;
+    }
+
+    private ParsedCode parseCodeBlocks(String answer) {
+        List<CodeBlock> blocks = new ArrayList<>();
+        String language = "";
+        StringBuilder code = null;
+        for (String line : answer.split("\\R", -1)) {
+            String stripped = line.stripLeading();
+            if (stripped.startsWith("```")) {
+                if (code == null) {
+                    String info = stripped.substring(3).strip();
+                    language = info.isBlank() ? "" : info.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+                    code = new StringBuilder();
+                } else {
+                    blocks.add(new CodeBlock(language, code.toString()));
+                    code = null;
+                    language = "";
+                }
+                continue;
+            }
+            if (code != null) {
+                if (!code.isEmpty()) {
+                    code.append('\n');
+                }
+                code.append(line);
+            }
+        }
+        if (code != null) {
+            blocks.add(new CodeBlock(language, code.toString()));
+        }
+        return new ParsedCode(List.copyOf(blocks), code != null);
+    }
+
+    private boolean asksForSql(String question) {
+        if (question == null) {
+            return false;
+        }
+        String normalized = question.toLowerCase(Locale.ROOT);
+        return normalized.contains("sql") || normalized.contains("查询语句") || normalized.contains("查询所有表")
+                || normalized.contains("查询全部表");
+    }
+
+    private boolean containsHanOutsideSqlText(String sql) {
+        String withoutComments = sql
+                .replaceAll("(?s)/\\*.*?\\*/", " ")
+                .replaceAll("(?m)--.*$", " ");
+        String withoutQuotedText = withoutComments
+                .replaceAll("'(?:''|[^'])*'", "''")
+                .replaceAll("\"(?:\"\"|[^\"])*\"", "\"\"");
+        return HAN_CHARACTER.matcher(withoutQuotedText).find();
     }
 
     private String generateWithHistory(String prompt, List<ChatMessage> history, Map<String, String> options) {
@@ -1653,6 +1730,12 @@ public class RagService {
     }
 
     private record ConversationContext(List<ChatMessage> history, String standaloneQuestion) {
+    }
+
+    private record CodeBlock(String language, String code) {
+    }
+
+    private record ParsedCode(List<CodeBlock> blocks, boolean unclosedFence) {
     }
 
     private record QueryRetrievalResult(

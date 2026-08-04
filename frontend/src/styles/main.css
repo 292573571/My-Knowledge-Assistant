@@ -928,6 +928,58 @@ textarea:focus-visible,
   color: inherit;
 }
 
+/* highlight.js 默认引入的是浅色主题，聊天代码块需要显式使用深色高对比配色。 */
+.code-block .hljs {
+  color: #e6edf3;
+  background: transparent;
+}
+
+.code-block .hljs-keyword,
+.code-block .hljs-selector-tag,
+.code-block .hljs-literal,
+.code-block .hljs-section,
+.code-block .hljs-link {
+  color: #ff7b9c;
+}
+
+.code-block .hljs-string,
+.code-block .hljs-attribute,
+.code-block .hljs-symbol,
+.code-block .hljs-bullet,
+.code-block .hljs-addition {
+  color: #a5d6ff;
+}
+
+.code-block .hljs-title,
+.code-block .hljs-title.class_,
+.code-block .hljs-title.function_,
+.code-block .hljs-selector-id,
+.code-block .hljs-selector-class {
+  color: #d2a8ff;
+}
+
+.code-block .hljs-number,
+.code-block .hljs-meta,
+.code-block .hljs-built_in,
+.code-block .hljs-type,
+.code-block .hljs-params {
+  color: #ffa657;
+}
+
+.code-block .hljs-comment,
+.code-block .hljs-quote {
+  color: #9aa7b8;
+  font-style: italic;
+}
+
+.code-block .hljs-variable,
+.code-block .hljs-template-variable,
+.code-block .hljs-name,
+.code-block .hljs-tag,
+.code-block .hljs-deletion {
+  color: #ff9b91;
+}
+
 .message-user .markdown-body code {
   background: rgba(255, 255, 255, 0.16);
   color: #ffffff;
