@@ -1,5 +1,6 @@
 package com.example.workbench.rag;
 
+import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.tools.WebSearchResult;
 import java.net.SocketTimeoutException;
@@ -49,6 +50,17 @@ public class LocalChatClient {
     private final String fallbackStrategy;
     private final double temperature;
     private final int maxOutputTokens;
+    private RagMetrics metrics;
+
+    /**
+     * 注入可选的模型调用指标记录器，单元测试直接构造客户端时可以不提供。
+     *
+     * @param metrics RAG 指标记录器
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setMetrics(RagMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public LocalChatClient(
             ObjectProvider<ChatClient> chatClientProvider,
@@ -190,6 +202,8 @@ public class LocalChatClient {
         log.info("AI model stream started provider=openai-compatible model={} conversationId={} requestTimeoutMs={} promptLength={}",
                 model, conversationId, timeout.toMillis(), prompt == null ? 0 : prompt.length());
         AtomicInteger answerLength = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        long startedAt = System.nanoTime();
         return chatClient.prompt()
                 .messages(toSpringAiMessages(history))
                 .user(prompt)
@@ -202,7 +216,16 @@ public class LocalChatClient {
                 .doOnComplete(() -> log.info(
                         "AI model stream completed model={} conversationId={} answerLength={}",
                         model, conversationId, answerLength.get()))
-                .doOnError(error -> log.warn("AI model stream failed model={} conversationId={} errorType={}", model, conversationId, error.getClass().getSimpleName()));
+                .doOnError(error -> {
+                    failed.set(true);
+                    log.warn("AI model stream failed model={} conversationId={} errorType={}", model, conversationId, error.getClass().getSimpleName());
+                })
+                .doFinally(signal -> {
+                    if (metrics != null) {
+                        metrics.recordModelCall(model, model.equals(chatModel) ? "primary" : "fallback",
+                                failed.get() ? "error" : "success", System.nanoTime() - startedAt, null, null);
+                    }
+                });
     }
 
     private String callSpringAi(String prompt, List<ChatMessage> history, Map<String, String> options) {
@@ -250,9 +273,11 @@ public class LocalChatClient {
                     ChatResponse response = callChatResponse(prompt, history, conversationId, model, timeout);
                     String content = content(response);
                     logModelResponse(response, model, conversationId, attempt, startedAt, content);
+                    recordModelCall(response, model, modelIndex == 0 ? "primary" : "fallback", "success", startedAt);
                     return content;
                 } catch (RuntimeException exception) {
                     boolean retryable = logModelError(exception, model, conversationId, attempt, startedAt, modelIndex < models.size() - 1);
+                    recordModelCall(null, model, modelIndex == 0 ? "primary" : "fallback", "error", startedAt);
 
                     if (retryable && attempt < maxAttempts) {
                         sleepBackoff(model, conversationId, attempt);
@@ -270,7 +295,21 @@ public class LocalChatClient {
                 fallbackModels,
                 conversationId
         );
+        if (metrics != null) {
+            metrics.recordFallback(fallbackStrategy);
+        }
         return null;
+    }
+
+    private void recordModelCall(ChatResponse response, String model, String role, String outcome, long startedAtMillis) {
+        if (metrics == null) {
+            return;
+        }
+        Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        metrics.recordModelCall(model, role, outcome,
+                java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis() - startedAtMillis),
+                usage == null ? null : usage.getPromptTokens(),
+                usage == null ? null : usage.getCompletionTokens());
     }
 
     private ChatResponse callChatResponse(

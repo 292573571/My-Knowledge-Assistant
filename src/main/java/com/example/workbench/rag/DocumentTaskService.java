@@ -3,6 +3,7 @@ package com.example.workbench.rag;
 import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AppUserRepository;
+import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import java.nio.file.Files;
@@ -31,6 +32,17 @@ public class DocumentTaskService {
     private final WorkspaceService workspaceService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final String workerId = UUID.randomUUID().toString();
+    private RagMetrics metrics;
+
+    /**
+     * 注入可选的文档任务指标记录器，单元测试直接构造服务时可以不提供。
+     *
+     * @param metrics RAG 指标记录器
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setMetrics(RagMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public DocumentTaskService(
             DocumentTaskRepository repository,
@@ -200,12 +212,14 @@ public class DocumentTaskService {
             task = repository.findById(taskId).orElseThrow();
             task.succeed(documentId);
             repository.saveAndFlush(task);
+            recordTaskTransition(task);
             log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
         } catch (Exception exception) {
             task = repository.findById(taskId).orElseThrow();
             String failedStage = task.getStage();
             task.fail(publicErrorMessage(exception), isRetryable(exception));
             repository.saveAndFlush(task);
+            recordTaskTransition(task);
             // 后台线程没有 HTTP 异常处理器兜底，必须保留完整异常链才能区分 OCR、Embedding 和 Chroma 故障。
             log.warn("Document task failed taskId={} type={} fileName={} failedStage={} status={} attempt={}",
                     taskId, task.getType(), task.getFileName(), failedStage, task.getStatus(),
@@ -356,6 +370,12 @@ public class DocumentTaskService {
             Files.deleteIfExists(Path.of(sourcePath).toAbsolutePath().normalize());
         } catch (Exception ignored) {
             // 数据库创建失败时尽力清理源文件，原始异常仍交给调用方。
+        }
+    }
+
+    private void recordTaskTransition(DocumentTaskEntity task) {
+        if (metrics != null) {
+            metrics.recordDocumentTask(task.getType().name(), task.getStatus().name());
         }
     }
 }

@@ -2,6 +2,7 @@ package com.example.workbench.rag;
 
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
 import com.example.workbench.workspace.DocumentVisibility;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Comparator;
 import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +81,17 @@ public class RagService {
     private final boolean adjacentEnabled;
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
+    private RagMetrics metrics;
+
+    /**
+     * 注入可选的 RAG 指标记录器，单元测试直接构造服务时可以不提供。
+     *
+     * @param metrics RAG 指标记录器
+     */
+    @Autowired(required = false)
+    public void setMetrics(RagMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     @Autowired
     public RagService(
@@ -280,7 +293,7 @@ public class RagService {
                 sources.size()
         );
         // 只有阈值合格的片段会被拼入上下文，降低无关内容诱发幻觉的概率。
-        String context = buildContext(sources);
+        String context = time("context_build", () -> buildContext(sources));
         String prompt = buildPrompt(context, question);
         String answer = chatClient.call(
                 prompt,
@@ -288,7 +301,7 @@ public class RagService {
                 relevantHistory,
                 Map.of(ConversationMemory.CONVERSATION_ID, conversationId)
         );
-        if (!qualityGate.approvesAnswer(question, answer, sources)) {
+        if (!time("quality_validation", () -> qualityGate.approvesAnswer(question, answer, sources))) {
             // 依据校验失败通常意味着召回内容或生成答案偏离了当前问题，不能再把候选原文当作答案。
             log.info(
                     "RAG answer grounding failed conversationId={} action=model_fallback sources={}",
@@ -380,7 +393,7 @@ public class RagService {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(response.answer()), List.of());
         }
 
-        String context = buildContext(sources);
+        String context = time("context_build", () -> buildContext(sources));
         List<RagSource> ragSources = toRagSources(sources);
         String prompt = buildPrompt(context, question);
         return new RagStreamResponse(
@@ -436,7 +449,8 @@ public class RagService {
         List<SourceDocument> webSources = webResults.stream()
                 .map(result -> new SourceDocument(result.url(), result.snippet(), result.title(), result.url(), result.url(), 0))
                 .toList();
-        if (!qualityGate.approvesAnswer(question, answer, webSources)) {
+        String generatedAnswer = answer;
+        if (!time("quality_validation", () -> qualityGate.approvesAnswer(question, generatedAnswer, webSources))) {
             log.info("RAG web answer grounding failed conversationId={} action=use_web_snippets", conversationId);
             answer = "知识库没有足够信息，我将使用搜索工具...\n\n"
                     + webResults.stream()
@@ -712,10 +726,10 @@ public class RagService {
             String workspaceId,
             RagChatOptions options
     ) {
-        List<String> queries = new ArrayList<>(retrievalQueries(question, options));
+        List<String> queries = new ArrayList<>(time("query_planning", () -> retrievalQueries(question, options)));
         if (standaloneQuestion != null && !standaloneQuestion.isBlank()
                 && !standaloneQuestion.equalsIgnoreCase(question)) {
-            retrievalQueries(standaloneQuestion, options).stream()
+            time("query_planning", () -> retrievalQueries(standaloneQuestion, options)).stream()
                     .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
                     .forEach(queries::add);
         }
@@ -754,10 +768,10 @@ public class RagService {
             }
         }
 
-        List<CandidateAccumulator> ranked = candidates.values().stream()
+        List<CandidateAccumulator> ranked = time("fusion", () -> candidates.values().stream()
                 .sorted(Comparator.comparingDouble(CandidateAccumulator::fusionScore).reversed()
                         .thenComparing(candidate -> stableSourceKey(candidate.source())))
-                .toList();
+                .toList());
         LinkedHashMap<String, CandidateTrace> traces = new LinkedHashMap<>();
         List<SourceDocument> sources = new ArrayList<>();
         for (int index = 0; index < ranked.size(); index++) {
@@ -768,16 +782,26 @@ public class RagService {
         }
         retrievalTrace.set(traces);
         retrievalScope.set(new RetrievalScope(ownerUserId, workspaceId));
+        recordRetrievalCount("fused", sources.size());
         return sources;
     }
 
     private CompletableFuture<QueryRetrievalResult> retrieveQueryInParallel(
             String query, int candidateLimit, String ownerUserId, String workspaceId
     ) {
-        CompletableFuture<List<SourceDocument>> dense = CompletableFuture.supplyAsync(
-                () -> similaritySearch(query, candidateLimit, ownerUserId, workspaceId));
+        CompletableFuture<List<SourceDocument>> dense = CompletableFuture.supplyAsync(() -> {
+            List<SourceDocument> results = time("vector_retrieval",
+                    () -> similaritySearch(query, candidateLimit, ownerUserId, workspaceId));
+            recordRetrievalCount("dense", results.size());
+            return results;
+        });
         CompletableFuture<List<SourceDocument>> sparse = hybridEnabled && sparseRetriever != null
-                ? CompletableFuture.supplyAsync(() -> safeSparseSearch(query, candidateLimit, ownerUserId, workspaceId))
+                ? CompletableFuture.supplyAsync(() -> {
+                    List<SourceDocument> results = time("keyword_retrieval",
+                            () -> safeSparseSearch(query, candidateLimit, ownerUserId, workspaceId));
+                    recordRetrievalCount("sparse", results.size());
+                    return results;
+                })
                 : CompletableFuture.completedFuture(List.of());
         return dense.thenCombine(sparse, (denseResults, sparseResults) ->
                 new QueryRetrievalResult(query, denseResults, sparseResults));
@@ -834,8 +858,8 @@ public class RagService {
                 用户问题：
                 %s
                 """.formatted(question);
-            String generated = chatClient.generate(prompt);
-            log.info("RAG multi-query generated enabled=true generatedLength={}", generated == null ? 0 : generated.length());
+        String generated = time("multi_query", () -> chatClient.generate(prompt));
+        log.info("RAG multi-query generated enabled=true generatedLength={}", generated == null ? 0 : generated.length());
 
         if (generated == null || generated.isBlank()) {
             return queries;
@@ -869,7 +893,7 @@ public class RagService {
                 用户问题：
                 %s
                 """.formatted(question);
-        String rewritten = cleanGeneratedQuery(chatClient.generate(prompt));
+        String rewritten = cleanGeneratedQuery(time("query_rewrite", () -> chatClient.generate(prompt)));
         log.info("RAG query rewrite completed enabled=true rewritten={} originalLength={}", !rewritten.isBlank(), question == null ? 0 : question.length());
 
         if (rewritten.isBlank()) {
@@ -962,13 +986,18 @@ public class RagService {
         }
 
         // 先按距离/相似度阈值去掉低质量候选，再执行项目中的轻量规则重排。
-        List<SourceDocument> thresholdSources = diversify(rerankSources(question, eligibleSources.stream()
+        List<SourceDocument> thresholdSources = time("rerank", () -> diversify(rerankSources(question, eligibleSources.stream()
                 .filter(this::hasSubstantiveContent)
                 .filter(this::passesThreshold)
                 .filter(source -> hasStrongRetrievalSignal(question, source))
-                .toList()));
-        List<SourceDocument> relevantSources = qualityGate.relevantSources(question, thresholdSources);
-        return applyContextPolicy(expandAdjacent(relevantSources));
+                .toList())));
+        List<SourceDocument> relevantSources = time("quality_validation",
+                () -> qualityGate.relevantSources(question, thresholdSources));
+        List<SourceDocument> contextSources = applyContextPolicy(expandAdjacent(relevantSources));
+        if (metrics != null) {
+            metrics.recordContextCount(contextSources.size());
+        }
+        return contextSources;
     }
 
     private boolean hasStrongRetrievalSignal(String question, SourceDocument source) {
@@ -1472,6 +1501,16 @@ public class RagService {
             usedTokens += tokens;
         }
         return String.join("\n\n", blocks);
+    }
+
+    private <T> T time(String stage, Supplier<T> action) {
+        return metrics == null ? action.get() : metrics.time(stage, action);
+    }
+
+    private void recordRetrievalCount(String channel, int count) {
+        if (metrics != null) {
+            metrics.recordRetrievalCount(channel, count);
+        }
     }
 
     private int estimatedTokens(String text) {

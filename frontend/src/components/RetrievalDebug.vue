@@ -313,24 +313,18 @@ onMounted(loadEvalCases)
       <div class="retrieval-eval-actions"><span><b>{{ selectedCaseIds.length }}</b> / {{ evalCases.length }} 已选</span><label class="retrieval-eval-run-filter">评测集<select v-model="runSuite"><option value="">全部</option><option v-for="suite in ['SMOKE', 'REGRESSION', 'FORMAT', 'SECURITY', 'FAILURE', 'NO_ANSWER']" :key="suite" :value="suite">{{ suite }}</option></select></label><label class="retrieval-eval-run-filter">层级<select v-model="runLayer"><option value="">全部</option><option v-for="layer in ['PARSER', 'RETRIEVAL', 'CONTEXT', 'GENERATION']" :key="layer" :value="layer">{{ layer }}</option></select></label><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading || !evalCases.length" @click="selectAllCases">全选</button><button type="button" class="retrieval-eval-secondary" :disabled="!selectedCaseIds.length" @click="clearCaseSelection">清空</button><i></i><button type="button" class="retrieval-eval-primary" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(false)">{{ evalLoading ? '评测中...' : '运行标准检索' }}</button><button type="button" class="retrieval-eval-primary enhanced" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(true)">{{ evalLoading ? '评测中...' : '运行增强检索' }}</button><button type="button" class="retrieval-eval-secondary retrieval-eval-records-button" :disabled="runsLoading" @click="openEvalHistory">{{ runsLoading ? '加载中...' : '检索记录' }}</button></div>
       <div v-if="casesLoading" class="retrieval-eval-empty">正在加载评测题...</div>
       <div v-else-if="!evalCases.length" class="retrieval-eval-empty">暂无评测题。请使用下方表单新增一条 Eval Case。</div>
-      <div v-else class="retrieval-eval-case-list">
-        <table class="retrieval-eval-table">
-          <thead><tr><th scope="col">选择</th><th scope="col">Case ID / 评测问题</th><th scope="col">评测集 / 层级</th><th scope="col">模式</th><th scope="col">类型</th><th scope="col">评测规则</th><th scope="col">判定配置</th><th scope="col" class="retrieval-eval-sticky-action">操作</th></tr></thead>
-          <tbody>
-            <tr v-for="item in filteredEvalCases" :key="item.id" :class="{ selected: selectedCaseIds.includes(item.id) }">
-              <td><input v-model="selectedCaseIds" type="checkbox" :aria-label="`选择 ${item.caseId || `Case #${item.id}`}`" :value="item.id"></td>
-              <td><div class="retrieval-eval-question"><strong>{{ item.caseId || `Case #${item.id}` }}</strong><p :title="item.question">{{ item.question }}</p></div></td>
-              <td><span class="retrieval-eval-tag">{{ item.suite || 'REGRESSION' }}</span> <span class="retrieval-eval-tag">{{ item.layer || 'GENERATION' }}</span></td>
-              <td><span class="retrieval-eval-tag">{{ item.mode || '未设模式' }}</span></td>
-              <td><span class="retrieval-eval-tag">{{ item.type || '未设类型' }}</span></td>
-              <td><span class="retrieval-eval-cell-text retrieval-eval-rule" :title="ruleSummary(item)">{{ ruleSummary(item) }}</span></td>
-              <td><div class="retrieval-eval-booleans"><span :class="['retrieval-eval-boolean', item.expectNoAnswer ? 'yes' : 'no']">无回答 {{ item.expectNoAnswer ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.requireLocalEvidence ? 'yes' : 'no']">本地证据 {{ item.requireLocalEvidence ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.allowModelFallback ? 'yes' : 'no']">模型兜底 {{ item.allowModelFallback ? '是' : '否' }}</span></div></td>
-              <td class="retrieval-eval-sticky-action"><div class="retrieval-eval-table-actions"><button type="button" @click="beginEditCase(item)">编辑</button><button type="button" class="danger" :disabled="caseDeletingId === item.id" @click="removeEvalCase(item)">{{ caseDeletingId === item.id ? '删除中...' : '删除' }}</button></div></td>
-            </tr>
-            <tr v-if="!filteredEvalCases.length"><td colspan="8" class="retrieval-eval-no-results">未找到匹配的评测题。</td></tr>
-          </tbody>
-        </table>
-      </div>
+       <div v-else class="retrieval-eval-case-list">
+         <div class="retrieval-eval-case-list-heading"><span>评测题</span><span>规则与判定</span><span>操作</span></div>
+         <article v-for="item in filteredEvalCases" :key="item.id" :class="['retrieval-eval-case-card', { selected: selectedCaseIds.includes(item.id) }]">
+           <div class="retrieval-eval-case-main">
+             <input v-model="selectedCaseIds" type="checkbox" :aria-label="`选择 ${item.caseId || `Case #${item.id}`}`" :value="item.id">
+             <div class="retrieval-eval-question"><div class="retrieval-eval-case-title"><strong>{{ item.caseId || `Case #${item.id}` }}</strong><span class="retrieval-eval-tag">{{ item.type || '未设类型' }}</span></div><p :title="item.question">{{ item.question }}</p><div class="retrieval-eval-case-meta"><span>{{ item.suite || 'REGRESSION' }}</span><b>/</b><span>{{ item.layer || 'GENERATION' }}</span><span v-if="item.mode" class="mode">{{ item.mode }}</span></div></div>
+           </div>
+           <div class="retrieval-eval-case-rules"><strong>评测规则</strong><p :title="ruleSummary(item)">{{ ruleSummary(item) }}</p><div class="retrieval-eval-booleans"><span :class="['retrieval-eval-boolean', item.expectNoAnswer ? 'yes' : 'no']">无回答 {{ item.expectNoAnswer ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.requireLocalEvidence ? 'yes' : 'no']">本地证据 {{ item.requireLocalEvidence ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.allowModelFallback ? 'yes' : 'no']">模型兜底 {{ item.allowModelFallback ? '是' : '否' }}</span></div></div>
+           <div class="retrieval-eval-card-actions"><button type="button" @click="beginEditCase(item)">编辑</button><button type="button" class="danger" :disabled="caseDeletingId === item.id" @click="removeEvalCase(item)">{{ caseDeletingId === item.id ? '删除中...' : '删除' }}</button></div>
+         </article>
+         <div v-if="!filteredEvalCases.length" class="retrieval-eval-no-results">未找到匹配的评测题。</div>
+       </div>
     </section>
 
     <section v-if="historyOpen && !evalSummary" class="retrieval-eval-summary retrieval-eval-results-view retrieval-eval-history-view" aria-live="polite">
