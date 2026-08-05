@@ -29,8 +29,8 @@ public class EvalModeRunner implements CommandLineRunner {
             return;
         }
 
-        evalRunner.run();
-        int exitCode = SpringApplication.exit(applicationContext, () -> 0);
+        EvalSummary summary = evalRunner.run();
+        int exitCode = SpringApplication.exit(applicationContext, () -> summary.gatePassed() ? 0 : 2);
         System.exit(exitCode);
     }
 }

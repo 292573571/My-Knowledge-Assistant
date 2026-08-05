@@ -93,11 +93,11 @@ export async function downloadEvalImport(id) {
   return { name: matched ? decodeURIComponent(matched[1]) : 'eval-import', content: await response.blob() }
 }
 
-export function runEvals(caseIds, enhanced) {
+export function runEvals(caseIds, enhanced, suite = null, layer = null) {
   return evalRequest('/api/eval/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ caseIds, enhanced })
+    body: JSON.stringify({ caseIds, enhanced, suite, layer })
   }, '评测执行失败，请检查后端服务和模型配置。')
 }
 

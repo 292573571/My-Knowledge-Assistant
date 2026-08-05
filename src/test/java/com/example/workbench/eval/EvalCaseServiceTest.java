@@ -38,6 +38,8 @@ class EvalCaseServiceTest {
 
         assertThat(response.caseId()).isEqualTo("flow-001");
         assertThat(response.expectedKeywords()).containsExactly("keyword");
+        assertThat(response.suite()).isEqualTo(EvalSuite.REGRESSION);
+        assertThat(response.layer()).isEqualTo(EvalLayer.GENERATION);
     }
 
     @Test
@@ -49,6 +51,16 @@ class EvalCaseServiceTest {
         EvalCaseResponse response = service.update(user, 1L, request());
 
         assertThat(response.question()).isEqualTo("question");
+    }
+
+    @Test
+    void readsLegacyRequestWithoutSuiteOrLayer() throws Exception {
+        EvalCaseRequest request = new ObjectMapper().readValue("""
+                {"mode":"rag","type":"fact","question":"legacy"}
+                """, EvalCaseRequest.class);
+
+        assertThat(request.normalizedSuite()).isEqualTo(EvalSuite.REGRESSION);
+        assertThat(request.normalizedLayer()).isEqualTo(EvalLayer.GENERATION);
     }
 
     private EvalCaseEntity entity(AppUser owner) {

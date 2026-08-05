@@ -4,10 +4,27 @@ import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RetrievalDebug;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public class RuleBasedEvaluator {
+
+    private final EvalRetrievalMetrics retrievalMetrics;
+
+    RuleBasedEvaluator() {
+        this(new EvalRetrievalMetrics());
+    }
+
+    /**
+     * 创建规则评测器。
+     *
+     * @param retrievalMetrics 检索排名指标计算器
+     */
+    @Autowired
+    public RuleBasedEvaluator(EvalRetrievalMetrics retrievalMetrics) {
+        this.retrievalMetrics = retrievalMetrics;
+    }
 
     public EvalResult evaluate(EvalCase evalCase, RagChatResponse response) {
         String answer = response.answer() == null ? "" : response.answer();
@@ -20,6 +37,7 @@ public class RuleBasedEvaluator {
         List<String> missingKeywords = nullSafe(evalCase.expectedKeywords()).stream()
                 .filter(keyword -> !matchedKeywords.contains(keyword))
                 .toList();
+        EvalRetrievalMetrics.Metrics rankingMetrics = retrievalMetrics.calculate(evalCase, response.retrievalDebug());
 
         if (evalCase.expectNoAnswer()) {
             return evaluateNoAnswerCase(
@@ -29,7 +47,8 @@ public class RuleBasedEvaluator {
                     actualHeadingPaths,
                     matchedKeywords,
                     missingKeywords,
-                    response.retrievalDebug()
+                    response.retrievalDebug(),
+                    rankingMetrics
             );
         }
 
@@ -99,7 +118,15 @@ public class RuleBasedEvaluator {
                 hasAnswer && !localEvidenceSatisfied && !modelFallbackUsed,
                 modelFallbackUsed,
                 false,
-                response.retrievalDebug()
+                response.retrievalDebug(),
+                evalCase.suite(),
+                evalCase.layer(),
+                rankingMetrics.applicable(),
+                rankingMetrics.recallAt5(),
+                rankingMetrics.precisionAt5(),
+                rankingMetrics.reciprocalRank(),
+                rankingMetrics.ndcgAt5(),
+                rankingMetrics.firstRelevantRank()
         );
     }
 
@@ -110,7 +137,8 @@ public class RuleBasedEvaluator {
             List<String> actualHeadingPaths,
             List<String> matchedKeywords,
             List<String> missingKeywords,
-            List<RetrievalDebug> retrievalDebug
+            List<RetrievalDebug> retrievalDebug,
+            EvalRetrievalMetrics.Metrics rankingMetrics
     ) {
         boolean hasAnswer = !answer.isBlank();
         boolean noAnswerMatched = expressesNoAnswer(answer);
@@ -157,7 +185,15 @@ public class RuleBasedEvaluator {
                 false,
                 modelFallbackUsed,
                 passed,
-                retrievalDebug
+                retrievalDebug,
+                evalCase.suite(),
+                evalCase.layer(),
+                rankingMetrics.applicable(),
+                rankingMetrics.recallAt5(),
+                rankingMetrics.precisionAt5(),
+                rankingMetrics.reciprocalRank(),
+                rankingMetrics.ndcgAt5(),
+                rankingMetrics.firstRelevantRank()
         );
     }
 

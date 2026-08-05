@@ -1,0 +1,78 @@
+name: Daily real-model eval
+
+on:
+  schedule:
+    - cron: '20 18 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-real-model-eval
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: knowledge_assistant
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d knowledge_assistant"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_URL: jdbc:postgresql://localhost:5432/knowledge_assistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
+      OPENAI_EMBEDDING_API_KEY: ${{ secrets.EVAL_OPENAI_EMBEDDING_API_KEY }}
+      SPRING_AI_VECTORSTORE_CHROMA_CLIENT_HOST: ${{ secrets.EVAL_CHROMA_HOST }}
+      SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT: ${{ secrets.EVAL_CHROMA_PORT }}
+      WORKBENCH_EVAL_GATE_ENABLED: 'true'
+      WORKBENCH_RAG_DEBUG: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate eval secrets
+        shell: bash
+        run: |
+          test -n "$OPENAI_API_KEY" || { printf '%s\n' 'Missing EVAL_OPENAI_API_KEY'; exit 1; }
+          test -n "$OPENAI_EMBEDDING_API_KEY" || { printf '%s\n' 'Missing EVAL_OPENAI_EMBEDDING_API_KEY'; exit 1; }
+          test -n "$SPRING_AI_VECTORSTORE_CHROMA_CLIENT_HOST" || { printf '%s\n' 'Missing EVAL_CHROMA_HOST'; exit 1; }
+          test -n "$SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT" || { printf '%s\n' 'Missing EVAL_CHROMA_PORT'; exit 1; }
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Package evaluator
+        run: mvn --batch-mode --no-transfer-progress -DskipTests package
+
+      - name: Run real-model quality gate
+        run: java -jar target/my-knowledge-assistant-0.0.1-SNAPSHOT.jar --app.mode=eval
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-model-eval-${{ github.run_id }}
+          path: |
+            eval/results/*.json
+            eval/reports/*.md
+          if-no-files-found: warn
+          retention-days: 30

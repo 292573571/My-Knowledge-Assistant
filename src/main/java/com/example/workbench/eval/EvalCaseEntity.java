@@ -39,6 +39,14 @@ public class EvalCaseEntity {
     @Comment("评测类型")
     private String type;
 
+    @Column(length = 64)
+    @Comment("评测质量集合")
+    private String suite;
+
+    @Column(length = 64)
+    @Comment("RAG 评测层级")
+    private String layer;
+
     @Column(nullable = false, length = 4000)
     @Comment("评测问题")
     private String question;
@@ -83,6 +91,22 @@ public class EvalCaseEntity {
     @Comment("检索候选正文不得包含的噪音关键词")
     private String forbiddenRetrievalKeywords;
 
+    @Column(name = "conversation_history", columnDefinition = "TEXT")
+    @Comment("上下文评测历史消息 JSON")
+    private String history;
+
+    @Column(name = "expected_relation", length = 32)
+    @Comment("期望的上下文关系")
+    private String expectedRelation;
+
+    @Column(name = "expected_standalone_question", length = 4000)
+    @Comment("期望补全后的独立问题")
+    private String expectedStandaloneQuestion;
+
+    @Column(name = "expected_retrieval_queries", columnDefinition = "TEXT")
+    @Comment("期望的上下文检索查询 JSON")
+    private String expectedRetrievalQueries;
+
     protected EvalCaseEntity() {
     }
 
@@ -95,6 +119,8 @@ public class EvalCaseEntity {
     public String getCaseId() { return caseId; }
     public String getMode() { return mode; }
     public String getType() { return type; }
+    public EvalSuite getSuite() { return EvalSuite.from(suite); }
+    public EvalLayer getLayer() { return EvalLayer.from(layer); }
     public String getQuestion() { return question; }
     public boolean isExpectNoAnswer() { return expectNoAnswer; }
     public boolean isRequireLocalEvidence() { return requireLocalEvidence; }
@@ -106,13 +132,29 @@ public class EvalCaseEntity {
     public String getExpectedPageNumbers() { return expectedPageNumbers; }
     public String getExpectedRetrievalKeywords() { return expectedRetrievalKeywords; }
     public String getForbiddenRetrievalKeywords() { return forbiddenRetrievalKeywords; }
+    public String getHistory() { return history; }
+    public com.example.workbench.rag.ContextRelation getExpectedRelation() {
+        if (expectedRelation == null || expectedRelation.isBlank()) {
+            return null;
+        }
+        try {
+            return com.example.workbench.rag.ContextRelation.valueOf(expectedRelation.trim().toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+    public String getExpectedStandaloneQuestion() { return expectedStandaloneQuestion; }
+    public String getExpectedRetrievalQueries() { return expectedRetrievalQueries; }
 
     public void update(EvalCaseRequest request, String expectedSources, String expectedHeadingPaths,
                        String expectedKeywords, String forbiddenKeywords, String expectedPageNumbers,
-                       String expectedRetrievalKeywords, String forbiddenRetrievalKeywords) {
+                       String expectedRetrievalKeywords, String forbiddenRetrievalKeywords,
+                       String history, String expectedRetrievalQueries) {
         this.caseId = request.caseId();
         this.mode = request.mode();
         this.type = request.type();
+        this.suite = request.normalizedSuite().name();
+        this.layer = request.normalizedLayer().name();
         this.question = request.question();
         this.expectNoAnswer = request.expectNoAnswer();
         this.requireLocalEvidence = request.requireLocalEvidence();
@@ -124,11 +166,15 @@ public class EvalCaseEntity {
         this.expectedPageNumbers = expectedPageNumbers;
         this.expectedRetrievalKeywords = expectedRetrievalKeywords;
         this.forbiddenRetrievalKeywords = forbiddenRetrievalKeywords;
+        this.history = history;
+        this.expectedRelation = request.expectedRelation() == null ? null : request.expectedRelation().name();
+        this.expectedStandaloneQuestion = request.expectedStandaloneQuestion();
+        this.expectedRetrievalQueries = expectedRetrievalQueries;
     }
 
     void update(EvalCaseRequest request, String expectedSources, String expectedHeadingPaths,
                 String expectedKeywords, String forbiddenKeywords) {
         update(request, expectedSources, expectedHeadingPaths, expectedKeywords, forbiddenKeywords,
-                "[]", "[]", "[]");
+                "[]", "[]", "[]", "[]", "[]");
     }
 }

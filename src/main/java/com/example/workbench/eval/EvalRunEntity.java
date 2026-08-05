@@ -80,6 +80,38 @@ public class EvalRunEntity {
     @Comment("拒答正确率")
     private double refusalCorrectnessRate;
 
+    @Column(name = "ranking_case_count")
+    @Comment("排名指标适用用例数")
+    private Integer rankingCaseCount;
+
+    @Column(name = "recall_at_5")
+    @Comment("文档级 Recall@5")
+    private Double recallAt5;
+
+    @Column(name = "precision_at_5")
+    @Comment("文档级 Precision@5")
+    private Double precisionAt5;
+
+    @Column
+    @Comment("平均倒数排名")
+    private Double mrr;
+
+    @Column(name = "ndcg_at_5")
+    @Comment("文档级 NDCG@5")
+    private Double ndcgAt5;
+
+    @Column(name = "gate_enabled")
+    @Comment("是否启用质量门禁")
+    private Boolean gateEnabled;
+
+    @Column(name = "gate_passed")
+    @Comment("是否通过质量门禁")
+    private Boolean gatePassed;
+
+    @Column(name = "gate_failures", columnDefinition = "TEXT")
+    @Comment("质量门禁失败原因 JSON")
+    private String gateFailures;
+
     @Column(name = "created_at", nullable = false)
     @Comment("运行时间")
     private Instant createdAt;
@@ -102,6 +134,14 @@ public class EvalRunEntity {
         this.unsupportedAnswerRate = summary.unsupportedAnswerRate();
         this.modelFallbackRate = summary.modelFallbackRate();
         this.refusalCorrectnessRate = summary.refusalCorrectnessRate();
+        this.rankingCaseCount = summary.rankingCaseCount();
+        this.recallAt5 = summary.recallAt5();
+        this.precisionAt5 = summary.precisionAt5();
+        this.mrr = summary.mrr();
+        this.ndcgAt5 = summary.ndcgAt5();
+        this.gateEnabled = summary.gateEnabled();
+        this.gatePassed = summary.gatePassed();
+        this.gateFailures = String.join("\n", summary.gateFailures());
         this.createdAt = Instant.now();
     }
 
@@ -119,5 +159,13 @@ public class EvalRunEntity {
     public double getUnsupportedAnswerRate() { return unsupportedAnswerRate; }
     public double getModelFallbackRate() { return modelFallbackRate; }
     public double getRefusalCorrectnessRate() { return refusalCorrectnessRate; }
+    public int getRankingCaseCount() { return rankingCaseCount == null ? 0 : rankingCaseCount; }
+    public double getRecallAt5() { return recallAt5 == null ? 0 : recallAt5; }
+    public double getPrecisionAt5() { return precisionAt5 == null ? 0 : precisionAt5; }
+    public double getMrr() { return mrr == null ? 0 : mrr; }
+    public double getNdcgAt5() { return ndcgAt5 == null ? 0 : ndcgAt5; }
+    public boolean isGateEnabled() { return Boolean.TRUE.equals(gateEnabled); }
+    public boolean isGatePassed() { return !isGateEnabled() || Boolean.TRUE.equals(gatePassed); }
+    public String getGateFailures() { return gateFailures; }
     public Instant getCreatedAt() { return createdAt; }
 }

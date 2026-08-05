@@ -146,6 +146,43 @@ public class RagService {
     }
 
     public RagChatResponse chat(RagChatRequest request, RagChatOptions options) {
+        return chatInternal(request, options, false);
+    }
+
+    /**
+     * 执行一次带检索快照的 RAG 问答，供离线评测复用生成时的真实候选。
+     *
+     * @param request 问答请求
+     * @param options 本次请求的检索开关
+     * @return 带同轮检索快照的回答
+     */
+    public RagChatResponse chatForEvaluation(RagChatRequest request, RagChatOptions options) {
+        return chatInternal(request, options, true);
+    }
+
+    /**
+     * 只评估历史消歧和最终检索查询规划，不访问向量库，也不生成回答。
+     *
+     * @param request 显式携带历史的上下文评测请求
+     * @return 上下文关系、独立问题和最终查询列表
+     */
+    public ContextEvaluationResult evaluateContext(ContextEvaluationRequest request) {
+        if (request.currentQuestion() == null || request.currentQuestion().isBlank()) {
+            throw new IllegalArgumentException("currentQuestion cannot be empty");
+        }
+        String conversationId = request.conversationId() == null ? "context-eval" : request.conversationId();
+        ConversationContext context = resolveConversationContext(conversationId,
+                request.currentQuestion(), request.history());
+        List<String> queries = new ArrayList<>(retrievalQueries(request.currentQuestion(), request.options()));
+        if (context.standaloneQuestion() != null && !context.standaloneQuestion().isBlank()) {
+            retrievalQueries(context.standaloneQuestion(), request.options()).stream()
+                    .filter(query -> queries.stream().noneMatch(query::equalsIgnoreCase))
+                    .forEach(queries::add);
+        }
+        return new ContextEvaluationResult(context.relation(), context.standaloneQuestion(), queries, context.history());
+    }
+
+    private RagChatResponse chatInternal(RagChatRequest request, RagChatOptions options, boolean includeDebug) {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
         String question = request.message();
@@ -166,7 +203,7 @@ public class RagService {
             conversationMemory.addUserMessage(conversationId, question);
             conversationMemory.addAssistantMessage(conversationId, LEARNING_ASSISTANT_INTRODUCTION);
             log.info("RAG chat completed route=LEARNING_ASSISTANT_INTRODUCTION conversationId={} durationMs={}", conversationId, System.currentTimeMillis() - startedAt);
-            return new RagChatResponse(LEARNING_ASSISTANT_INTRODUCTION, List.of(), retrievalDebug(question, List.of(), List.of()));
+            return new RagChatResponse(LEARNING_ASSISTANT_INTRODUCTION, List.of(), retrievalDebug(includeDebug, question, List.of(), List.of()));
         }
 
         if (shouldAnswerNoKnowledge(question)) {
@@ -179,7 +216,7 @@ public class RagService {
                     conversationId,
                     System.currentTimeMillis() - startedAt
             );
-            return new RagChatResponse(answer, List.of(), retrievalDebug(question, List.of(), List.of()));
+            return new RagChatResponse(answer, List.of(), retrievalDebug(includeDebug, question, List.of(), List.of()));
         }
 
         ConversationContext conversationContext = resolveConversationContext(conversationId, question, history);
@@ -211,7 +248,7 @@ public class RagService {
                     retrievedSources.size(),
                     System.currentTimeMillis() - startedAt
             );
-            return response;
+            return withDebug(response, includeDebug, question, retrievedSources, sources);
         }
 
         if (!hasEnoughKnowledge(question, sources)) {
@@ -234,7 +271,7 @@ public class RagService {
                     response.sources().size(),
                     System.currentTimeMillis() - startedAt
             );
-            return response;
+            return withDebug(response, includeDebug, question, retrievedSources, sources);
         }
 
         log.info(
@@ -261,7 +298,7 @@ public class RagService {
             RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, List.of());
             conversationMemory.addUserMessage(conversationId, question);
             conversationMemory.addAssistantMessage(conversationId, response.answer());
-            return response;
+            return withDebug(response, includeDebug, question, retrievedSources, List.of());
         } else {
             log.info("RAG answer grounding passed conversationId={}", conversationId);
         }
@@ -277,7 +314,16 @@ public class RagService {
                 ragSources.size(),
                 System.currentTimeMillis() - startedAt
         );
-        return new RagChatResponse(answer, ragSources, retrievalDebug(question, retrievedSources, sources));
+        return new RagChatResponse(answer, ragSources, retrievalDebug(includeDebug, question, retrievedSources, sources));
+    }
+
+    private RagChatResponse withDebug(RagChatResponse response, boolean includeDebug, String question,
+                                      List<SourceDocument> retrievedSources, List<SourceDocument> contextSources) {
+        if (!includeDebug || response.retrievalDebug() != null) {
+            return response;
+        }
+        return new RagChatResponse(response.answer(), response.sources(),
+                retrievalDebug(true, question, retrievedSources, contextSources));
     }
 
     public List<SourceDocument> retrieve(String query, int topK) {
@@ -848,7 +894,7 @@ public class RagService {
     private ConversationContext resolveConversationContext(
             String conversationId, String question, List<ChatMessage> history) {
         if (history == null || history.isEmpty()) {
-            return new ConversationContext(List.of(), null);
+            return new ConversationContext(ContextRelation.INDEPENDENT, List.of(), null);
         }
 
         String prompt = """
@@ -866,17 +912,18 @@ public class RagService {
         if (standaloneQuestion != null) {
             log.info("RAG conversation context resolved conversationId={} related=true standaloneLength={}",
                     conversationId, standaloneQuestion.length());
-            return new ConversationContext(sanitizeHistory(history), standaloneQuestion);
+            return new ConversationContext(ContextRelation.RELATED, sanitizeHistory(history), standaloneQuestion);
         }
         if (generated != null && generated.strip().equalsIgnoreCase("INDEPENDENT")) {
             log.info("RAG conversation context resolved conversationId={} related=false", conversationId);
-            return new ConversationContext(List.of(), null);
+            return new ConversationContext(ContextRelation.INDEPENDENT, List.of(), null);
         }
 
         boolean likelyRelated = containsAny(question, List.of(
                 "它", "这个", "那个", "刚才", "上面", "前面", "继续", "上一", "其中", "该方案", "还有呢", "然后呢"));
         log.info("RAG conversation context fallback conversationId={} related={}", conversationId, likelyRelated);
-        return new ConversationContext(likelyRelated ? sanitizeHistory(history) : List.of(), null);
+        return new ConversationContext(likelyRelated ? ContextRelation.RELATED : ContextRelation.INDEPENDENT,
+                likelyRelated ? sanitizeHistory(history) : List.of(), null);
     }
 
     private String parseStandaloneQuestion(String generated, String originalQuestion) {
@@ -1536,7 +1583,16 @@ public class RagService {
             List<SourceDocument> retrievedSources,
             List<SourceDocument> contextSources
     ) {
-        if (!retrievalDebugEnabled) {
+        return retrievalDebug(retrievalDebugEnabled, question, retrievedSources, contextSources);
+    }
+
+    private List<RetrievalDebug> retrievalDebug(
+            boolean enabled,
+            String question,
+            List<SourceDocument> retrievedSources,
+            List<SourceDocument> contextSources
+    ) {
+        if (!enabled) {
             return null;
         }
 
@@ -1708,7 +1764,7 @@ public class RagService {
     private record RetrievalScope(String ownerUserId, String workspaceId) {
     }
 
-    private record ConversationContext(List<ChatMessage> history, String standaloneQuestion) {
+    private record ConversationContext(ContextRelation relation, List<ChatMessage> history, String standaloneQuestion) {
     }
 
     private record CodeBlock(String language, String code) {

@@ -160,14 +160,17 @@ public class EvalCaseImportService {
                 list(value(values, "expectedkeywords", "expected_keywords", "期望关键词")), list(value(values, "forbiddenkeywords", "forbidden_keywords", "禁用关键词")),
                 integers(value(values, "expectedpagenumbers", "expected_page_numbers", "期望页码")),
                 list(value(values, "expectedretrievalkeywords", "expected_retrieval_keywords", "期望检索关键词")),
-                list(value(values, "forbiddenretrievalkeywords", "forbidden_retrieval_keywords", "禁用检索关键词")));
+                list(value(values, "forbiddenretrievalkeywords", "forbidden_retrieval_keywords", "禁用检索关键词")),
+                value(values, "suite", "评测集"), value(values, "layer", "评测层级"), List.of(), null, null, List.of());
     }
 
     private EvalCaseRequest normalize(EvalCaseRequest request) {
         if (request.question() == null || request.question().isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "每条导入题目都必须填写问题");
         return new EvalCaseRequest(null, request.mode(), request.type() == null || request.type().isBlank() ? "fact" : request.type(), request.question().trim(),
                 request.expectNoAnswer(), request.requireLocalEvidence(), request.allowModelFallback(), request.expectedSources(), request.expectedHeadingPaths(), request.expectedKeywords(), request.forbiddenKeywords(),
-                request.expectedPageNumbers(), request.expectedRetrievalKeywords(), request.forbiddenRetrievalKeywords());
+                request.expectedPageNumbers(), request.expectedRetrievalKeywords(), request.forbiddenRetrievalKeywords(),
+                request.normalizedSuite().name(), request.normalizedLayer().name(), request.history(), request.expectedRelation(),
+                request.expectedStandaloneQuestion(), request.expectedRetrievalQueries());
     }
 
     private String key(String value) { return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace(" ", ""); }

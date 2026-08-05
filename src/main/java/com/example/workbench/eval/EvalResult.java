@@ -31,6 +31,18 @@ public record EvalResult(
         boolean unsupportedAnswer,
         boolean modelFallbackUsed,
         boolean refusalCorrect,
-        List<RetrievalDebug> retrievalDebug
+        List<RetrievalDebug> retrievalDebug,
+        EvalSuite suite,
+        EvalLayer layer,
+        boolean rankingMetricsApplicable,
+        double recallAt5,
+        double precisionAt5,
+        double reciprocalRank,
+        double ndcgAt5,
+        Integer firstRelevantRank
 ) {
+    public EvalResult {
+        suite = suite == null ? EvalSuite.REGRESSION : suite;
+        layer = layer == null ? EvalLayer.GENERATION : layer;
+    }
 }

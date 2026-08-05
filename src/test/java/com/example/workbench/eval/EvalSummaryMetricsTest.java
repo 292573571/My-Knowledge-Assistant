@@ -19,5 +19,8 @@ class EvalSummaryMetricsTest {
         assertThat(summary.unsupportedAnswerRate()).isEqualTo(0.5);
         assertThat(summary.modelFallbackRate()).isEqualTo(0.5);
         assertThat(summary.refusalCorrectnessRate()).isEqualTo(1.0);
+        assertThat(summary.gatePassed()).isTrue();
+        assertThat(summary.rankingCaseCount()).isZero();
+        assertThat(summary.dimensionSummaries()).isEmpty();
     }
 }

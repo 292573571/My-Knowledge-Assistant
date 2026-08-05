@@ -15,11 +15,14 @@ public class EvalRunStorage {
     private final EvalRunRepository runRepository;
     private final EvalRunResultRepository resultRepository;
     private final ObjectMapper objectMapper;
+    private final EvalDimensionSummarizer dimensionSummarizer;
 
-    public EvalRunStorage(EvalRunRepository runRepository, EvalRunResultRepository resultRepository, ObjectMapper objectMapper) {
+    public EvalRunStorage(EvalRunRepository runRepository, EvalRunResultRepository resultRepository,
+                          ObjectMapper objectMapper, EvalDimensionSummarizer dimensionSummarizer) {
         this.runRepository = runRepository;
         this.resultRepository = resultRepository;
         this.objectMapper = objectMapper;
+        this.dimensionSummarizer = dimensionSummarizer;
     }
 
     @Transactional
@@ -48,7 +51,10 @@ public class EvalRunStorage {
                 .toList();
         return new EvalSummary(run.getRunId(), run.getTotal(), run.getPassed(), run.getFailed(), run.getPassRate(),
                 run.getRetrievalHitRate(), run.getCitationCorrectnessRate(), run.getKeyPointCoverageRate(),
-                run.getUnsupportedAnswerRate(), run.getModelFallbackRate(), run.getRefusalCorrectnessRate(), results);
+                run.getUnsupportedAnswerRate(), run.getModelFallbackRate(), run.getRefusalCorrectnessRate(),
+                run.getRankingCaseCount(), run.getRecallAt5(), run.getPrecisionAt5(), run.getMrr(), run.getNdcgAt5(),
+                run.isGateEnabled(), run.isGatePassed(), failures(run.getGateFailures()),
+                dimensionSummarizer.summarize(results), results);
     }
 
     private String write(EvalResult result) {
@@ -65,5 +71,9 @@ public class EvalRunStorage {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Failed to read eval result", exception);
         }
+    }
+
+    private List<String> failures(String value) {
+        return value == null || value.isBlank() ? List.of() : value.lines().toList();
     }
 }

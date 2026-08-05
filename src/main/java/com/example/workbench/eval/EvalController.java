@@ -83,7 +83,8 @@ public class EvalController {
     @PostMapping("/run")
     public EvalSummary run(@RequestBody(required = false) EvalRunRequest run, HttpServletRequest request) throws IOException {
         AppUser user = user(request);
-        return evalRunner.run(evalCaseService.selectedCases(user, run == null ? null : run.caseIds()),
+        return evalRunner.run(evalCaseService.selectedCases(user, run == null ? null : run.caseIds(),
+                        run == null ? null : run.suite(), run == null ? null : run.layer()),
                 run != null && run.enhanced(), user);
     }
 

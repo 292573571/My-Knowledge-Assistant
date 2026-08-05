@@ -2146,6 +2146,8 @@ textarea:focus-visible,
 .retrieval-eval-actions { align-items: center; flex-wrap: wrap; margin-top: 16px; border: 1px solid #e6ebf4; border-radius: 10px; padding: 8px; background: #fafbfe; }
 .retrieval-eval-actions > span { margin-right: 4px; color: #64738a; font-size: 12px; font-weight: 650; }
 .retrieval-eval-actions > span b { color: #3455c4; font-size: 17px; }
+.retrieval-eval-run-filter { display: inline-flex; align-items: center; gap: 5px; color: #697891; font-size: 11px; font-weight: 700; }
+.retrieval-eval-run-filter select { border: 1px solid #cbd7ea; border-radius: 6px; padding: 5px 7px; color: #34445f; background: #fff; font: inherit; }
 .retrieval-eval-actions > i { flex: 1; }
 .retrieval-eval-records-button { margin-left: 2px; }
 .retrieval-eval-primary, .retrieval-eval-secondary { border: 0; border-radius: 8px; padding: 9px 12px; font-size: 12px; font-weight: 750; }
@@ -2247,6 +2249,11 @@ textarea:focus-visible,
 .retrieval-eval-checkboxes { display: flex; flex-wrap: wrap; gap: 14px; margin: 13px 0; color: #53647c; font-size: 12px; }
 .retrieval-eval-checkboxes label { display: flex; align-items: center; gap: 6px; }
 .retrieval-eval-modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(25, 37, 63, .34); backdrop-filter: blur(3px); }
+.retrieval-eval-modal-backdrop:has(.retrieval-eval-classification) { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0; }
+.retrieval-eval-classification { z-index: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; width: min(760px, 100%); box-sizing: border-box; margin: 0; border: 1px solid #dce4f0; border-bottom: 0; border-radius: 16px 16px 0 0; padding: 14px 20px 0; background: #fff; }
+.retrieval-eval-classification label { display: grid; gap: 6px; color: #566780; font-size: 11px; font-weight: 750; }
+.retrieval-eval-classification select { width: 100%; border: 1px solid #cbd7ea; border-radius: 7px; padding: 8px 9px; color: #2b3952; background: #fff; font: inherit; font-size: 12px; }
+.retrieval-eval-classification + .retrieval-eval-modal { margin-top: 0; border-top: 0; border-radius: 0 0 16px 16px; }
 .retrieval-eval-modal { width: min(760px, 100%); max-height: min(760px, calc(100vh - 40px)); overflow-y: auto; border: 1px solid #dce4f0; border-radius: 16px; padding: 20px; background: #fff; box-shadow: 0 24px 70px rgba(28, 42, 75, .24); }
 .retrieval-eval-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .retrieval-eval-summary { padding: 20px; }
@@ -2260,6 +2267,10 @@ textarea:focus-visible,
 .retrieval-eval-metrics > div { display: grid; gap: 4px; border-radius: 11px; padding: 12px; background: #f5f7fc; }
 .retrieval-eval-metrics span, .retrieval-eval-metrics small { color: #7b899e; font-size: 11px; }
 .retrieval-eval-metrics strong { color: #2c4073; font-size: 22px; letter-spacing: -.04em; }
+.retrieval-eval-dimensions { display: grid; gap: 7px; margin-top: 16px; }
+.retrieval-eval-dimensions h3 { margin: 0 0 2px; color: #34445f; font-size: 13px; }
+.retrieval-eval-dimensions > div { display: flex; justify-content: space-between; gap: 12px; border: 1px solid #e1e7f1; border-radius: 8px; padding: 9px 11px; color: #697891; font-size: 11px; }
+.retrieval-eval-dimensions strong { color: #34445f; }
 .retrieval-eval-cases { display: grid; gap: 7px; margin-top: 18px; }
 .retrieval-eval-cases article { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 9px; align-items: baseline; border: 1px solid #d7eadf; border-radius: 9px; padding: 10px 11px; background: #f6fcf8; }
 .retrieval-eval-cases article.failed { border-color: #f0c9cd; background: #fff7f7; }
@@ -2297,6 +2308,8 @@ textarea:focus-visible,
   .retrieval-eval-actions { align-items: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; box-sizing: border-box; }
   .retrieval-eval-actions > span { grid-column: 1 / -1; }
   .retrieval-eval-form-grid { grid-template-columns: 1fr; }
+  .retrieval-eval-classification { grid-template-columns: 1fr; padding: 14px 14px 0; }
+  .retrieval-eval-classification + .retrieval-eval-modal { border-radius: 0 0 14px 14px; }
   .retrieval-eval-modal { max-height: calc(100vh - 28px); border-radius: 14px; padding: 14px; }
   .retrieval-eval-summary { border-radius: 14px; padding: 14px; }
   .retrieval-eval-summary > header { display: grid; }

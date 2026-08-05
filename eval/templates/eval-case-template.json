@@ -1,6 +1,12 @@
 [
   {
     "mode": "rag",
+    "suite": "SMOKE",
+    "layer": "GENERATION",
+    "history": [],
+    "expectedRelation": null,
+    "expectedStandaloneQuestion": null,
+    "expectedRetrievalQueries": [],
     "type": "fact",
     "question": "普通问答前端调用哪个接口发起请求？",
     "expectNoAnswer": false,
@@ -16,6 +22,12 @@
   },
   {
     "mode": "rag",
+    "suite": "NO_ANSWER",
+    "layer": "GENERATION",
+    "history": [],
+    "expectedRelation": null,
+    "expectedStandaloneQuestion": null,
+    "expectedRetrievalQueries": [],
     "type": "refusal",
     "question": "当前知识库是否说明了生产数据库密码的具体值？",
     "expectNoAnswer": true,

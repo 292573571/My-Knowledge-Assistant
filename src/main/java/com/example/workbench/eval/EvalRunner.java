@@ -5,7 +5,6 @@ import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagChatOptions;
-import com.example.workbench.rag.RetrievalDebugResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +25,7 @@ import org.springframework.stereotype.Service;
 public class EvalRunner {
 
     private static final Path QUESTIONS_PATH = Path.of("eval", "questions.jsonl");
-    // 兼容保留旧报告渲染代码；在线和命令行评测均不再调用这些文件路径。
+    // 命令行评测同时输出文件报告，便于 CI 保存可追溯的运行产物。
     private static final Path RESULTS_PATH = Path.of("eval", "results", "latest.json");
     private static final Path REPORT_PATH = Path.of("eval", "reports", "latest.md");
     private static final DateTimeFormatter RUN_ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")
@@ -37,6 +36,10 @@ public class EvalRunner {
     private final LlmJudgeEvaluator llmJudgeEvaluator;
     private final ObjectMapper objectMapper;
     private final EvalRunStorage evalRunStorage;
+    private final EvalQualityGate qualityGate;
+    private final EvalDimensionSummarizer dimensionSummarizer;
+    private final ContextRuleBasedEvaluator contextEvaluator;
+    private final ParserRuleBasedEvaluator parserEvaluator;
     private final boolean judgeEnabled;
     private final Set<String> caseIds;
     private final int ragTopK;
@@ -52,6 +55,10 @@ public class EvalRunner {
             LlmJudgeEvaluator llmJudgeEvaluator,
             ObjectMapper objectMapper,
             EvalRunStorage evalRunStorage,
+            EvalQualityGate qualityGate,
+            EvalDimensionSummarizer dimensionSummarizer,
+            ContextRuleBasedEvaluator contextEvaluator,
+            ParserRuleBasedEvaluator parserEvaluator,
             @Value("${workbench.eval.judge.enabled:false}") boolean judgeEnabled,
             @Value("${workbench.eval.case-ids:}") String caseIds,
             @Value("${workbench.rag.top-k:5}") int ragTopK,
@@ -66,6 +73,10 @@ public class EvalRunner {
         this.llmJudgeEvaluator = llmJudgeEvaluator;
         this.objectMapper = objectMapper;
         this.evalRunStorage = evalRunStorage;
+        this.qualityGate = qualityGate;
+        this.dimensionSummarizer = dimensionSummarizer;
+        this.contextEvaluator = contextEvaluator;
+        this.parserEvaluator = parserEvaluator;
         this.judgeEnabled = judgeEnabled;
         this.caseIds = parseCaseIds(caseIds);
         this.ragTopK = ragTopK;
@@ -77,7 +88,10 @@ public class EvalRunner {
     }
 
     public EvalSummary run() throws IOException {
-        return run(readCases().stream().filter(this::shouldRun).toList(), false, null);
+        EvalSummary summary = run(readCases().stream().filter(this::shouldRun).toList(), false, null);
+        writeJson(summary);
+        writeReport(summary);
+        return summary;
     }
 
     public EvalSummary run(List<EvalCase> cases, boolean enhanced, AppUser owner) throws IOException {
@@ -86,18 +100,41 @@ public class EvalRunner {
                 .map(evalCase -> runCase(evalCase, enhanced, owner == null ? "" : owner.getId().toString()))
                 .toList();
         int passed = (int) results.stream().filter(EvalResult::passed).count();
+        List<EvalResult> rankingResults = results.stream().filter(EvalResult::rankingMetricsApplicable).toList();
+        List<EvalResult> keyPointResults = results.stream()
+                .filter(result -> result.matchedKeywords() != null && result.missingKeywords() != null)
+                .filter(result -> !result.matchedKeywords().isEmpty() || !result.missingKeywords().isEmpty())
+                .toList();
+        List<EvalResult> answerResults = results.stream().filter(result -> !result.expectNoAnswer()).toList();
+        double passRate = results.isEmpty() ? 0 : (double) passed / results.size();
+        double unsupportedAnswerRate = rate(answerResults, EvalResult::unsupportedAnswer);
+        double recallAt5 = average(rankingResults, EvalResult::recallAt5);
+        double precisionAt5 = average(rankingResults, EvalResult::precisionAt5);
+        double mrr = average(rankingResults, EvalResult::reciprocalRank);
+        double ndcgAt5 = average(rankingResults, EvalResult::ndcgAt5);
+        EvalQualityGate.Result gate = qualityGate.evaluate(
+                passRate, rankingResults.size(), recallAt5, mrr, unsupportedAnswerRate);
         EvalSummary summary = new EvalSummary(
                 runId,
                 results.size(),
                 passed,
                 results.size() - passed,
-                results.isEmpty() ? 0 : (double) passed / results.size(),
-                rate(results, EvalResult::retrievalHit),
-                rate(results, EvalResult::citationCorrect),
-                average(results, EvalResult::keyPointCoverage),
-                rate(results, EvalResult::unsupportedAnswer),
+                passRate,
+                rate(rankingResults, EvalResult::retrievalHit),
+                rate(rankingResults, EvalResult::citationCorrect),
+                average(keyPointResults, EvalResult::keyPointCoverage),
+                unsupportedAnswerRate,
                 rate(results, EvalResult::modelFallbackUsed),
                 refusalCorrectnessRate(results),
+                rankingResults.size(),
+                recallAt5,
+                precisionAt5,
+                mrr,
+                ndcgAt5,
+                gate.enabled(),
+                gate.passed(),
+                gate.failures(),
+                dimensionSummarizer.summarize(results),
                 results
         );
 
@@ -120,13 +157,20 @@ public class EvalRunner {
     }
 
     private EvalResult runCase(EvalCase evalCase, boolean enhanced, String ownerUserId) {
+        if (evalCase.layer() == EvalLayer.CONTEXT) {
+            return contextEvaluator.evaluate(evalCase, ragService.evaluateContext(
+                    new com.example.workbench.rag.ContextEvaluationRequest(
+                            "eval-" + evalCase.id(), evalCase.question(), evalCase.history(),
+                            new RagChatOptions(false, false))));
+        }
+        if (evalCase.layer() == EvalLayer.PARSER) {
+            return parserEvaluator.evaluate(evalCase);
+        }
         String conversationId = ownerUserId == null || ownerUserId.isBlank()
                 ? "eval-" + evalCase.id()
                 : "user-" + ownerUserId + ":eval-" + evalCase.id();
-        RagChatResponse response = ragService.chat(new RagChatRequest(conversationId, evalCase.question()),
+        RagChatResponse response = ragService.chatForEvaluation(new RagChatRequest(conversationId, evalCase.question()),
                 new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled));
-        RetrievalDebugResponse diagnostic = ragService.debugRetrieval(evalCase.question(), ownerUserId);
-        response = new RagChatResponse(response.answer(), response.sources(), diagnostic.candidates());
         EvalResult ruleResult = evaluator.evaluate(evalCase, response);
 
         if (!judgeEnabled) {
@@ -179,7 +223,15 @@ public class EvalRunner {
                 ruleResult.unsupportedAnswer(),
                 ruleResult.modelFallbackUsed(),
                 ruleResult.refusalCorrect(),
-                ruleResult.retrievalDebug()
+                ruleResult.retrievalDebug(),
+                ruleResult.suite(),
+                ruleResult.layer(),
+                ruleResult.rankingMetricsApplicable(),
+                ruleResult.recallAt5(),
+                ruleResult.precisionAt5(),
+                ruleResult.reciprocalRank(),
+                ruleResult.ndcgAt5(),
+                ruleResult.firstRelevantRank()
         );
     }
 
@@ -212,7 +264,15 @@ public class EvalRunner {
                 ruleResult.unsupportedAnswer(),
                 ruleResult.modelFallbackUsed(),
                 ruleResult.refusalCorrect(),
-                ruleResult.retrievalDebug()
+                ruleResult.retrievalDebug(),
+                ruleResult.suite(),
+                ruleResult.layer(),
+                ruleResult.rankingMetricsApplicable(),
+                ruleResult.recallAt5(),
+                ruleResult.precisionAt5(),
+                ruleResult.reciprocalRank(),
+                ruleResult.ndcgAt5(),
+                ruleResult.firstRelevantRank()
         );
     }
 
@@ -245,6 +305,26 @@ public class EvalRunner {
         builder.append("Unsupported Answer Rate: ").append(percent(summary.unsupportedAnswerRate())).append("\n");
         builder.append("Model Fallback Rate: ").append(percent(summary.modelFallbackRate())).append("\n");
         builder.append("Refusal Correctness Rate: ").append(percent(summary.refusalCorrectnessRate())).append("\n\n");
+        builder.append("Ranking Cases: ").append(summary.rankingCaseCount()).append("\n");
+        builder.append("Recall@5: ").append(percent(summary.recallAt5())).append("\n");
+        builder.append("Precision@5: ").append(percent(summary.precisionAt5())).append("\n");
+        builder.append("MRR: ").append(String.format("%.3f", summary.mrr())).append("\n");
+        builder.append("NDCG@5: ").append(String.format("%.3f", summary.ndcgAt5())).append("\n");
+        builder.append("Quality Gate: ").append(summary.gateEnabled() ? summary.gatePassed() : "disabled").append("\n");
+        if (!summary.gateFailures().isEmpty()) {
+            builder.append("Gate Failures: ").append(String.join("; ", summary.gateFailures())).append("\n");
+        }
+        builder.append("\n");
+        builder.append("## Results By Suite / Layer\n\n");
+        builder.append("| Suite | Layer | Total | Passed | Pass Rate | Recall@5 | MRR |\n|---|---|---:|---:|---:|---:|---:|\n");
+        for (EvalDimensionSummary dimension : summary.dimensionSummaries()) {
+            builder.append("| ").append(dimension.suite()).append(" | ").append(dimension.layer())
+                    .append(" | ").append(dimension.total()).append(" | ").append(dimension.passed())
+                    .append(" | ").append(percent(dimension.passRate()))
+                    .append(" | ").append(percent(dimension.recallAt5()))
+                    .append(" | ").append(String.format("%.3f", dimension.mrr())).append(" |\n");
+        }
+        builder.append("\n");
         appendConfigSnapshot(builder);
         builder.append("## Results By Type\n\n");
         builder.append("| Type | Total | Passed | Pass Rate |\n");
