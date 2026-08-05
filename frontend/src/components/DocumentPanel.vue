@@ -96,6 +96,7 @@ const taskStageLabels = {
   PARSING: '正在解析文档',
   OCR: '正在识别扫描文字',
   SCANNING: '正在扫描文件',
+  REBUILDING: '正在逐个重建文件',
   CHUNKING: '正在切分内容',
   VECTORIZING: '正在生成向量',
   PERSISTING_INDEX: '正在保存索引',

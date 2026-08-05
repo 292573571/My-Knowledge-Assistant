@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -577,6 +578,7 @@ public class DocumentIngestionService {
                     indexedDocuments.size(),
                     indexedChunkIds.size(),
                     result.files(),
+                    0,
                     result.documents(),
                     durationMs
             );
@@ -593,6 +595,19 @@ public class DocumentIngestionService {
     }
 
     public synchronized RebuildResult rebuildDocuments(WorkspaceAccessContext access) throws IOException {
+        return rebuildDocuments(access, progress -> { });
+    }
+
+    /**
+     * 重建空间索引，并在每个源文件处理后报告可持久化的进度统计。
+     *
+     * @param access 空间访问上下文
+     * @param progress 文件处理进度回调
+     * @return 重建结果
+     * @throws IOException 扫描空间目录失败时抛出
+     */
+    public synchronized RebuildResult rebuildDocuments(
+            WorkspaceAccessContext access, Consumer<RebuildProgress> progress) throws IOException {
         requireWorkspaceWrite(access);
         long startedAt = System.currentTimeMillis();
         List<DocumentIndexEntry> existingEntries = documentIndexStore.list().stream()
@@ -611,20 +626,30 @@ public class DocumentIngestionService {
                         entry -> entry.path().replace('\\', '/'),
                         DocumentIndexEntry::fileName,
                         (left, right) -> left));
-        List<IngestDocumentResult> results = new ArrayList<>();
-        for (Path source : existingSources) {
-            String sourcePath = workspaceRelativePath(source).replace('\\', '/');
-            results.add(ingestWorkspacePath(
-                    source, true, access, originalNamesByPath.getOrDefault(sourcePath, source.getFileName().toString())));
-        }
+        List<Path> sources = new ArrayList<>(existingSources);
         for (Path source : supportedFiles(workspaceDirectory(access))) {
-            if (!existingSources.contains(source)) {
-                results.add(ingestWorkspacePath(source, true, access));
+            if (!sources.contains(source)) {
+                sources.add(source);
             }
+        }
+        List<IngestDocumentResult> results = new ArrayList<>();
+        progress.accept(new RebuildProgress(sources.size(), 0, 0, 0, 0));
+        for (Path source : sources) {
+            String sourcePath = workspaceRelativePath(source).replace('\\', '/');
+            try {
+                results.add(ingestWorkspacePath(source, true, access,
+                        originalNamesByPath.getOrDefault(sourcePath, source.getFileName().toString())));
+            } catch (RuntimeException exception) {
+                results.add(new IngestDocumentResult(source.getFileName().toString(), sourcePath, null,
+                        "failed", 0, exception.getMessage()));
+            }
+            IngestResponse current = responseFrom(results);
+            progress.accept(new RebuildProgress(sources.size(), results.size(), current.imported(),
+                    current.failed(), current.chunks()));
         }
         IngestResponse response = responseFrom(results);
         return new RebuildResult("success", existingEntries.size(), clearedChunks,
-                response.imported(), response.chunks(), System.currentTimeMillis() - startedAt);
+                response.imported(), response.failed(), response.chunks(), System.currentTimeMillis() - startedAt);
     }
 
     public synchronized SyncResult syncDocsDirectory() throws IOException {

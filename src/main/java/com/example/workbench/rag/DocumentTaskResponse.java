@@ -17,6 +17,11 @@ public record DocumentTaskResponse(
         int attemptCount,
         int maxAttempts,
         String errorMessage,
+        int totalItems,
+        int completedItems,
+        int succeededItems,
+        int failedItems,
+        int resultChunks,
         Instant createdAt,
         Instant startedAt,
         Instant finishedAt,
@@ -29,7 +34,8 @@ public record DocumentTaskResponse(
     static DocumentTaskResponse from(DocumentTaskEntity task, boolean documentDeleted) {
         return new DocumentTaskResponse(task.getTaskId(), task.getType(), task.getStatus(), task.getStage(),
                 task.getProgress(), task.getWorkspaceId(), task.getFileName(), task.getDocumentId(),
-                task.getAttemptCount(), task.getMaxAttempts(), task.getErrorMessage(), task.getCreatedAt(),
+                task.getAttemptCount(), task.getMaxAttempts(), task.getErrorMessage(), task.getTotalItems(),
+                task.getCompletedItems(), task.getSucceededItems(), task.getFailedItems(), task.getResultChunks(), task.getCreatedAt(),
                 task.getStartedAt(), task.getFinishedAt(), documentDeleted);
     }
 }

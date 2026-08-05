@@ -14,6 +14,7 @@ import com.example.workbench.auth.AppUserRepository;
 import com.example.workbench.workspace.WorkspaceService;
 import java.util.Optional;
 import java.util.List;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -26,6 +27,7 @@ class DocumentTaskServiceTest {
         DocumentTaskEntity task = task();
         when(repository.claim(anyString(), any(), any(), any(), any(), anyString(), any())).thenAnswer(invocation -> {
             task.start();
+            org.springframework.test.util.ReflectionTestUtils.setField(task, "workerId", invocation.getArgument(5));
             return 1;
         });
         when(repository.findById("task-1")).thenReturn(Optional.of(task));
@@ -64,6 +66,39 @@ class DocumentTaskServiceTest {
         assertThat(task.getAttemptCount()).isEqualTo(1);
         assertThat(task.getErrorMessage()).isEqualTo("临时服务不可用，系统将自动重试");
         assertThat(task.getNextAttemptAt()).isNotNull();
+    }
+
+    @Test
+    void persistsPerFileProgressForRebuildTask() throws Exception {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        DocumentTaskEntity task = new DocumentTaskEntity("rebuild-1", DocumentTaskType.REBUILD,
+                "重建空间索引", "", "user-1", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
+        when(repository.claim(anyString(), any(), any(), any(), any(), anyString(), any())).thenAnswer(invocation -> {
+            task.start();
+            org.springframework.test.util.ReflectionTestUtils.setField(task, "workerId", invocation.getArgument(5));
+            return 1;
+        });
+        when(repository.findById("rebuild-1")).thenReturn(Optional.of(task));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ingestionService.rebuildDocuments(any(), Mockito.<Consumer<RebuildProgress>>any()))
+                .thenAnswer(invocation -> {
+                    Consumer<RebuildProgress> progress = invocation.getArgument(1);
+                    progress.accept(new RebuildProgress(3, 0, 0, 0, 0));
+                    progress.accept(new RebuildProgress(3, 1, 1, 0, 12));
+                    progress.accept(new RebuildProgress(3, 3, 3, 0, 31));
+                    return new RebuildResult("success", 3, 20, 3, 0, 31, 100);
+                });
+
+        service(repository, ingestionService).process("rebuild-1");
+
+        DocumentTaskResponse response = DocumentTaskResponse.from(task);
+        assertThat(response.status()).isEqualTo(DocumentTaskStatus.SUCCEEDED);
+        assertThat(response.totalItems()).isEqualTo(3);
+        assertThat(response.completedItems()).isEqualTo(3);
+        assertThat(response.succeededItems()).isEqualTo(3);
+        assertThat(response.failedItems()).isZero();
+        assertThat(response.resultChunks()).isEqualTo(31);
     }
 
     @Test

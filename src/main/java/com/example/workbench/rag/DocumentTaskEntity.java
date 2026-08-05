@@ -90,6 +90,26 @@ public class DocumentTaskEntity {
     @Comment("最近一次失败原因")
     private String errorMessage;
 
+    @Column(name = "total_items")
+    @Comment("批量任务计划处理的文件数")
+    private Integer totalItems;
+
+    @Column(name = "completed_items")
+    @Comment("批量任务已处理的文件数")
+    private Integer completedItems;
+
+    @Column(name = "succeeded_items")
+    @Comment("批量任务处理成功的文件数")
+    private Integer succeededItems;
+
+    @Column(name = "failed_items")
+    @Comment("批量任务处理失败的文件数")
+    private Integer failedItems;
+
+    @Column(name = "result_chunks")
+    @Comment("批量任务最终生成的分块数")
+    private Integer resultChunks;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Comment("任务创建时间")
     private Instant createdAt;
@@ -160,6 +180,15 @@ public class DocumentTaskEntity {
     void updateProgress(String stage, int progress) {
         this.stage = stage;
         this.progress = Math.max(this.progress, Math.min(99, progress));
+    }
+
+    void updateBatchProgress(int totalItems, int completedItems, int succeededItems, int failedItems,
+                             int resultChunks) {
+        this.totalItems = Math.max(0, totalItems);
+        this.completedItems = Math.max(0, completedItems);
+        this.succeededItems = Math.max(0, succeededItems);
+        this.failedItems = Math.max(0, failedItems);
+        this.resultChunks = Math.max(0, resultChunks);
     }
 
     void succeed(String documentId) {
@@ -233,6 +262,11 @@ public class DocumentTaskEntity {
     int getMaxAttempts() { return maxAttempts; }
     Instant getNextAttemptAt() { return nextAttemptAt; }
     String getErrorMessage() { return errorMessage; }
+    int getTotalItems() { return totalItems == null ? 0 : totalItems; }
+    int getCompletedItems() { return completedItems == null ? 0 : completedItems; }
+    int getSucceededItems() { return succeededItems == null ? 0 : succeededItems; }
+    int getFailedItems() { return failedItems == null ? 0 : failedItems; }
+    int getResultChunks() { return resultChunks == null ? 0 : resultChunks; }
     Instant getCreatedAt() { return createdAt; }
     Instant getStartedAt() { return startedAt; }
     Instant getFinishedAt() { return finishedAt; }

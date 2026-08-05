@@ -271,7 +271,11 @@ public class DocumentTaskService {
             }
             case REBUILD -> {
                 updateProgress(task.getTaskId(), "SCANNING", 15);
-                ingestionService.rebuildDocuments(access);
+                RebuildResult result = ingestionService.rebuildDocuments(access,
+                        progress -> updateRebuildProgress(task.getTaskId(), progress));
+                if (result.failedFiles() > 0) {
+                    throw new IllegalArgumentException("索引重建完成，但有 " + result.failedFiles() + " 个文件处理失败");
+                }
                 updateProgress(task.getTaskId(), "PERSISTING_INDEX", 90);
                 yield null;
             }
@@ -313,6 +317,21 @@ public class DocumentTaskService {
                 return;
             }
             task.updateProgress(stage, progress);
+            task.renewLease(workerId, Instant.now().plusSeconds(LEASE_SECONDS));
+            repository.saveAndFlush(task);
+        });
+    }
+
+    private void updateRebuildProgress(String taskId, RebuildProgress progress) {
+        repository.findById(taskId).ifPresent(task -> {
+            if (!workerId.equals(task.getWorkerId())) {
+                return;
+            }
+            int percentage = progress.totalFiles() == 0 ? 85
+                    : 20 + (int) Math.floor(progress.completedFiles() * 65.0 / progress.totalFiles());
+            task.updateProgress("REBUILDING", percentage);
+            task.updateBatchProgress(progress.totalFiles(), progress.completedFiles(), progress.succeededFiles(),
+                    progress.failedFiles(), progress.chunks());
             task.renewLease(workerId, Instant.now().plusSeconds(LEASE_SECONDS));
             repository.saveAndFlush(task);
         });

@@ -5,6 +5,7 @@ public record RebuildResult(
         int clearedDocuments,
         int clearedChunks,
         int files,
+        int failedFiles,
         int chunks,
         long durationMs
 ) {
