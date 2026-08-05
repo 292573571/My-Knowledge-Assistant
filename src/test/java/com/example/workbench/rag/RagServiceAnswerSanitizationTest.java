@@ -33,4 +33,14 @@ class RagServiceAnswerSanitizationTest {
                 "Spring AI 如何实现 RAG？"))
                 .isEqualTo("Spring AI 通过文档读取和向量检索实现 RAG。");
     }
+
+    @Test
+    void normalizesPdfStyleNumberingAndDuplicatedParentheses() {
+        RagService service = new RagService(mock(DocumentIngestionService.class), mock(VectorStore.class),
+                mock(LocalChatClient.class), new ConversationMemory(), mock(WebSearchService.class),
+                mock(RagQualityGate.class), false, 5, 0.85, "distance", false, false, 3, true, false);
+
+        assertThat(service.sanitizePresentedAnswer("一 LLM：负责思考和决策。\n二 上下文（（眼睛）：负责接收信息。\n三 工具：负责执行操作。"))
+                .isEqualTo("1. LLM：负责思考和决策。\n2. 上下文（眼睛）：负责接收信息。\n3. 工具：负责执行操作。");
+    }
 }
