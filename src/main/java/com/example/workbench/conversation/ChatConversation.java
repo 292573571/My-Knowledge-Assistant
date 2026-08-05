@@ -8,11 +8,14 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import org.hibernate.annotations.Comment;
 
 @Entity
-@Table(name = "chat_conversations")
+@Table(name = "chat_conversations", uniqueConstraints = @UniqueConstraint(
+        name = "uk_chat_conversation_scope_client_id",
+        columnNames = {"user_id", "workspace_id", "client_conversation_id"}))
 @Comment("聊天会话表")
 public class ChatConversation {
 
@@ -20,6 +23,10 @@ public class ChatConversation {
     @Column(name = "id", nullable = false, length = 64)
     @Comment("会话主键")
     private String id;
+
+    @Column(name = "client_conversation_id", length = 64)
+    @Comment("客户端会话标识，在用户和空间范围内使用")
+    private String clientConversationId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
@@ -54,7 +61,23 @@ public class ChatConversation {
     }
 
     public ChatConversation(String id, AppUser user, String title, String mode, String workspaceId) {
+        this(id, id, user, title, mode, workspaceId);
+    }
+
+    /**
+     * 使用服务端内部主键和租户范围内客户端标识创建会话。
+     *
+     * @param id 服务端内部主键
+     * @param clientConversationId 客户端会话标识
+     * @param user 所属用户
+     * @param title 会话标题
+     * @param mode 会话模式
+     * @param workspaceId 所属空间
+     */
+    public ChatConversation(String id, String clientConversationId, AppUser user, String title, String mode,
+                            String workspaceId) {
         this.id = id;
+        this.clientConversationId = clientConversationId;
         this.user = user;
         this.title = title;
         this.mode = mode;
@@ -64,6 +87,9 @@ public class ChatConversation {
     }
 
     public String getId() { return id; }
+    public String getClientConversationId() {
+        return clientConversationId == null || clientConversationId.isBlank() ? id : clientConversationId;
+    }
     public AppUser getUser() { return user; }
     public String getTitle() { return title; }
     public String getMode() { return mode; }

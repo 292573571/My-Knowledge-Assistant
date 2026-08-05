@@ -67,7 +67,7 @@ class DocumentTaskServiceTest {
     }
 
     @Test
-    void readsVisibleUploadTaskSourceFile() {
+    void uploaderCanReadPendingUploadSourceFile() {
         DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
         DocumentTaskEntity task = task();
@@ -77,9 +77,24 @@ class DocumentTaskServiceTest {
         DocumentTaskService service = service(repository, ingestionService);
 
         DocumentSourceFile result = service.sourceFile("task-1",
-                new WorkspaceAccessContext("viewer-1", "team-1", WorkspaceRole.VIEWER, WorkspaceType.TEAM));
+                new WorkspaceAccessContext("user-1", "team-1", WorkspaceRole.VIEWER, WorkspaceType.TEAM));
 
         assertThat(result).isSameAs(source);
+    }
+
+    @Test
+    void viewerCannotReadAnotherUsersPendingUploadSourceFile() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        DocumentTaskEntity task = task();
+        when(repository.findById("task-1")).thenReturn(Optional.of(task));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service(repository, Mockito.mock(DocumentIngestionService.class)).sourceFile("task-1",
+                                new WorkspaceAccessContext("viewer-1", "team-1", WorkspaceRole.VIEWER,
+                                        WorkspaceType.TEAM)))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((org.springframework.web.server.ResponseStatusException) exception)
+                        .getStatusCode().value()).isEqualTo(403));
     }
 
     @Test

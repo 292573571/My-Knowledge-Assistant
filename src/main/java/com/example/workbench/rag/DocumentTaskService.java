@@ -167,6 +167,12 @@ public class DocumentTaskService {
         if (task.getType() != DocumentTaskType.UPLOAD) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "上传记录不存在");
         }
+        if (task.getStatus() != DocumentTaskStatus.SUCCEEDED
+                && !access.canWrite()
+                && !task.getActorUserId().equals(access.userId())) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
+                    "处理中或失败的原始上传仅限上传者和空间维护者查看");
+        }
         if (documentDeleted(task, access)) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.GONE, "知识库文档已删除，源文件不可打开");
         }

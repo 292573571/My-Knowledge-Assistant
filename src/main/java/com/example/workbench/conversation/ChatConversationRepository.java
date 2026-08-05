@@ -17,7 +17,8 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
                                                          @Param("workspaceId") String workspaceId,
                                                          @Param("personalWorkspaceId") String personalWorkspaceId);
 
-    @Query("select c from ChatConversation c where c.id = :id and c.user.id = :userId and "
+    @Query("select c from ChatConversation c where (c.clientConversationId = :id "
+            + "or (c.clientConversationId is null and c.id = :id)) and c.user.id = :userId and "
             + "(c.workspaceId = :workspaceId or (c.workspaceId is null and :workspaceId = :personalWorkspaceId))")
     Optional<ChatConversation> findVisibleByIdAndUserAndWorkspace(@Param("id") String id,
                                                                   @Param("userId") Long userId,

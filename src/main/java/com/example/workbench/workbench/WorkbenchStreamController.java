@@ -120,6 +120,7 @@ public class WorkbenchStreamController {
                         "status", "running"
                 ));
 
+                workspaceService.access(user, workspace.workspaceId());
                 RagStreamResponse answer = ragService.stream(new RagChatRequest(scopedConversationId, workspace.workspaceId(), message));
                 if (execution.isCancelled()) {
                     // 在检索或模型生成期间取消时，直接结束 SSE，且不发送/保存迟到结果。
@@ -127,6 +128,7 @@ public class WorkbenchStreamController {
                     return;
                 }
                 long durationMs = System.currentTimeMillis() - startedAt;
+                workspaceService.access(user, workspace.workspaceId());
 
                 send(emitter, "tool_call_result", Map.of(
                         "id", "tool-rag-retrieve",
@@ -158,6 +160,7 @@ public class WorkbenchStreamController {
                         })
                         .blockLast();
                 if (!execution.isCancelled()) {
+                    workspaceService.access(user, workspace.workspaceId());
                     String answerContent = ragService.sanitizePresentedAnswer(content.toString(), message);
                     ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
                     boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,

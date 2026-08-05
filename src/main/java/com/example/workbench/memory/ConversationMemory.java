@@ -48,6 +48,15 @@ public class ConversationMemory {
         conversations.remove(conversationId);
     }
 
+    /**
+     * 清理指定用户和空间前缀下的全部短期对话记忆。
+     *
+     * @param conversationPrefix 会话作用域前缀
+     */
+    public void removeByPrefix(String conversationPrefix) {
+        conversations.keySet().removeIf(key -> key.startsWith(conversationPrefix));
+    }
+
     private void add(String conversationId, ChatMessage message) {
         List<ChatMessage> messages = conversations.computeIfAbsent(conversationId, key -> new ArrayList<>());
         synchronized (messages) {

@@ -30,13 +30,17 @@ public class EvalController {
     private final EvalRunStorage evalRunStorage;
     private final EvalCaseImportService evalCaseImportService;
     private final EvalImportStorage evalImportStorage;
+    private final EvalExecutionGuard executionGuard;
 
-    public EvalController(EvalRunner evalRunner, EvalCaseService evalCaseService, EvalRunStorage evalRunStorage, EvalCaseImportService evalCaseImportService, EvalImportStorage evalImportStorage) {
+    public EvalController(EvalRunner evalRunner, EvalCaseService evalCaseService, EvalRunStorage evalRunStorage,
+                          EvalCaseImportService evalCaseImportService, EvalImportStorage evalImportStorage,
+                          EvalExecutionGuard executionGuard) {
         this.evalRunner = evalRunner;
         this.evalCaseService = evalCaseService;
         this.evalRunStorage = evalRunStorage;
         this.evalCaseImportService = evalCaseImportService;
         this.evalImportStorage = evalImportStorage;
+        this.executionGuard = executionGuard;
     }
 
     @GetMapping("/cases")
@@ -83,9 +87,19 @@ public class EvalController {
     @PostMapping("/run")
     public EvalSummary run(@RequestBody(required = false) EvalRunRequest run, HttpServletRequest request) throws IOException {
         AppUser user = user(request);
-        return evalRunner.run(evalCaseService.selectedCases(user, run == null ? null : run.caseIds(),
-                        run == null ? null : run.suite(), run == null ? null : run.layer()),
-                run != null && run.enhanced(), user);
+        List<EvalCase> cases = evalCaseService.selectedCases(user, run == null ? null : run.caseIds(),
+                run == null ? null : run.suite(), run == null ? null : run.layer());
+        try {
+            return executionGuard.execute(user, cases.size(), () -> {
+                try {
+                    return evalRunner.run(cases, run != null && run.enhanced(), user);
+                } catch (IOException exception) {
+                    throw new EvalRunException(exception);
+                }
+            });
+        } catch (EvalRunException exception) {
+            throw exception.ioException;
+        }
     }
 
     @GetMapping("/runs")
@@ -100,5 +114,14 @@ public class EvalController {
 
     private AppUser user(HttpServletRequest request) {
         return (AppUser) request.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+    }
+
+    private static final class EvalRunException extends RuntimeException {
+        private final IOException ioException;
+
+        private EvalRunException(IOException ioException) {
+            super(ioException);
+            this.ioException = ioException;
+        }
     }
 }

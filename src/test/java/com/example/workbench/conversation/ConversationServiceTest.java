@@ -11,11 +11,56 @@ import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.memory.ConversationMemory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.web.server.ResponseStatusException;
 
 class ConversationServiceTest {
+
+    @Test
+    void createsScopedInternalIdWhenAnotherUserUsesSameClientConversationId() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser owner = new AppUser("alice", "Alice", "hash");
+        AppUser anotherUser = new AppUser("bob", "Bob", "hash");
+        ChatConversation existing = new ChatConversation("default", owner, "已有会话", "rag", "team-1");
+        ConversationRequest request = new ConversationRequest("default", "新会话", "rag");
+
+        when(conversations.findVisibleByIdAndUserAndWorkspace("default", anotherUser.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.empty());
+        when(conversations.save(Mockito.any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ConversationResponse response = service.create(anotherUser, "team-1", request);
+
+        assertThat(response.id()).isEqualTo("default");
+        verify(conversations).save(Mockito.argThat(conversation -> !conversation.getId().equals(existing.getId())
+                && conversation.getClientConversationId().equals("default")
+                && conversation.getUser() == anotherUser));
+    }
+
+    @Test
+    void createsScopedInternalIdWhenSameUserUsesClientIdInAnotherWorkspace() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation existing = new ChatConversation("default", user, "已有会话", "rag", "team-1");
+
+        when(conversations.findVisibleByIdAndUserAndWorkspace("default", user.getId(), "team-2", "personal-null"))
+                .thenReturn(Optional.empty());
+        when(conversations.save(Mockito.any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.recordUserMessage(user, "team-2", "default", "新会话", "rag", "你好");
+
+        verify(conversations).save(Mockito.argThat(conversation -> !conversation.getId().equals(existing.getId())
+                && conversation.getClientConversationId().equals("default")
+                && conversation.getWorkspaceId().equals("team-2")));
+        verify(messages).save(Mockito.any(ChatMessageEntity.class));
+    }
 
     @Test
     void doesNotReadMessagesForConversationNotOwnedByCurrentUser() {
@@ -32,6 +77,23 @@ class ConversationServiceTest {
                 .hasMessageContaining("404 NOT_FOUND");
 
         verify(messages, never()).findByConversationIdOrderByCreatedAtAsc("conversation-a");
+    }
+
+    @Test
+    void readsMessagesUsingServerConversationIdForClientConversationId() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation conversation = new ChatConversation("server-uuid", "default", user, "测试", "rag", "team-1");
+
+        when(conversations.findVisibleByIdAndUserAndWorkspace("default", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        when(messages.findByConversationIdOrderByCreatedAtAsc("server-uuid")).thenReturn(List.of());
+
+        assertThat(service.messages(user, "team-1", "default")).isEmpty();
+        verify(messages).findByConversationIdOrderByCreatedAtAsc("server-uuid");
     }
 
     @Test

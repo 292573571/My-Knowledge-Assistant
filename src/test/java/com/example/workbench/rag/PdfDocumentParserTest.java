@@ -64,6 +64,17 @@ class PdfDocumentParserTest {
     }
 
     @Test
+    void usesOcrWhenNormalParagraphIsFollowedByFragmentedLines() throws Exception {
+        org.mockito.Mockito.when(ocrEngine.recognize(org.mockito.Mockito.any()))
+                .thenReturn("Agent 由三个主要部分组成：感知、推理和行动。");
+
+        ParsedDocument document = parser.parse(PdfTestDocuments.mixedFragmentedTextPdf());
+
+        assertThat(document.content()).isEqualTo("Agent 由三个主要部分组成：感知、推理和行动。");
+        org.mockito.Mockito.verify(ocrEngine).recognize(org.mockito.Mockito.any());
+    }
+
+    @Test
     void removesRepeatedShortWatermarkLinesAcrossPages() throws Exception {
         ParsedDocument document = parser.parse(PdfTestDocuments.repeatedLinePdf(
                 "CONFIDENTIAL COPY", "First page knowledge", "Second page knowledge", "Third page knowledge"
@@ -107,5 +118,34 @@ class PdfDocumentParserTest {
         assertThatThrownBy(() -> parser.parse("not a pdf".getBytes()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("有效的 PDF");
+    }
+
+    @Test
+    void rejectsPdfAboveConfiguredPageLimit() throws Exception {
+        PdfDocumentParser limitedParser = new PdfDocumentParser(ocrEngine, 1, 50, 14400, 14400, 25_000_000L);
+
+        assertThatThrownBy(() -> limitedParser.parse(PdfTestDocuments.textPdf("Too many pages", "one", "two")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("页数");
+    }
+
+    @Test
+    void rejectsOcrPageAboveConfiguredPixelLimitBeforeRendering() throws Exception {
+        PdfDocumentParser limitedParser = new PdfDocumentParser(ocrEngine, 200, 50, 14400, 14400, 1);
+
+        assertThatThrownBy(() -> limitedParser.parse(PdfTestDocuments.scannedPdf()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("尺寸或 OCR 像素数");
+        org.mockito.Mockito.verifyNoInteractions(ocrEngine);
+    }
+
+    @Test
+    void rejectsOcrPageWhenConfiguredOcrPageLimitIsReached() throws Exception {
+        PdfDocumentParser limitedParser = new PdfDocumentParser(ocrEngine, 200, 0, 14400, 14400, 25_000_000L);
+
+        assertThatThrownBy(() -> limitedParser.parse(PdfTestDocuments.scannedPdf()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("OCR 页数");
+        org.mockito.Mockito.verifyNoInteractions(ocrEngine);
     }
 }

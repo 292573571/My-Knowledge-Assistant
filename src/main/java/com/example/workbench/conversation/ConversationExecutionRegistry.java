@@ -21,6 +21,19 @@ public class ConversationExecutionRegistry {
         executions.getOrDefault(conversationScope, Set.of()).forEach(Execution::cancel);
     }
 
+    /**
+     * 取消指定用户和空间前缀下的全部运行会话。
+     *
+     * @param scopePrefix 会话作用域前缀
+     */
+    public void cancelByPrefix(String scopePrefix) {
+        executions.forEach((scope, running) -> {
+            if (scope.startsWith(scopePrefix)) {
+                running.forEach(Execution::cancel);
+            }
+        });
+    }
+
     public void finish(String conversationScope, Execution execution) {
         executions.computeIfPresent(conversationScope, (key, running) -> {
             running.remove(execution);

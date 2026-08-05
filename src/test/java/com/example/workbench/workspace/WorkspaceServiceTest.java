@@ -9,6 +9,9 @@ import static org.mockito.Mockito.when;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AppUserRepository;
 import com.example.workbench.auth.SystemRole;
+import com.example.workbench.auth.UserConversationScope;
+import com.example.workbench.conversation.ConversationExecutionRegistry;
+import com.example.workbench.memory.ConversationMemory;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -170,6 +173,40 @@ class WorkspaceServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("不能移除空间所有者");
         verify(memberRepository, never()).delete(Mockito.any());
+    }
+
+    @Test
+    void roleMatrixAllowsOnlyOwnerAndEditorToWrite() {
+        assertThat(new WorkspaceAccessContext("owner", "team-1", WorkspaceRole.OWNER, WorkspaceType.TEAM).canWrite())
+                .isTrue();
+        assertThat(new WorkspaceAccessContext("editor", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM).canWrite())
+                .isTrue();
+        assertThat(new WorkspaceAccessContext("viewer", "team-1", WorkspaceRole.VIEWER, WorkspaceType.TEAM).canWrite())
+                .isFalse();
+    }
+
+    @Test
+    void removingMemberCancelsRunningWorkspaceConversationsAndClearsMemory() {
+        AppUser owner = user(1L, "alice", "usr_alice", "Alice");
+        AppUser member = user(2L, "bob", "usr_bob", "Bob");
+        Workspace workspace = new Workspace("team-1", "研发团队", WorkspaceType.TEAM, owner);
+        WorkspaceMember ownerMembership = new WorkspaceMember(workspace, owner, WorkspaceRole.OWNER);
+        WorkspaceMember memberMembership = new WorkspaceMember(workspace, member, WorkspaceRole.VIEWER);
+        when(memberRepository.findByWorkspaceIdAndUserId("team-1", 1L)).thenReturn(Optional.of(ownerMembership));
+        when(userRepository.findByPublicId("usr_bob")).thenReturn(Optional.of(member));
+        when(memberRepository.findByWorkspaceIdAndUserId("team-1", 2L)).thenReturn(Optional.of(memberMembership));
+        ConversationExecutionRegistry executions = new ConversationExecutionRegistry();
+        ConversationMemory memory = new ConversationMemory();
+        service.setRevocationResources(executions, memory);
+        String scope = UserConversationScope.id(member, "team-1:conversation-a");
+        ConversationExecutionRegistry.Execution execution = executions.begin(scope);
+        memory.addUserMessage(scope, "敏感问题");
+
+        service.removeMember(owner, "team-1", "usr_bob");
+
+        assertThat(execution.isCancelled()).isTrue();
+        assertThat(memory.get(scope)).isEmpty();
+        verify(memberRepository).delete(memberMembership);
     }
 
     private AppUser user(Long id, String account, String publicId, String name) {

@@ -99,6 +99,13 @@ final class PdfTestDocuments {
                 "X\n3 > 3 > JSON\nG TE JSON p\nWPS i\nEee\n2023 3 28 1\nSH Fs\n3 Ps\nAR Ps\n0ar Ps\nQa Ps\nJSON BGS\nOIA\neA ao x\neA ox");
     }
 
+    static byte[] mixedFragmentedTextPdf() throws IOException {
+        return textPdf("Mixed broken text layer",
+                "An agent can understand its environment and make decisions to achieve a goal.\n"
+                        + "It can use generated code to perform actions and improve its behavior.\n"
+                        + "An agent has three main parts:\n1\n1\n1\n\"\n1\n\"1\nuser\nagent and llm difference");
+    }
+
     private static byte[] save(PDDocument document) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         document.save(output);

@@ -75,6 +75,7 @@ public class WorkbenchChatService {
 
             log.info("Workbench chat route selected route=RAG_LOCAL_KNOWLEDGE mode={} conversationId={}", mode, conversationId);
             // 工作台统一走 RAG：优先本地知识库，证据不足时由 RAG 服务决定是否模型补充。
+            workspaceService.access(user, workspace.workspaceId());
             RagChatResponse ragResponse = ragService.chat(new RagChatRequest(conversationId, workspace.workspaceId(), request.message()));
             log.info(
                     "Workbench chat completed route=RAG_LOCAL_KNOWLEDGE conversationId={} sources={} durationMs={}",
@@ -88,6 +89,7 @@ public class WorkbenchChatService {
                 log.info("Workbench chat result discarded because conversation was stopped or deleted userId={} conversationId={}", user.getId(), conversationId);
                 return response;
             }
+            workspaceService.access(user, workspace.workspaceId());
             boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
                     mode, ragResponse.answer(), response.sources(), response.toolCalls());
             if (recorded) {

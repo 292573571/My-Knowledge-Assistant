@@ -4,6 +4,8 @@ import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AppUserRepository;
 import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.auth.SystemRole;
+import com.example.workbench.conversation.ConversationExecutionRegistry;
+import com.example.workbench.memory.ConversationMemory;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -17,6 +19,21 @@ public class WorkspaceService {
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
     private final AppUserRepository userRepository;
+    private ConversationExecutionRegistry executionRegistry;
+    private ConversationMemory conversationMemory;
+
+    /**
+     * 注入成员撤权时使用的运行会话注册表和短期记忆。
+     *
+     * @param executionRegistry 运行会话注册表
+     * @param conversationMemory 短期对话记忆
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setRevocationResources(ConversationExecutionRegistry executionRegistry,
+                                       ConversationMemory conversationMemory) {
+        this.executionRegistry = executionRegistry;
+        this.conversationMemory = conversationMemory;
+    }
 
     public WorkspaceService(
             WorkspaceRepository workspaceRepository,
@@ -131,6 +148,13 @@ public class WorkspaceService {
         WorkspaceMember member = memberByPublicId(workspaceId, memberPublicId);
         if (member.getRole() == WorkspaceRole.OWNER) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不能移除空间所有者");
+        }
+        String scopePrefix = UserConversationScope.id(member.getUser(), workspaceId + ":");
+        if (executionRegistry != null) {
+            executionRegistry.cancelByPrefix(scopePrefix);
+        }
+        if (conversationMemory != null) {
+            conversationMemory.removeByPrefix(scopePrefix);
         }
         memberRepository.delete(member);
     }

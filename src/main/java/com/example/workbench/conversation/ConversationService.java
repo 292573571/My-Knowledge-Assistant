@@ -47,26 +47,26 @@ public class ConversationService {
     @Transactional
     public ConversationResponse create(AppUser user, String workspaceId, ConversationRequest request) {
         ChatConversation conversation = findConversation(user, workspaceId, request.id())
-                .orElseGet(() -> new ChatConversation(request.id(), user, request.title(), request.mode(), workspaceId));
+                .orElseGet(() -> newConversation(user, workspaceId, request.id(), request.title(), request.mode()));
         conversation.touch(request.title(), request.mode());
         return response(conversationRepository.save(conversation));
     }
 
     @Transactional(readOnly = true)
     public List<MessageResponse> messages(AppUser user, String workspaceId, String conversationId) {
-        ownedConversation(user, workspaceId, conversationId);
-        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId).stream()
+        ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
+        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
                 .map(this::messageResponse)
                 .toList();
     }
 
     @Transactional
     public void delete(AppUser user, String workspaceId, String conversationId) {
-        ownedConversation(user, workspaceId, conversationId);
+        ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
         // 先取消正在生成的任务，避免删除后模型迟到结果重新写入会话。
         cancel(user, workspaceId, conversationId);
-        messageRepository.deleteByConversationId(conversationId);
-        conversationRepository.deleteById(conversationId);
+        messageRepository.deleteByConversationId(conversation.getId());
+        conversationRepository.deleteById(conversation.getId());
     }
 
     public void stop(AppUser user, String workspaceId, String conversationId) {
@@ -100,11 +100,17 @@ public class ConversationService {
         ChatConversation conversation = findConversation(user, workspaceId, id)
                 .orElse(null);
         if (conversation == null) {
-            conversation = new ChatConversation(id, user, title == null || title.isBlank() ? "新的对话" : title, mode, workspaceId);
+            conversation = newConversation(user, workspaceId, id,
+                    title == null || title.isBlank() ? "新的对话" : title, mode);
         } else {
             conversation.touch("新的对话".equals(conversation.getTitle()) ? title : null, mode);
         }
         return conversationRepository.save(conversation);
+    }
+
+    private ChatConversation newConversation(AppUser user, String workspaceId, String id, String title, String mode) {
+        // 数据库使用服务端 UUID，全局主键不再直接信任客户端可复用的会话标识。
+        return new ChatConversation(java.util.UUID.randomUUID().toString(), id, user, title, mode, workspaceId);
     }
 
     private ChatConversation ownedConversation(AppUser user, String workspaceId, String conversationId) {
@@ -134,7 +140,7 @@ public class ConversationService {
     }
 
     private ConversationResponse response(ChatConversation conversation) {
-        return new ConversationResponse(conversation.getId(), conversation.getTitle(), conversation.getMode(), conversation.getUpdatedAt());
+        return new ConversationResponse(conversation.getClientConversationId(), conversation.getTitle(), conversation.getMode(), conversation.getUpdatedAt());
     }
 
     private MessageResponse messageResponse(ChatMessageEntity message) {

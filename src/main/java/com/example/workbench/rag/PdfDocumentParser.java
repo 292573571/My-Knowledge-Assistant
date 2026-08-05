@@ -20,6 +20,8 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.rendering.ImageType;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * 提取 PDF 的逐页文本，并对疑似扫描页执行 OCR。
@@ -32,6 +34,11 @@ public class PdfDocumentParser implements DocumentParser {
     private static final int MIN_PAGES_FOR_REPEATED_LINE_FILTER = 3;
     private static final int MAX_REPEATED_LINE_CHARACTERS = 80;
     private final OcrEngine ocrEngine;
+    private final int maxPages;
+    private final int maxOcrPages;
+    private final float maxPageWidthPoints;
+    private final float maxPageHeightPoints;
+    private final long maxOcrPixels;
 
     /**
      * 创建支持扫描页识别的 PDF 解析器。
@@ -39,7 +46,32 @@ public class PdfDocumentParser implements DocumentParser {
      * @param ocrEngine 扫描页 OCR 引擎
      */
     public PdfDocumentParser(OcrEngine ocrEngine) {
+        this(ocrEngine, 200, 50, 14400, 14400, 25_000_000L);
+    }
+
+    /**
+     * 创建带有页面和 OCR 资源限制的 PDF 解析器。
+     *
+     * @param ocrEngine 扫描页 OCR 引擎
+     * @param maxPages PDF 最大页数
+     * @param maxOcrPages 单个 PDF 最大 OCR 页数
+     * @param maxPageWidthPoints OCR 页面最大宽度（PDF 点）
+     * @param maxPageHeightPoints OCR 页面最大高度（PDF 点）
+     * @param maxOcrPixels OCR 渲染页面估算的最大像素数
+     */
+    @Autowired
+    public PdfDocumentParser(OcrEngine ocrEngine,
+            @Value("${workbench.ocr.max-pages:200}") int maxPages,
+            @Value("${workbench.ocr.max-ocr-pages:50}") int maxOcrPages,
+            @Value("${workbench.ocr.max-page-width-points:14400}") float maxPageWidthPoints,
+            @Value("${workbench.ocr.max-page-height-points:14400}") float maxPageHeightPoints,
+            @Value("${workbench.ocr.max-pixels:25000000}") long maxOcrPixels) {
         this.ocrEngine = ocrEngine;
+        this.maxPages = maxPages;
+        this.maxOcrPages = maxOcrPages;
+        this.maxPageWidthPoints = maxPageWidthPoints;
+        this.maxPageHeightPoints = maxPageHeightPoints;
+        this.maxOcrPixels = maxOcrPixels;
     }
 
     @Override
@@ -57,6 +89,9 @@ public class PdfDocumentParser implements DocumentParser {
         try (PDDocument pdf = Loader.loadPDF(content)) {
             if (pdf.isEncrypted()) {
                 throw new IllegalArgumentException("暂不支持加密 PDF");
+            }
+            if (pdf.getNumberOfPages() > maxPages) {
+                throw new IllegalArgumentException("PDF 页数超过限制");
             }
 
             List<PageText> pages = filterRepeatedPageLines(extractPages(pdf));
@@ -94,6 +129,7 @@ public class PdfDocumentParser implements DocumentParser {
         stripper.setSortByPosition(true);
         PDFRenderer renderer = new PDFRenderer(pdf);
         List<PageText> pages = new ArrayList<>();
+        int ocrPages = 0;
         for (int pageNumber = 1; pageNumber <= pdf.getNumberOfPages(); pageNumber++) {
             stripper.setStartPage(pageNumber);
             stripper.setEndPage(pageNumber);
@@ -101,6 +137,9 @@ public class PdfDocumentParser implements DocumentParser {
             boolean hasImage = containsImage(pdf.getPage(pageNumber - 1).getResources());
             if ((hasImage && meaningfulCharacters(text) < MIN_MEANINGFUL_PAGE_CHARACTERS)
                     || hasUnusableTextLayer(text)) {
+                PDPage page = pdf.getPage(pageNumber - 1);
+                if (++ocrPages > maxOcrPages) throw new IllegalArgumentException("PDF OCR 页数超过限制");
+                validateOcrPageSize(page, pageNumber);
                 text = ocrEngine.recognize(renderer.renderImageWithDPI(pageNumber - 1, OCR_RENDER_DPI, ImageType.RGB)).strip();
                 if (text.isBlank()) {
                     throw new IllegalArgumentException("PDF 第 " + pageNumber + " 页 OCR 未识别到文字");
@@ -109,6 +148,15 @@ public class PdfDocumentParser implements DocumentParser {
             pages.add(new PageText(pageNumber, text));
         }
         return pages;
+    }
+
+    private void validateOcrPageSize(PDPage page, int pageNumber) {
+        float width = page.getMediaBox().getWidth();
+        float height = page.getMediaBox().getHeight();
+        double pixels = width / 72 * OCR_RENDER_DPI * height / 72 * OCR_RENDER_DPI;
+        if (width <= 0 || height <= 0 || width > maxPageWidthPoints || height > maxPageHeightPoints || pixels > maxOcrPixels) {
+            throw new IllegalArgumentException("PDF 第 " + pageNumber + " 页尺寸或 OCR 像素数超过限制");
+        }
     }
 
     /**
@@ -151,7 +199,14 @@ public class PdfDocumentParser implements DocumentParser {
         if (lines.size() >= 8) {
             long sparseLines = lines.stream().filter(line -> meaningfulCharacters(line) <= 4).count();
             double averageMeaningfulCharacters = meaningfulCharacters(text) / (double) lines.size();
+            long fragmentedLines = lines.stream().filter(line -> meaningfulCharacters(line) <= 2).count();
             if (sparseLines >= Math.ceil(lines.size() * 0.6) && averageMeaningfulCharacters < 8) {
+                return true;
+            }
+            // 某些中文 PDF 前面的段落仍能正常提取，但列表项或单字会被错误拆成多行。
+            // 仅看全文平均长度会掩盖这种损坏，因此额外检测短行的密集程度。
+            if (fragmentedLines >= Math.ceil(lines.size() * 0.45)
+                    && averageMeaningfulCharacters < 20) {
                 return true;
             }
         }
