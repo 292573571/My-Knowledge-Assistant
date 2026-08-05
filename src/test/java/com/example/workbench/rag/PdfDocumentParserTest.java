@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
 
 class PdfDocumentParserTest {
 
@@ -25,6 +26,33 @@ class PdfDocumentParserTest {
                 assertThat(document.content().substring(block.startOffset(), block.endOffset()))
                         .isEqualTo(block.content())
         );
+    }
+
+    @Test
+    void parsesLongPdfAsPageBatchesWithoutRejectingTheWholeDocument() throws Exception {
+        List<ParsedDocument> batches = parser.parseBatches(PdfTestDocuments.textPdf(
+                "Long PDF", "page one", "page two", "page three", "page four"), 2);
+
+        assertThat(batches).hasSize(2);
+        assertThat(batches.get(0).blocks()).extracting(DocumentBlock::pageNumber).containsExactly(1, 2);
+        assertThat(batches.get(1).blocks()).extracting(DocumentBlock::pageNumber).containsExactly(3, 4);
+        assertThat(batches).allSatisfy(batch -> assertThat(batch.content()).isNotBlank());
+    }
+
+    @Test
+    void skipsCompletedBatchesDuringRecovery() throws Exception {
+        List<ParsedDocumentBatch> batches = new java.util.ArrayList<>();
+
+        parser.parseEachBatch(PdfTestDocuments.textPdf(
+                "Resume PDF", "one", "two", "three", "four"), 2,
+                batchIndex -> batchIndex != 1, batches::add);
+
+        assertThat(batches).singleElement().satisfies(batch -> {
+            assertThat(batch.batchIndex()).isEqualTo(2);
+            assertThat(batch.startPage()).isEqualTo(3);
+            assertThat(batch.endPage()).isEqualTo(4);
+            assertThat(batch.document().content()).contains("three", "four");
+        });
     }
 
     @Test

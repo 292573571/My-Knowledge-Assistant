@@ -59,6 +59,10 @@ export function fetchDocumentTasks(workspaceId = '') {
   return request(`/api/document-tasks${workspaceQuery(workspaceId)}`)
 }
 
+export function fetchDocumentTaskBatches(taskId, workspaceId = '') {
+  return request(`/api/document-tasks/${encodeURIComponent(taskId)}/batches${workspaceQuery(workspaceId)}`)
+}
+
 export function retryDocumentTask(taskId, workspaceId = '') {
   return request(`/api/document-tasks/${encodeURIComponent(taskId)}/retry${workspaceQuery(workspaceId)}`, {
     method: 'POST'

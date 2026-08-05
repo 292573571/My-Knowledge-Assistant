@@ -33,6 +33,8 @@ public class DocumentTaskService {
     private final AdminAuthorizationService adminAuthorizationService;
     private final String workerId = UUID.randomUUID().toString();
     private RagMetrics metrics;
+    private DocumentTaskBatchRepository batchRepository;
+    private DocumentTaskBatchArtifactStore batchArtifactStore;
 
     /**
      * 注入可选的文档任务指标记录器，单元测试直接构造服务时可以不提供。
@@ -42,6 +44,26 @@ public class DocumentTaskService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setMetrics(RagMetrics metrics) {
         this.metrics = metrics;
+    }
+
+    /**
+     * 注入长文档批次记录仓库。
+     *
+     * @param batchRepository 批次记录仓库
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBatchRepository(DocumentTaskBatchRepository batchRepository) {
+        this.batchRepository = batchRepository;
+    }
+
+    /**
+     * 注入批次产物存储，用于失败时移除不可恢复产物。
+     *
+     * @param batchArtifactStore 批次产物存储
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBatchArtifactStore(DocumentTaskBatchArtifactStore batchArtifactStore) {
+        this.batchArtifactStore = batchArtifactStore;
     }
 
     public DocumentTaskService(
@@ -132,6 +154,25 @@ public class DocumentTaskService {
     }
 
     /**
+     * 查询一个可见任务的全部页面批次。
+     *
+     * @param taskId 任务标识
+     * @param access 空间访问上下文
+     * @param systemAdmin 当前用户是否为系统管理员
+     * @return 按序排列的批次
+     */
+    public List<DocumentTaskBatchResponse> batches(String taskId, WorkspaceAccessContext access,
+                                                    boolean systemAdmin) {
+        DocumentTaskEntity task = visibleTask(taskId, access);
+        if (task.getType() != DocumentTaskType.UPLOAD && !systemAdmin) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "维护任务批次仅限系统管理员查看");
+        }
+        if (batchRepository == null) return List.of();
+        return batchRepository.findByTaskIdOrderByBatchIndex(taskId).stream()
+                .map(DocumentTaskBatchResponse::from).toList();
+    }
+
+    /**
      * 重新执行失败任务。
      *
      * @param taskId 任务标识
@@ -148,6 +189,10 @@ public class DocumentTaskService {
         }
         if (task.getStatus() != DocumentTaskStatus.FAILED) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "仅失败任务可以重试");
+        }
+        if (!task.isRetryable()) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+                    "该失败由文件内容或资源限制导致，请处理原文件后重新上传");
         }
         task.retry();
         DocumentTaskEntity saved = repository.saveAndFlush(task);
@@ -218,13 +263,16 @@ public class DocumentTaskService {
             task = repository.findById(taskId).orElseThrow();
             task.succeed(documentId);
             repository.saveAndFlush(task);
+            deleteBatchArtifacts(taskId);
             recordTaskTransition(task);
             log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
         } catch (Exception exception) {
             task = repository.findById(taskId).orElseThrow();
             String failedStage = task.getStage();
+            failCurrentBatch(task, publicErrorMessage(exception));
             task.fail(publicErrorMessage(exception), isRetryable(exception));
             repository.saveAndFlush(task);
+            if (task.getStatus() == DocumentTaskStatus.FAILED) deleteBatchArtifacts(taskId);
             recordTaskTransition(task);
             // 后台线程没有 HTTP 异常处理器兜底，必须保留完整异常链才能区分 OCR、Embedding 和 Chroma 故障。
             log.warn("Document task failed taskId={} type={} fileName={} failedStage={} status={} attempt={}",
@@ -246,7 +294,7 @@ public class DocumentTaskService {
     private String executeTask(DocumentTaskEntity task, WorkspaceAccessContext access) throws java.io.IOException {
         return switch (task.getType()) {
             case UPLOAD -> ingestionService.indexWorkspaceUpload(
-                    access, task.getSourcePath(), task.getFileName(),
+                    access, task.getSourcePath(), task.getFileName(), task.getTaskId(),
                     (stage, progress) -> updateProgress(task.getTaskId(), stage, progress)).documentId();
             case INGEST_FILE -> {
                 updateProgress(task.getTaskId(), "PARSING", 25);
@@ -316,9 +364,99 @@ public class DocumentTaskService {
             if (!workerId.equals(task.getWorkerId())) {
                 return;
             }
-            task.updateProgress(stage, progress);
+            java.util.regex.Matcher batchStart = java.util.regex.Pattern.compile(
+                    "BATCH_START_(\\d+)_OF_(\\d+)_TOTALPAGES_(\\d+)_PAGES_(\\d+)_(\\d+)").matcher(stage);
+            if (batchStart.matches()) {
+                int batchIndex = Integer.parseInt(batchStart.group(1));
+                int total = Integer.parseInt(batchStart.group(2));
+                int totalPages = Integer.parseInt(batchStart.group(3));
+                int startPage = Integer.parseInt(batchStart.group(4));
+                int endPage = Integer.parseInt(batchStart.group(5));
+                task.updateBatchDetails(batchIndex, total, startPage, endPage);
+                persistBatchStart(taskId, batchIndex, total, totalPages, startPage, endPage);
+                task.updateProgress("REBUILDING", progress);
+            }
+            java.util.regex.Matcher batch = java.util.regex.Pattern.compile(
+                    "BATCH_(\\d+)_OF_(\\d+)_PAGES_(\\d+)_(\\d+)_CHUNKS_(\\d+)").matcher(stage);
+            if (!batchStart.matches() && batch.matches()) {
+                int completed = Integer.parseInt(batch.group(1));
+                int total = Integer.parseInt(batch.group(2));
+                int startPage = Integer.parseInt(batch.group(3));
+                int endPage = Integer.parseInt(batch.group(4));
+                int chunks = Integer.parseInt(batch.group(5));
+                task.updateBatchProgress(total, completed, completed, 0, chunks);
+                task.updateBatchDetails(completed, total, startPage, endPage);
+                task.updateProgress("REBUILDING", progress);
+                persistBatchProgress(taskId, completed, total, startPage, endPage, chunks);
+            } else if (!batchStart.matches()) {
+                task.updateProgress(stage, progress);
+            }
             task.renewLease(workerId, Instant.now().plusSeconds(LEASE_SECONDS));
             repository.saveAndFlush(task);
+        });
+    }
+
+    private void persistBatchStart(String taskId, int batchIndex, int total, int totalPages,
+                                   int startPage, int endPage) {
+        if (batchRepository == null) return;
+        int batchSize = Math.max(1, endPage - startPage + 1);
+        for (int index = 1; index <= total; index++) {
+            String batchId = taskId + "-batch-" + index;
+            if (!batchRepository.existsById(batchId)) {
+                int plannedStart = (index - 1) * batchSize + 1;
+                int plannedEnd = Math.min(totalPages, index * batchSize);
+                batchRepository.save(new DocumentTaskBatchEntity(taskId, index, plannedStart, plannedEnd));
+            }
+        }
+        batchRepository.findById(taskId + "-batch-" + batchIndex).ifPresent(batch -> {
+            batch.start(startPage, endPage);
+            batchRepository.save(batch);
+        });
+    }
+
+    private void failCurrentBatch(DocumentTaskEntity task, String message) {
+        if (batchRepository == null || task.getCurrentBatch() <= 0) return;
+        if (batchArtifactStore != null) {
+            try {
+                batchArtifactStore.delete(task.getTaskId(), task.getCurrentBatch());
+            } catch (RuntimeException exception) {
+                log.warn("Failed to delete document batch artifact taskId={} batch={} errorType={}",
+                        task.getTaskId(), task.getCurrentBatch(), exception.getClass().getSimpleName());
+            }
+        }
+        batchRepository.findById(task.getTaskId() + "-batch-" + task.getCurrentBatch()).ifPresent(batch -> {
+            batch.fail(message);
+            batchRepository.save(batch);
+        });
+    }
+
+    private void deleteBatchArtifacts(String taskId) {
+        if (batchArtifactStore == null) return;
+        try {
+            batchArtifactStore.deleteAll(taskId);
+        } catch (RuntimeException exception) {
+            // 临时产物可由保留策略再次清理，不能因此改变已经确定的任务结果。
+            log.warn("Failed to delete document batch artifacts taskId={} errorType={}", taskId,
+                    exception.getClass().getSimpleName());
+        }
+    }
+
+    private void persistBatchProgress(String taskId, int batchIndex, int total, int startPage, int endPage,
+                                      int chunks) {
+        if (batchRepository == null) return;
+        for (int index = 1; index <= total; index++) {
+            String batchId = taskId + "-batch-" + index;
+            if (batchRepository.existsById(batchId)) continue;
+            batchRepository.save(new DocumentTaskBatchEntity(taskId, index,
+                    index == batchIndex ? startPage : 0, index == batchIndex ? endPage : 0));
+        }
+        batchRepository.findById(taskId + "-batch-" + batchIndex).ifPresent(batch -> {
+            int previousChunks = batchRepository.findByTaskIdOrderByBatchIndex(taskId).stream()
+                    .filter(previous -> previous.getBatchIndex() < batchIndex)
+                    .filter(previous -> previous.getStatus() == DocumentTaskBatchStatus.SUCCEEDED)
+                    .mapToInt(DocumentTaskBatchEntity::getChunkCount).sum();
+            batch.succeed(Math.max(0, chunks - previousChunks));
+            batchRepository.save(batch);
         });
     }
 

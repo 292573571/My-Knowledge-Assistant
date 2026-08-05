@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
@@ -42,15 +43,28 @@ public class DocumentIngestionService {
     private final DocumentParserRouter documentParserRouter;
     private final DocumentChunkerRouter documentChunkerRouter;
     private final Path docsDirectory;
+    private final int pdfBatchPages;
+    private DocumentTaskBatchArtifactStore batchArtifactStore;
+
+    /**
+     * 注入异步任务批次产物存储。
+     *
+     * @param batchArtifactStore 批次产物存储
+     */
+    @Autowired(required = false)
+    public void setBatchArtifactStore(DocumentTaskBatchArtifactStore batchArtifactStore) {
+        this.batchArtifactStore = batchArtifactStore;
+    }
 
     @Autowired
     public DocumentIngestionService(
             VectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
-            DocumentChunkerRouter documentChunkerRouter
+            DocumentChunkerRouter documentChunkerRouter,
+            @Value("${workbench.pdf.batch-pages:50}") int pdfBatchPages
     ) {
-        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY);
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY, pdfBatchPages);
     }
 
     DocumentIngestionService(
@@ -60,11 +74,23 @@ public class DocumentIngestionService {
             DocumentChunkerRouter documentChunkerRouter,
             Path docsDirectory
     ) {
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, docsDirectory, 50);
+    }
+
+    DocumentIngestionService(
+            VectorStore vectorStore,
+            DocumentIndexStore documentIndexStore,
+            DocumentParserRouter documentParserRouter,
+            DocumentChunkerRouter documentChunkerRouter,
+            Path docsDirectory,
+            int pdfBatchPages
+    ) {
         this.vectorStore = vectorStore;
         this.documentIndexStore = documentIndexStore;
         this.documentParserRouter = documentParserRouter;
         this.documentChunkerRouter = documentChunkerRouter;
         this.docsDirectory = docsDirectory.toAbsolutePath().normalize();
+        this.pdfBatchPages = Math.max(1, pdfBatchPages);
     }
 
     public IngestResult ingestDocsDirectory() throws IOException {
@@ -296,29 +322,77 @@ public class DocumentIngestionService {
             String originalFileName,
             BiConsumer<String, Integer> progress
     ) {
+        return indexWorkspaceUpload(access, sourcePath, originalFileName, null, progress);
+    }
+
+    /**
+     * 解析并索引支持批次恢复的异步上传文档。
+     *
+     * @param access 空间访问上下文
+     * @param sourcePath 源文件相对路径
+     * @param originalFileName 原始文件名
+     * @param taskId 异步任务标识
+     * @param progress 任务进度回调
+     * @return 完成索引后的文档信息
+     */
+    public synchronized WorkspaceDocumentUploadResponse indexWorkspaceUpload(
+            WorkspaceAccessContext access, String sourcePath, String originalFileName, String taskId,
+            BiConsumer<String, Integer> progress
+    ) {
         requireWorkspaceWrite(access);
         Path source = resolveIndexedPath(sourcePath);
-        IngestedFile ingested = ingestWorkspaceFile(source, originalFileName, access, progress);
+        DocumentIndexEntry previousEntry = documentIndexStore.list().stream()
+                .filter(entry -> entry.path().equals(workspaceRelativePath(source).replace('\\', '/')))
+                .findFirst()
+                .orElse(null);
+        List<String> streamedIds = new ArrayList<>();
+        IngestedFile ingested;
+        try {
+            ingested = ingestWorkspaceFile(source, originalFileName, access, taskId, progress);
+            for (List<SourceDocument> batch : partitionByPageBatch(ingested.documents())) {
+                streamedIds.addAll(batch.stream().map(SourceDocument::id).toList());
+                vectorStore.addAll(batch);
+            }
+        } catch (RuntimeException exception) {
+            if (!streamedIds.isEmpty()) vectorStore.deleteByIds(streamedIds);
+            throw exception;
+        }
         if (ingested.indexEntry() == null || ingested.chunkCount() == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档内容不能为空");
         }
-        DocumentIndexEntry previousEntry = documentIndexStore.list().stream()
-                .filter(entry -> entry.documentId().equals(ingested.indexEntry().documentId()))
-                .findFirst()
-                .orElse(null);
-        documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
-        documents.addAll(ingested.documents());
-        progress.accept("VECTORIZING", 70);
-        vectorStore.addAll(ingested.documents());
-        progress.accept("PERSISTING_INDEX", 90);
-        documentIndexStore.upsertAll(List.of(ingested.indexEntry()));
-        DocumentIndexEntry entry = ingested.indexEntry();
-        if (previousEntry != null && !previousEntry.path().equals(entry.path())) {
-            // 相同内容重新上传后仅保留最新受管源文件，避免随机文件名不断产生磁盘孤儿。
-            deleteWorkspaceUploadSource(previousEntry);
+        try {
+            documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
+            documents.addAll(ingested.documents());
+            progress.accept("VECTORIZING", 70);
+            progress.accept("PERSISTING_INDEX", 90);
+            documentIndexStore.upsertAll(List.of(ingested.indexEntry()));
+            if (previousEntry != null && !previousEntry.documentId().equals(ingested.indexEntry().documentId())) {
+                vectorStore.deleteByIds(chunkIds(previousEntry));
+            }
+            DocumentIndexEntry entry = ingested.indexEntry();
+            if (previousEntry != null && !previousEntry.path().equals(entry.path())) {
+                // 相同内容重新上传后仅保留最新受管源文件，避免随机文件名不断产生磁盘孤儿。
+                deleteWorkspaceUploadSource(previousEntry);
+            }
+            return new WorkspaceDocumentUploadResponse(entry.documentId(), entry.fileName(), entry.path(),
+                    entry.chunkCount(), entry.workspaceId(), entry.visibility());
+        } catch (RuntimeException exception) {
+            vectorStore.deleteByIds(streamedIds);
+            documents.removeIf(document -> streamedIds.contains(document.id()));
+            if (previousEntry == null) {
+                documentIndexStore.delete(ingested.indexEntry().documentId());
+            } else {
+                documentIndexStore.upsertAll(List.of(previousEntry));
+            }
+            throw exception;
         }
-        return new WorkspaceDocumentUploadResponse(entry.documentId(), entry.fileName(), entry.path(),
-                entry.chunkCount(), entry.workspaceId(), entry.visibility());
+    }
+
+    private List<List<SourceDocument>> partitionByPageBatch(List<SourceDocument> sourceDocuments) {
+        if (sourceDocuments.isEmpty()) return List.of();
+        return new ArrayList<>(sourceDocuments.stream().collect(Collectors.groupingBy(
+                document -> document.pageNumber() <= 0 ? 0 : (document.pageNumber() - 1) / pdfBatchPages,
+                java.util.LinkedHashMap::new, Collectors.toList())).values());
     }
 
     public List<DocumentIndexEntry> listIndexedDocuments() {
@@ -1176,36 +1250,63 @@ public class DocumentIngestionService {
     }
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
-                                             BiConsumer<String, Integer> progress) {
+                                              BiConsumer<String, Integer> progress) {
+        return ingestWorkspaceFile(path, originalFileName, access, null, progress);
+    }
+
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
+                                              String taskId, BiConsumer<String, Integer> progress) {
         try {
             byte[] sourceContent = Files.readAllBytes(path);
             progress.accept(isImageDocument(originalFileName) ? "OCR" : "PARSING", 25);
-            ParsedDocument parsedDocument = documentParserRouter.parse(originalFileName, sourceContent);
-            String normalizedContent = parsedDocument.content();
-            if (normalizedContent.isEmpty()) {
-                return new IngestedFile(null, List.of());
-            }
-
+            DocumentParser parser = documentParserRouter.parserFor(originalFileName);
+            boolean pdf = originalFileName.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
             DocumentVisibility visibility = switch (access.type()) {
                 case PERSONAL -> DocumentVisibility.PRIVATE;
                 case TEAM -> DocumentVisibility.WORKSPACE;
                 case PUBLIC -> DocumentVisibility.PUBLIC;
             };
-            String contentHash = isBinaryDocument(originalFileName) ? sha256(sourceContent) : sha256(normalizedContent);
+            String contentHash = isBinaryDocument(originalFileName) ? sha256(sourceContent)
+                    : sha256(sourceContent);
             String scopedHash = sha256(access.workspaceId() + "\n" + contentHash);
             String documentId = scopedHash.substring(0, 16);
             String relativePath = workspaceRelativePath(path).replace('\\', '/');
-            progress.accept("CHUNKING", 50);
-            List<DocumentChunk> chunks = documentChunkerRouter.select(parsedDocument).chunk(parsedDocument);
-            List<SourceDocument> sourceDocuments = new ArrayList<>();
-
-            for (DocumentChunk chunk : chunks) {
-                sourceDocuments.add(new SourceDocument(
-                        documentId + "#chunk-" + chunk.chunkIndex(), parsedDocument.title(), originalFileName, relativePath,
-                        documentId, originalFileName, contentHash, chunk, "SOURCE", access.userId(),
-                        access.workspaceId(), visibility
-                ));
-            }
+            Map<Integer, DocumentTaskBatchArtifactStore.SavedBatch> savedBatches = taskId == null || batchArtifactStore == null
+                    ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(batchArtifactStore.load(taskId));
+            int[] processedChunks = {savedBatches.values().stream().mapToInt(batch -> batch.chunks().size()).sum()};
+            parser.parseEachBatch(sourceContent, pdf ? pdfBatchPages : 1,
+                    batchIndex -> !savedBatches.containsKey(batchIndex), batch -> {
+                        progress.accept("BATCH_START_" + batch.batchIndex() + "_OF_" + batch.totalBatches()
+                                        + "_TOTALPAGES_" + batch.totalPages()
+                                        + "_PAGES_" + batch.startPage() + "_" + batch.endPage(),
+                                25 + (int) Math.floor((batch.batchIndex() - 1) * 50.0 / batch.totalBatches()));
+                        List<DocumentChunk> batchChunks = documentChunkerRouter.select(batch.document())
+                                .chunk(batch.document());
+                        if (taskId != null && batchArtifactStore != null) {
+                            batchArtifactStore.save(taskId, batch.batchIndex(), batch.document().title(), batchChunks);
+                        }
+                        savedBatches.put(batch.batchIndex(),
+                                new DocumentTaskBatchArtifactStore.SavedBatch(batch.document().title(), batchChunks));
+                        processedChunks[0] += batchChunks.size();
+                        progress.accept("BATCH_" + batch.batchIndex() + "_OF_" + batch.totalBatches()
+                                        + "_PAGES_" + batch.startPage() + "_" + batch.endPage()
+                                        + "_CHUNKS_" + processedChunks[0],
+                                25 + (int) Math.floor(batch.batchIndex() * 50.0 / batch.totalBatches()));
+                    });
+            List<DocumentChunk> chunks = new ArrayList<>();
+            String title = savedBatches.values().stream().map(DocumentTaskBatchArtifactStore.SavedBatch::title)
+                    .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
+            savedBatches.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+                for (DocumentChunk chunk : entry.getValue().chunks()) {
+                    chunks.add(new DocumentChunk(chunk.content(), chunks.size(), chunk.headingPath(), chunk.headingLevel(),
+                            chunk.startOffset(), chunk.endOffset(), chunk.chunkType(), chunk.pageNumber()));
+                }
+            });
+            if (chunks.isEmpty()) return new IngestedFile(null, List.of());
+            List<SourceDocument> sourceDocuments = chunks.stream().map(chunk -> new SourceDocument(
+                    documentId + "#chunk-" + chunk.chunkIndex(), title, originalFileName, relativePath,
+                    documentId, originalFileName, contentHash, chunk, "SOURCE", access.userId(),
+                    access.workspaceId(), visibility)).toList();
             DocumentIndexEntry entry = new DocumentIndexEntry(
                     documentId, originalFileName, relativePath, scopedHash, chunks.size(), System.currentTimeMillis(),
                     "SOURCE", "INDEXED", access.userId(), access.workspaceId(), visibility

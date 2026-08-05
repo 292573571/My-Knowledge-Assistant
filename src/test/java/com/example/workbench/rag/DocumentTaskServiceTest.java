@@ -32,7 +32,7 @@ class DocumentTaskServiceTest {
         });
         when(repository.findById("task-1")).thenReturn(Optional.of(task));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), any()))
+        when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new WorkspaceDocumentUploadResponse(
                         "document-1", "guide.pdf", "docs/workspaces/team-1/guide.pdf", 3,
                         "team-1", DocumentVisibility.WORKSPACE));
@@ -56,7 +56,7 @@ class DocumentTaskServiceTest {
         });
         when(repository.findById("task-1")).thenReturn(Optional.of(task));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), any()))
+        when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), anyString(), any()))
                 .thenThrow(new IllegalStateException("Failed to write documents to Chroma"));
         DocumentTaskService service = service(repository, ingestionService);
 
@@ -66,6 +66,22 @@ class DocumentTaskServiceTest {
         assertThat(task.getAttemptCount()).isEqualTo(1);
         assertThat(task.getErrorMessage()).isEqualTo("临时服务不可用，系统将自动重试");
         assertThat(task.getNextAttemptAt()).isNotNull();
+    }
+
+    @Test
+    void refusesRetryForPermanentFileValidationFailure() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        DocumentTaskEntity task = task();
+        task.start();
+        task.fail("PDF 页数超过限制", false);
+        when(repository.findById("task-1")).thenReturn(Optional.of(task));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service(repository,
+                        Mockito.mock(DocumentIngestionService.class)).retry("task-1",
+                        new WorkspaceAccessContext("user-1", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM),
+                        false))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("处理原文件后重新上传");
     }
 
     @Test

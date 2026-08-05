@@ -1412,7 +1412,23 @@ textarea:focus-visible,
 .document-task-item.failed .document-task-progress span { background: #d45c5c; }
 .document-task-item.succeeded .document-task-progress span { background: #28a275; }
 .document-task-meta small { min-width: 0; overflow-wrap: anywhere; }
+.document-task-meta small strong, .document-task-meta small span { display: block; }
+.document-task-meta small strong { color: #a94d54; font-size: 11px; }
+.document-task-meta small span { margin-top: 3px; color: #8d6670; font-size: 10px; }
+.document-task-item.failed .document-task-main b { color: #b65058; font-size: 11px; }
 .document-task-meta button { flex: 0 0 auto; border: 1px solid #d7deed; border-radius: 7px; padding: 4px 9px; color: #315fd4; background: #fff; font-size: 11px; }
+.document-task-batches-toggle { margin-left: 8px; }
+.document-task-batches { margin-top: 12px; padding: 12px; border-radius: 10px; background: #f5f7fb; }
+.document-task-batches > p { margin: 0; color: #7a869b; font-size: 12px; }
+.document-task-batches ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.document-task-batches li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 9px 10px; border-left: 3px solid #cdd5e3; border-radius: 6px; background: #fff; }
+.document-task-batches li.succeeded { border-left-color: #2f9e69; }
+.document-task-batches li.running { border-left-color: #3976d3; }
+.document-task-batches li.failed { border-left-color: #c94f4f; }
+.document-task-batches li span { display: flex; flex-direction: column; gap: 2px; }
+.document-task-batches li span:last-of-type { text-align: right; }
+.document-task-batches li small { color: #7a869b; font-size: 11px; }
+.document-task-batches li em { grid-column: 1 / -1; color: #b53c3c; font-size: 11px; font-style: normal; }
 
 .document-task-history-backdrop { position: fixed; z-index: 410; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(20,30,50,.48); backdrop-filter: blur(5px); }
 .document-task-history-dialog { display: grid; grid-template-rows: auto minmax(0,1fr); width: min(760px,100%); max-height: min(760px,calc(100vh - 48px)); overflow: hidden; border: 1px solid #d9e2ef; border-radius: 18px; background: #f8faff; box-shadow: 0 28px 90px rgba(20,35,66,.28); }

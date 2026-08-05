@@ -154,6 +154,17 @@ public class RagController {
                 adminAuthorizationService.isAdmin(actor));
     }
 
+    @GetMapping("/document-tasks/{taskId}/batches")
+    public List<DocumentTaskBatchResponse> documentTaskBatches(
+            @PathVariable String taskId,
+            @RequestParam(required = false) String workspaceId,
+            HttpServletRequest request
+    ) {
+        AppUser actor = authenticatedUser(request);
+        return documentTaskService.batches(taskId, workspaceService.access(actor, workspaceId),
+                adminAuthorizationService.isAdmin(actor));
+    }
+
     @PostMapping("/document-tasks/{taskId}/retry")
     public DocumentTaskResponse retryDocumentTask(@PathVariable String taskId,
                                                   @RequestParam(required = false) String workspaceId,

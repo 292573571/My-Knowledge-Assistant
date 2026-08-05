@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
-import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
+import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
 import { createUuid } from '../utils/uuid'
@@ -36,6 +36,9 @@ const openingTaskId = ref('')
 const dismissedLatestTaskId = ref('')
 const currentUploadTaskId = ref('')
 const uploadHistoryOpen = ref(false)
+const expandedTaskId = ref('')
+const taskBatches = ref({})
+const loadingBatchTaskId = ref('')
 let noticeTimer = null
 let errorTimer = null
 let taskPollTimer = null
@@ -105,6 +108,13 @@ const taskStageLabels = {
   FAILED: '请查看失败原因'
 }
 
+const batchStatusLabels = {
+  QUEUED: '等待处理',
+  RUNNING: '处理中',
+  SUCCEEDED: '已完成',
+  FAILED: '处理失败'
+}
+
 const supportedUploadExtensions = new Set(['md', 'txt', 'html', 'htm', 'pdf', 'docx', 'png', 'jpg', 'jpeg'])
 const maxUploadBytes = 50 * 1024 * 1024
 
@@ -128,6 +138,45 @@ function formatTime(value) {
   }).format(new Date(value))
 }
 
+function taskProgressLabel(task) {
+  return task.status === 'FAILED' ? '已终止' : `${task.progress}%`
+}
+
+function taskFailureGuidance(task) {
+  if (task.retryable) return '这是临时故障，可以重试当前任务。'
+  if (task.errorMessage?.includes('PDF 页数超过限制')) return '请拆分 PDF 或调整允许的最大页数后重新上传。'
+  if (task.errorMessage?.includes('OCR 页数')) return '扫描页数量超过 OCR 限制，请拆分文件后重新上传。'
+  if (task.errorMessage?.includes('尺寸') || task.errorMessage?.includes('像素')) return '页面尺寸过大，请压缩或拆分文件后重新上传。'
+  return '请处理原文件或配置限制后重新上传。'
+}
+
+function taskStageText(task) {
+  if (task.status === 'FAILED') return '处理已终止'
+  if (task.currentBatch && task.totalBatches) {
+    return `${taskStageLabels[task.stage] || task.stage} · 第 ${task.currentBatch}/${task.totalBatches} 批`
+      + (task.currentStartPage ? ` · 第 ${task.currentStartPage}-${task.currentEndPage} 页` : '')
+  }
+  return taskStageLabels[task.stage] || task.stage
+}
+
+async function toggleTaskBatches(task) {
+  if (expandedTaskId.value === task.taskId) {
+    expandedTaskId.value = ''
+    return
+  }
+  expandedTaskId.value = task.taskId
+  if (taskBatches.value[task.taskId]) return
+  loadingBatchTaskId.value = task.taskId
+  try {
+    const batches = await fetchDocumentTaskBatches(task.taskId, props.workspace?.id)
+    taskBatches.value = { ...taskBatches.value, [task.taskId]: batches }
+  } catch (exception) {
+    showError(`批次详情加载失败：${formatApiError(exception)}`)
+  } finally {
+    loadingBatchTaskId.value = ''
+  }
+}
+
 async function loadDocuments() {
   loading.value = true
   clearError()
@@ -145,6 +194,10 @@ async function loadDocumentTasks() {
   try {
     const previous = new Map(documentTasks.value.map((task) => [task.taskId, task.status]))
     documentTasks.value = await fetchDocumentTasks(props.workspace?.id)
+    if (expandedTaskId.value) {
+      const batches = await fetchDocumentTaskBatches(expandedTaskId.value, props.workspace?.id)
+      taskBatches.value = { ...taskBatches.value, [expandedTaskId.value]: batches }
+    }
     if (documentTasks.value.some((task) => task.status === 'SUCCEEDED' && previous.get(task.taskId) !== 'SUCCEEDED')) {
       await loadDocuments()
     }
@@ -431,14 +484,14 @@ onBeforeUnmount(() => {
       </header>
       <article class="document-task-item" :class="visibleLatestUploadTask.status.toLowerCase()">
         <div class="document-task-main">
-          <div><strong>{{ visibleLatestUploadTask.fileName }}</strong><span>{{ taskTypeLabels[visibleLatestUploadTask.type] || visibleLatestUploadTask.type }} · {{ taskStatusLabels[visibleLatestUploadTask.status] || visibleLatestUploadTask.status }} · {{ taskStageLabels[visibleLatestUploadTask.stage] || visibleLatestUploadTask.stage }}</span></div>
-          <b>{{ visibleLatestUploadTask.progress }}%</b>
+          <div><strong>{{ visibleLatestUploadTask.fileName }}</strong><span>{{ taskTypeLabels[visibleLatestUploadTask.type] || visibleLatestUploadTask.type }} · {{ taskStatusLabels[visibleLatestUploadTask.status] || visibleLatestUploadTask.status }} · {{ taskStageText(visibleLatestUploadTask) }}</span></div>
+          <b>{{ taskProgressLabel(visibleLatestUploadTask) }}</b>
         </div>
         <div class="document-task-progress" :aria-label="`处理进度 ${visibleLatestUploadTask.progress}%`"><span :style="{ width: `${visibleLatestUploadTask.progress}%` }"></span></div>
         <div class="document-task-meta">
-          <small v-if="visibleLatestUploadTask.errorMessage">{{ visibleLatestUploadTask.errorMessage }}</small>
+          <small v-if="visibleLatestUploadTask.errorMessage"><strong>{{ visibleLatestUploadTask.errorMessage }}</strong><span>{{ taskFailureGuidance(visibleLatestUploadTask) }}</span></small>
           <small v-else>尝试 {{ visibleLatestUploadTask.attemptCount }}/{{ visibleLatestUploadTask.maxAttempts }} · {{ formatTime(visibleLatestUploadTask.createdAt) }}</small>
-          <button v-if="visibleLatestUploadTask.status === 'FAILED'" type="button" :disabled="retryingTaskId === visibleLatestUploadTask.taskId" @click="retryTask(visibleLatestUploadTask)">{{ retryingTaskId === visibleLatestUploadTask.taskId ? '重试中...' : '重试' }}</button>
+          <button v-if="visibleLatestUploadTask.status === 'FAILED' && visibleLatestUploadTask.retryable" type="button" :disabled="retryingTaskId === visibleLatestUploadTask.taskId" @click="retryTask(visibleLatestUploadTask)">{{ retryingTaskId === visibleLatestUploadTask.taskId ? '重试中...' : '重试' }}</button>
         </div>
       </article>
     </section>
@@ -454,16 +507,28 @@ onBeforeUnmount(() => {
             <div v-if="!uploadTasks.length" class="document-task-history-empty">当前空间暂无上传记录</div>
             <article v-for="task in uploadTasks" :key="task.taskId" class="document-task-item" :class="task.status.toLowerCase()">
               <div class="document-task-main">
-                <div><button v-if="!task.documentDeleted" type="button" class="document-task-file-link" :disabled="openingTaskId === task.taskId" :title="`打开源文件 ${task.fileName}`" @click="openTaskSource(task)">{{ openingTaskId === task.taskId ? '正在打开...' : task.fileName }}</button><strong v-else class="document-task-file-deleted">{{ task.fileName }}<em>已删除</em></strong><span>{{ task.documentDeleted ? '知识库文档已删除' : (taskStatusLabels[task.status] || task.status) }} · {{ taskStageLabels[task.stage] || task.stage }}</span></div>
-                <b>{{ task.progress }}%</b>
+                 <div><button v-if="!task.documentDeleted" type="button" class="document-task-file-link" :disabled="openingTaskId === task.taskId" :title="`打开源文件 ${task.fileName}`" @click="openTaskSource(task)">{{ openingTaskId === task.taskId ? '正在打开...' : task.fileName }}</button><strong v-else class="document-task-file-deleted">{{ task.fileName }}<em>已删除</em></strong><span>{{ task.documentDeleted ? '知识库文档已删除' : (taskStatusLabels[task.status] || task.status) }} · {{ taskStageText(task) }}</span></div>
+                <b>{{ taskProgressLabel(task) }}</b>
               </div>
               <div class="document-task-progress" :aria-label="`处理进度 ${task.progress}%`"><span :style="{ width: `${task.progress}%` }"></span></div>
               <div class="document-task-meta">
-                <small v-if="task.errorMessage">{{ task.errorMessage }}</small>
+                <small v-if="task.errorMessage"><strong>{{ task.errorMessage }}</strong><span>{{ taskFailureGuidance(task) }}</span></small>
                 <small v-else>尝试 {{ task.attemptCount }}/{{ task.maxAttempts }} · {{ formatTime(task.createdAt) }}</small>
-                <button v-if="task.status === 'FAILED'" type="button" :disabled="retryingTaskId === task.taskId" @click="retryTask(task)">{{ retryingTaskId === task.taskId ? '重试中...' : '重试' }}</button>
-              </div>
-            </article>
+                 <button v-if="task.status === 'FAILED' && task.retryable" type="button" :disabled="retryingTaskId === task.taskId" @click="retryTask(task)">{{ retryingTaskId === task.taskId ? '重试中...' : '重试' }}</button>
+                 <button v-if="task.totalBatches" type="button" class="document-task-batches-toggle" @click="toggleTaskBatches(task)">{{ expandedTaskId === task.taskId ? '收起批次' : '查看批次' }}</button>
+               </div>
+               <div v-if="expandedTaskId === task.taskId" class="document-task-batches">
+                 <p v-if="loadingBatchTaskId === task.taskId">正在加载批次详情...</p>
+                 <p v-else-if="!taskBatches[task.taskId]?.length">暂无批次记录</p>
+                 <ol v-else>
+                   <li v-for="batch in taskBatches[task.taskId]" :key="batch.batchIndex" :class="batch.status.toLowerCase()">
+                     <span><strong>第 {{ batch.batchIndex }} 批</strong><small>{{ batch.startPage ? `第 ${batch.startPage}-${batch.endPage} 页` : '等待确定页码' }}</small></span>
+                     <span><b>{{ batchStatusLabels[batch.status] || batch.status }}</b><small>{{ batch.chunkCount }} 个分块 · 执行 {{ batch.attemptCount }} 次</small></span>
+                     <em v-if="batch.errorMessage">{{ batch.errorMessage }}</em>
+                   </li>
+                 </ol>
+               </div>
+             </article>
           </div>
         </section>
       </div>

@@ -90,6 +90,10 @@ public class DocumentTaskEntity {
     @Comment("最近一次失败原因")
     private String errorMessage;
 
+    @Column(name = "retryable")
+    @Comment("失败后是否允许原任务重试")
+    private Boolean retryable;
+
     @Column(name = "total_items")
     @Comment("批量任务计划处理的文件数")
     private Integer totalItems;
@@ -109,6 +113,22 @@ public class DocumentTaskEntity {
     @Column(name = "result_chunks")
     @Comment("批量任务最终生成的分块数")
     private Integer resultChunks;
+
+    @Column(name = "current_batch")
+    @Comment("当前处理批次序号")
+    private Integer currentBatch;
+
+    @Column(name = "total_batches")
+    @Comment("文档总批次数")
+    private Integer totalBatches;
+
+    @Column(name = "current_start_page")
+    @Comment("当前批次起始页")
+    private Integer currentStartPage;
+
+    @Column(name = "current_end_page")
+    @Comment("当前批次结束页")
+    private Integer currentEndPage;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Comment("任务创建时间")
@@ -191,6 +211,13 @@ public class DocumentTaskEntity {
         this.resultChunks = Math.max(0, resultChunks);
     }
 
+    void updateBatchDetails(int currentBatch, int totalBatches, int startPage, int endPage) {
+        this.currentBatch = Math.max(0, currentBatch);
+        this.totalBatches = Math.max(0, totalBatches);
+        this.currentStartPage = Math.max(0, startPage);
+        this.currentEndPage = Math.max(0, endPage);
+    }
+
     void succeed(String documentId) {
         this.documentId = documentId;
         status = DocumentTaskStatus.SUCCEEDED;
@@ -198,11 +225,13 @@ public class DocumentTaskEntity {
         progress = 100;
         finishedAt = Instant.now();
         errorMessage = null;
+        retryable = null;
         releaseLease();
     }
 
     void fail(String message, boolean retryable) {
         errorMessage = message == null ? "文档处理失败" : message.substring(0, Math.min(message.length(), 1000));
+        this.retryable = retryable;
         if (retryable && attemptCount < maxAttempts) {
             status = DocumentTaskStatus.RETRY_WAIT;
             stage = "RETRY_WAIT";
@@ -223,6 +252,7 @@ public class DocumentTaskEntity {
         nextAttemptAt = Instant.now();
         finishedAt = null;
         errorMessage = null;
+        retryable = null;
         releaseLease();
     }
 
@@ -262,11 +292,16 @@ public class DocumentTaskEntity {
     int getMaxAttempts() { return maxAttempts; }
     Instant getNextAttemptAt() { return nextAttemptAt; }
     String getErrorMessage() { return errorMessage; }
+    boolean isRetryable() { return Boolean.TRUE.equals(retryable); }
     int getTotalItems() { return totalItems == null ? 0 : totalItems; }
     int getCompletedItems() { return completedItems == null ? 0 : completedItems; }
     int getSucceededItems() { return succeededItems == null ? 0 : succeededItems; }
     int getFailedItems() { return failedItems == null ? 0 : failedItems; }
     int getResultChunks() { return resultChunks == null ? 0 : resultChunks; }
+    int getCurrentBatch() { return currentBatch == null ? 0 : currentBatch; }
+    int getTotalBatches() { return totalBatches == null ? 0 : totalBatches; }
+    int getCurrentStartPage() { return currentStartPage == null ? 0 : currentStartPage; }
+    int getCurrentEndPage() { return currentEndPage == null ? 0 : currentEndPage; }
     Instant getCreatedAt() { return createdAt; }
     Instant getStartedAt() { return startedAt; }
     Instant getFinishedAt() { return finishedAt; }

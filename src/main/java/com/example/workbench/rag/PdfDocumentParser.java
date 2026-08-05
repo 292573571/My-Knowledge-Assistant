@@ -6,8 +6,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
+import java.util.function.IntPredicate;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -46,7 +49,7 @@ public class PdfDocumentParser implements DocumentParser {
      * @param ocrEngine 扫描页 OCR 引擎
      */
     public PdfDocumentParser(OcrEngine ocrEngine) {
-        this(ocrEngine, 200, 50, 14400, 14400, 25_000_000L);
+        this(ocrEngine, 5000, 50, 14400, 14400, 25_000_000L);
     }
 
     /**
@@ -124,13 +127,98 @@ public class PdfDocumentParser implements DocumentParser {
         }
     }
 
+    /**
+     * 按页面批次解析超长 PDF，避免一次性将所有页面文本和切块交给后续索引链路。
+     *
+     * @param content PDF 原始内容
+     * @param batchSize 每批页面数
+     * @return 页面解析批次
+     */
+    @Override
+    public List<ParsedDocument> parseBatches(byte[] content, int batchSize) {
+        List<ParsedDocument> batches = new ArrayList<>();
+        parseEachBatch(content, batchSize, batch -> batches.add(batch.document()));
+        return List.copyOf(batches);
+    }
+
+    /**
+     * 在 PDF 打开期间逐批提取页面并立即交给下游处理。
+     *
+     * @param content PDF 原始内容
+     * @param batchSize 每批页面数
+     * @param consumer 批次消费者
+     */
+    @Override
+    public void parseEachBatch(byte[] content, int batchSize, Consumer<ParsedDocumentBatch> consumer) {
+        parseEachBatch(content, batchSize, ignored -> true, consumer);
+    }
+
+    /**
+     * 按选择条件逐批解析 PDF，已成功批次不会再次提取文本或执行 OCR。
+     *
+     * @param content PDF 原始内容
+     * @param batchSize 每批页面数
+     * @param shouldParse 判断批次是否需要解析
+     * @param consumer 批次消费者
+     */
+    @Override
+    public void parseEachBatch(byte[] content, int batchSize, IntPredicate shouldParse,
+                               Consumer<ParsedDocumentBatch> consumer) {
+        if (content.length < 5 || content[0] != '%' || content[1] != 'P'
+                || content[2] != 'D' || content[3] != 'F' || content[4] != '-') {
+            throw new IllegalArgumentException("文件不是有效的 PDF");
+        }
+        int safeBatchSize = Math.max(1, batchSize);
+        try (PDDocument pdf = Loader.loadPDF(content)) {
+            if (pdf.isEncrypted()) throw new IllegalArgumentException("暂不支持加密 PDF");
+            if (pdf.getNumberOfPages() > maxPages) throw new IllegalArgumentException("PDF 页数超过限制（最多 " + maxPages + " 页）");
+            if (pdf.getNumberOfPages() == 0) throw new IllegalArgumentException("PDF 未提取到可索引文本");
+            String title = pdf.getDocumentInformation().getTitle();
+            String normalizedTitle = title == null || title.isBlank() ? null : title.strip();
+            int totalBatches = (pdf.getNumberOfPages() + safeBatchSize - 1) / safeBatchSize;
+            int batchIndex = 0;
+            boolean produced = false;
+            for (int start = 1; start <= pdf.getNumberOfPages(); start += safeBatchSize) {
+                int end = Math.min(pdf.getNumberOfPages(), start + safeBatchSize - 1);
+                batchIndex++;
+                if (!shouldParse.test(batchIndex)) {
+                    produced = true;
+                    continue;
+                }
+                List<PageText> pages = extractPages(pdf, start, end);
+                StringBuilder contentBuilder = new StringBuilder();
+                List<DocumentBlock> blocks = new ArrayList<>();
+                for (PageText page : pages) {
+                    if (page.text().isBlank()) continue;
+                    if (!contentBuilder.isEmpty()) contentBuilder.append("\n\n");
+                    int offset = contentBuilder.length();
+                    contentBuilder.append(page.text());
+                    blocks.add(new DocumentBlock(page.text(), "pdf-page", "", 0, offset,
+                            contentBuilder.length(), page.pageNumber()));
+                }
+                if (!blocks.isEmpty()) {
+                    produced = true;
+                    consumer.accept(new ParsedDocumentBatch(batchIndex, totalBatches, pdf.getNumberOfPages(), start, end,
+                            new ParsedDocument("pdf", contentBuilder.toString(), normalizedTitle, blocks)));
+                }
+            }
+            if (!produced) throw new IllegalArgumentException("PDF 未提取到可索引文本");
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("PDF 文件已损坏或无法解析", exception);
+        }
+    }
+
     private List<PageText> extractPages(PDDocument pdf) throws IOException {
+        return extractPages(pdf, 1, pdf.getNumberOfPages());
+    }
+
+    private List<PageText> extractPages(PDDocument pdf, int firstPage, int lastPage) throws IOException {
         PDFTextStripper stripper = new PDFTextStripper();
         stripper.setSortByPosition(true);
         PDFRenderer renderer = new PDFRenderer(pdf);
         List<PageText> pages = new ArrayList<>();
         int ocrPages = 0;
-        for (int pageNumber = 1; pageNumber <= pdf.getNumberOfPages(); pageNumber++) {
+        for (int pageNumber = firstPage; pageNumber <= lastPage; pageNumber++) {
             stripper.setStartPage(pageNumber);
             stripper.setEndPage(pageNumber);
             String text = stripper.getText(pdf).strip();

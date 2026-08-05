@@ -329,6 +329,65 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void resumesPdfFromPersistedBatchArtifactsWithoutReprocessingCompletedBatch() throws Exception {
+        DocumentTaskBatchArtifactStore artifactStore = Mockito.mock(DocumentTaskBatchArtifactStore.class);
+        DocumentChunk cachedChunk = new DocumentChunk("cached first batch", 0, "", 0, 0, 18,
+                "pdf-page", 1);
+        Mockito.when(artifactStore.load("resume-task")).thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of(
+                1, new DocumentTaskBatchArtifactStore.SavedBatch("Resume PDF", List.of(cachedChunk)))));
+        DocumentIngestionService resumableService = new DocumentIngestionService(
+                vectorStore, indexStore, parserRouter(), new DocumentChunkerRouter(List.of(
+                new MarkdownSmartChunker(), new TextParagraphChunker(), new PdfPageChunker(),
+                new DocxBlockChunker(), new HtmlBlockChunker())), docsDirectory, 2);
+        resumableService.setBatchArtifactStore(artifactStore);
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
+        DocumentIngestionService.PendingWorkspaceUpload upload = resumableService.saveWorkspaceUpload(editor,
+                new MockMultipartFile("file", "resume.pdf", "application/pdf", PdfTestDocuments.textPdf(
+                        "Resume PDF", "page one", "page two", "page three", "page four")));
+
+        WorkspaceDocumentUploadResponse response = resumableService.indexWorkspaceUpload(
+                editor, upload.sourcePath(), upload.fileName(), "resume-task", (stage, progress) -> { });
+
+        Mockito.verify(artifactStore, never()).save(Mockito.eq("resume-task"), Mockito.eq(1),
+                Mockito.any(), Mockito.anyList());
+        Mockito.verify(artifactStore).save(Mockito.eq("resume-task"), Mockito.eq(2),
+                Mockito.eq("Resume PDF"), Mockito.anyList());
+        assertThat(response.chunks()).isEqualTo(resumableService.listDocuments().size());
+        assertThat(resumableService.listDocuments()).extracting(SourceDocument::content)
+                .contains("cached first batch", "page three", "page four")
+                .doesNotContain("page one", "page two");
+    }
+
+    @Test
+    void removesPreviouslyWrittenPdfBatchesWhenLaterVectorWriteFails() throws Exception {
+        VectorStore failingVectorStore = Mockito.mock(VectorStore.class);
+        Mockito.doNothing().doThrow(new IllegalStateException("Failed to write documents to Chroma"))
+                .when(failingVectorStore).addAll(Mockito.anyList());
+        DocumentTaskBatchArtifactStore artifactStore = Mockito.mock(DocumentTaskBatchArtifactStore.class);
+        Mockito.when(artifactStore.load("failed-task")).thenReturn(new java.util.LinkedHashMap<>());
+        DocumentIngestionService failingService = new DocumentIngestionService(
+                failingVectorStore, indexStore, parserRouter(), new DocumentChunkerRouter(List.of(
+                new MarkdownSmartChunker(), new TextParagraphChunker(), new PdfPageChunker(),
+                new DocxBlockChunker(), new HtmlBlockChunker())), docsDirectory, 2);
+        failingService.setBatchArtifactStore(artifactStore);
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
+        DocumentIngestionService.PendingWorkspaceUpload upload = failingService.saveWorkspaceUpload(editor,
+                new MockMultipartFile("file", "rollback.pdf", "application/pdf", PdfTestDocuments.textPdf(
+                        "Rollback PDF", "page one", "page two", "page three", "page four")));
+
+        assertThatThrownBy(() -> failingService.indexWorkspaceUpload(
+                editor, upload.sourcePath(), upload.fileName(), "failed-task", (stage, progress) -> { }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Chroma");
+
+        Mockito.verify(failingVectorStore).deleteByIds(Mockito.argThat(ids -> ids.size() >= 2));
+        assertThat(indexStore.list()).isEmpty();
+        assertThat(failingService.listDocuments()).isEmpty();
+    }
+
+    @Test
     void uploadsScannedPdfUsingOcr() throws Exception {
         WorkspaceAccessContext editor = new WorkspaceAccessContext(
                 "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
