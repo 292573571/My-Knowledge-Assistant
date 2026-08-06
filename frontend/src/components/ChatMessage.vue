@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -14,7 +14,6 @@ const props = defineProps({
   }
 })
 
-const copiedCode = ref('')
 const displayContent = computed(() => (props.message.content || '')
   .replace(/^\s*以上回答基于通用大模型知识，不是当前知识库内容。\s*$/gm, '')
   .trim())
@@ -46,11 +45,9 @@ async function copyCode(event) {
   if (!code) return
   try {
     await navigator.clipboard.writeText(code)
-    copiedCode.value = code
     button.textContent = '已复制'
     window.setTimeout(() => {
       if (button.isConnected) button.textContent = '复制'
-      if (copiedCode.value === code) copiedCode.value = ''
     }, 1500)
   } catch {
     button.textContent = '复制失败'

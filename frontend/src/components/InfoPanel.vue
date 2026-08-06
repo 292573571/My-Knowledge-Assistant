@@ -13,14 +13,6 @@ defineProps({
     type: Array,
     default: () => []
   },
-  searchResults: {
-    type: Array,
-    default: () => []
-  },
-  fileResults: {
-    type: Array,
-    default: () => []
-  }
 })
 
 defineEmits(['close'])
@@ -40,14 +32,6 @@ async function loadStatus() {
   } finally {
     statusLoading.value = false
   }
-}
-
-function getTitle(item, fallback) {
-  return item.title || item.name || item.url || fallback
-}
-
-function getText(item) {
-  return item.excerpt || item.content || item.snippet || item.path || item.url || '暂无摘要'
 }
 
 onMounted(loadStatus)
@@ -85,30 +69,5 @@ onMounted(loadStatus)
       <ToolCallPanel :tool-calls="toolCalls" />
     </section>
 
-    <section class="info-section">
-      <h2>Search Results</h2>
-      <div v-if="!searchResults.length" class="muted-card">暂无搜索结果</div>
-      <a
-        v-for="result in searchResults"
-        v-else
-        :key="result.id || result.url || result.title"
-        class="info-card"
-        :href="result.url || '#'"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <strong>{{ getTitle(result, '搜索结果') }}</strong>
-        <span>{{ getText(result) }}</span>
-      </a>
-    </section>
-
-    <section class="info-section">
-      <h2>File Results</h2>
-      <div v-if="!fileResults.length" class="muted-card">暂无文件结果</div>
-      <div v-for="file in fileResults" v-else :key="file.id || file.path || file.name" class="info-card">
-        <strong>{{ getTitle(file, '文件') }}</strong>
-        <span>{{ getText(file) }}</span>
-      </div>
-    </section>
   </aside>
 </template>

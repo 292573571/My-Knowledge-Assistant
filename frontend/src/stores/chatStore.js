@@ -1,6 +1,5 @@
 import { reactive, readonly } from 'vue'
 import { apiErrorFromException, formatApiError } from '../api/apiError'
-import { sendChatMessage } from '../api/chatApi'
 import { streamChat } from '../api/streamApi'
 import { deleteConversation as deleteRemoteConversation, fetchConversationMessages, fetchConversations, stopConversation } from '../api/conversationApi'
 import { createUuid } from '../utils/uuid'
@@ -11,7 +10,6 @@ function createConversation(title = '新的对话') {
   return {
     id: createUuid(),
     title,
-    mode: 'rag',
     messages: [],
     sources: [],
     toolCalls: [],
@@ -25,7 +23,6 @@ function normalizeConversation(conversation) {
   return {
     id: conversation.id || createUuid(),
     title: conversation.title || '新的对话',
-    mode: conversation.mode || 'rag',
     messages: (conversation.messages || []).map((message) => ({
       error: null,
       ...message,
@@ -54,7 +51,6 @@ const state = reactive({
   conversations: [],
   activeConversationId: '',
   messages: [],
-  mode: 'rag',
   isLoadingConversations: false,
   isStreaming: false,
   error: '',
@@ -101,7 +97,6 @@ async function setUser(account) {
       state.conversations = [conversation]
       state.activeConversationId = conversation.id
       state.messages = conversation.messages
-      state.mode = conversation.mode
       return
     }
 
@@ -117,7 +112,6 @@ async function setUser(account) {
     state.conversations = conversations
     state.activeConversationId = mostRecentConversation.id
     state.messages = mostRecentConversation.messages
-    state.mode = 'rag'
   } catch (error) {
     const apiError = apiErrorFromException(error, '加载聊天记录失败。')
     state.error = formatApiError(apiError, '加载聊天记录失败。')
@@ -157,8 +151,6 @@ function createAssistantMessage() {
     error: null,
     sources: [],
     toolCalls: [],
-    searchResults: [],
-    fileResults: [],
     requestId: '',
     retryable: false,
     createdAt: Date.now()
@@ -213,7 +205,6 @@ function failStreaming(assistantMessage, error = null) {
   const apiError = apiErrorFromException(error, REQUEST_ERROR_MESSAGE)
   const message = formatApiError(apiError, REQUEST_ERROR_MESSAGE)
   state.error = message
-  state.lastFailedMessage = state.lastFailedMessage || ''
   assistantMessage.error = message
   assistantMessage.requestId = apiError.requestId
   assistantMessage.retryable = apiError.retryable
@@ -367,7 +358,6 @@ export function useChatStore() {
     state.conversations = [conversation]
     state.activeConversationId = conversation.id
     state.messages = conversation.messages
-    state.mode = conversation.mode
     state.error = ''
     state.lastFailedMessage = ''
   }
@@ -384,7 +374,6 @@ export function useChatStore() {
     // 未发送过消息的临时会话尚不存在于服务端，直接显示其本地消息即可。
     if (!conversation.persisted) {
       syncActiveMessages()
-      state.mode = conversation.mode
       state.error = ''
       return
     }
@@ -393,7 +382,6 @@ export function useChatStore() {
       const messages = await fetchConversationMessages(id)
       conversation.messages = messages.map(normalizeMessage)
       syncActiveMessages()
-      state.mode = conversation.mode
       state.error = ''
     } catch (error) {
       state.error = formatApiError(apiErrorFromException(error, '加载该会话消息失败。'), '加载该会话消息失败。')

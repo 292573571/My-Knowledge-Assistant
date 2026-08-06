@@ -1,33 +1,5 @@
 import { apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
-import { getActiveWorkspaceId } from './workspaceApi'
-
-const REQUEST_ERROR_MESSAGE = '检索调试请求失败，请检查后端服务是否启动。'
-
-export async function debugRetrieval(message) {
-  const body = { message, workspaceId: getActiveWorkspaceId() }
-
-  try {
-    const response = await fetch('/api/rag/debug', {
-      method: 'POST',
-      credentials: 'include',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      throw await apiErrorFromResponse(response, REQUEST_ERROR_MESSAGE)
-    }
-
-    const data = await response.json()
-    return {
-      ...data,
-      requestId: response.headers.get('X-Request-Id') || ''
-    }
-  } catch (error) {
-    throw apiErrorFromException(error, REQUEST_ERROR_MESSAGE)
-  }
-}
 
 async function evalRequest(path, options = {}, fallbackMessage) {
   try {

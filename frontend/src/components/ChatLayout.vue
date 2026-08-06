@@ -6,14 +6,6 @@ import ConversationSidebar from './ConversationSidebar.vue'
 import InfoPanel from './InfoPanel.vue'
 import { useChatStore } from '../stores/chatStore'
 
-const props = defineProps({
-  userName: {
-    type: String,
-    default: ''
-  }
-})
-const emit = defineEmits(['logout'])
-
 const { state, send, stop, retryLast, newConversation, selectConversation, deleteConversation } = useChatStore()
 const messagesEl = ref(null)
 const shouldAutoScroll = ref(true)
@@ -119,7 +111,7 @@ function handleMessagesScroll() {
           />
         </section>
 
-        <div v-if="state.error && !state.lastFailedMessage" class="error-text">
+        <div v-if="state.error" class="error-text">
           <strong>请求失败</strong>
           <span>{{ state.error }}</span>
           <button v-if="state.lastFailedMessage && !state.isStreaming" type="button" @click="retryLast">重试上一条</button>
@@ -134,8 +126,6 @@ function handleMessagesScroll() {
         :class="{ 'is-open': infoPanelOpen }"
         :sources="latestInfo.sources"
         :tool-calls="latestInfo.toolCalls"
-        :search-results="latestInfo.searchResults"
-        :file-results="latestInfo.fileResults"
         @close="infoPanelOpen = false"
       />
       <button

@@ -35,14 +35,6 @@ export function fetchConversationMessages(conversationId) {
   return request(workspacePath(`/api/conversations/${encodeURIComponent(conversationId)}/messages`))
 }
 
-export function createConversation(conversation) {
-  return request(workspacePath('/api/conversations'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(conversation)
-  })
-}
-
 export function deleteConversation(conversationId) {
   return request(workspacePath(`/api/conversations/${encodeURIComponent(conversationId)}`), { method: 'DELETE' })
 }

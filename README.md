@@ -1,131 +1,109 @@
 # My Knowledge Assistant
 
-一个基于 Spring Boot 和 Spring AI 的知识库助手项目。项目支持多用户知识空间、文档导入、RAG 问答、多轮对话、Chroma 向量数据库、OpenAI-compatible 模型、搜索兜底、答案质量检查和工具调用日志。
+一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答、评测和基础可观测性。
 
-## 项目功能
+当前版本已经适合作为 RAG 应用和 Agent 学习底座，但联网搜索仍是扩展点，不应当按完整搜索产品理解。
 
-- 读取 `docs` 目录下的 `.md`、`.txt`、`.docx` 和文本型 `.pdf` 文档。
-- 将文档切分成 chunks，并保留 `source`、`path`、`chunkIndex`、`title` metadata。
-- 使用 Spring AI Embedding 将 chunks 向量化。
-- 将向量写入 Chroma collection：`knowledge_assistant`。
-- 支持 `/api/rag/chat` 基于知识库问答。
-- 支持 `conversationId` 多轮对话。
-- RAG 上下文不足时再调用搜索工具，不会每次都搜索。
-- 回答后通过 judge 检查是否基于上下文，不合格会重新生成保守答案。
-- 记录工具调用日志，包括调用原因和 confidence。
+## 功能概览
 
-## 架构图
+- 用户注册、登录、Cookie 会话、资料和头像管理。
+- 个人、团队和公共知识空间，以及 `OWNER`、`EDITOR`、`VIEWER` 权限。
+- Markdown、TXT、HTML、DOCX、PDF、PNG、JPG/JPEG 导入。
+- PDF 文本层、扫描页 OCR 和混合 PDF 逐页处理。
+- 长 PDF 分批解析、批次状态、失败清理和成功批次跳过恢复。
+- Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。
+- 多轮聊天、SSE 流式回答、会话保存、停止和删除。
+- 来源页码展示、答案依据校验、模型兜底和工具调用记录。
+- 评测题库、规则评测、检索指标、运行记录和质量门禁。
+- Actuator、Prometheus、请求 ID、结构化日志和敏感信息脱敏。
 
-```text
-User
-  |
-  v
-ChatController / RagController
-  |
-  v
-TaskRouter
-  |
-  +--> 知识问题 ----------------> RagService
-  |                                |
-  |                                +--> VectorStore.similaritySearch
-  |                                |      |
-  |                                |      +--> ChromaVectorStoreAdapter
-  |                                |             |
-  |                                |             +--> Chroma
-  |                                |             +--> InMemoryVectorStore fallback
-  |                                |
-  |                                +--> Spring AI ChatClient
-  |                                +--> AnswerJudge
-  |
-  +--> 实时问题 ----------------> WebSearchService
-  |                                |
-  |                                +--> 搜索结果进入 Prompt
-  |                                +--> 回答标明来自 Web
-Document Ingestion
-  |
-  v
-POST /api/ingest
-  |
-  v
-DocumentIngestionService
-  |
-  +--> read docs/*.md docs/*.txt docs/*.docx docs/*.pdf
-  +--> split chunks
-  +--> metadata
-  +--> Spring AI Embedding
-  +--> Chroma VectorStore
-```
+当前默认关闭联网搜索：`workbench.rag.web-search.enabled=false`。`WebSearchService` 是搜索扩展点，需要接入真实搜索服务后再开启。
 
-## 本地配置
+## 技术栈
 
-直接编辑唯一配置文件 `src/main/resources/application.properties`，填写聊天模型、Embedding 模型和服务地址。API Key 不写入项目文件，启动后端前在系统环境或 IntelliJ Run Configuration 中设置：
+- 后端：Java 17、Spring Boot 3.4.5、Spring AI 1.0.0、Spring Data JPA。
+- 数据库：PostgreSQL、Flyway、Hibernate Schema Update。
+- 向量库：Chroma，Chroma 不可用时保留内存回退能力。
+- 文档处理：PDFBox、Apache POI、Jsoup、Tesseract OCR。
+- 前端：Vue、Vite、Yarn、Markdown-it、highlight.js、DOMPurify。
 
-```text
-OPENAI_API_KEY=聊天模型 API Key
-OPENAI_EMBEDDING_API_KEY=Embedding API Key
-```
+## 运行前准备
 
-IntelliJ 中可在 `Run -> Edit Configurations -> PersonalAiWorkbenchApplication -> Environment variables` 设置这两个值。
+需要安装：
+
+- Java 17。
+- Maven 3.9+。
+- Node.js 20+ 和 Yarn。
+- PostgreSQL。
+- Chroma。仓库不包含 Docker Compose 或 Dockerfile，需要自行部署。
+- Tesseract 及 `chi_sim`、`eng` 语言包。只有图片或扫描 PDF OCR 时需要。
+
+macOS：
 
 ```bash
-spring.ai.openai.base-url=https://api.siliconflow.cn
-spring.ai.openai.chat.options.model=Qwen/Qwen2.5-7B-Instruct
-spring.ai.openai.embedding.base-url=https://api.siliconflow.cn
-spring.ai.openai.embedding.options.model=BAAI/bge-m3
+brew install maven tesseract tesseract-lang
 ```
 
-地址不要以 `/v1` 结尾，Spring AI 会自动追加 OpenAI API 路径。
+Debian/Ubuntu：
 
-## PostgreSQL 表与字段注释
+```bash
+sudo apt-get install maven tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
+```
 
-全部 JPA 实体都使用 Hibernate `@Comment` 声明了中文表注释和中文字段注释，包括主键、普通字段和外键字段。当前 `spring.jpa.hibernate.ddl-auto=update` 会在 PostgreSQL 建表或更新结构时生成对应的 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN` 语句，已有数据库在应用启动执行 schema update 后也会补充注释。
-
-可在 PostgreSQL 中查询注释：
+创建 PostgreSQL 数据库，例如：
 
 ```sql
-SELECT obj_description('app_users'::regclass, 'pg_class') AS table_comment;
-
-SELECT
-    a.attname AS column_name,
-    col_description(a.attrelid, a.attnum) AS column_comment
-FROM pg_attribute a
-WHERE a.attrelid = 'app_users'::regclass
-  AND a.attnum > 0
-  AND NOT a.attisdropped
-ORDER BY a.attnum;
+CREATE DATABASE knowledge_assistant;
 ```
 
-`DatabaseCommentCoverageTest` 会自动扫描项目中的全部 `@Entity`，要求每张表以及每个 `@Id`、`@Column`、`@JoinColumn` 字段都有包含中文的 `@Comment`。后续切换到 Flyway 时，应将相同的 `COMMENT ON` 语句固化到版本化迁移脚本，并在生产环境关闭 `ddl-auto=update`。
+## 环境变量
 
-## 如何运行
-
-前置要求：
-
-- Java 17
-- Maven 3.9+
-- Node.js 20+
-- Docker
-- Tesseract OCR 及简体中文、英文语言包
-
-macOS 可以安装：
+最小后端配置：
 
 ```bash
-brew install tesseract tesseract-lang
+export POSTGRES_URL='jdbc:postgresql://localhost:5432/knowledge_assistant'
+export POSTGRES_USER='postgres'
+export POSTGRES_PASSWORD='postgres'
+export OPENAI_API_KEY='聊天模型 API Key'
+export OPENAI_EMBEDDING_API_KEY='Embedding API Key'
 ```
 
-Debian/Ubuntu 可以安装：
+默认模型和服务配置在 `src/main/resources/application.properties`：
+
+```properties
+spring.ai.openai.chat.options.model=deepseek-ai/DeepSeek-V4-Flash
+spring.ai.openai.embedding.options.model=BAAI/bge-m3
+spring.ai.openai.chat.base-url=https://api.siliconflow.cn
+spring.ai.openai.embedding.base-url=https://api.siliconflow.cn
+```
+
+当前默认 Chroma 地址是配置文件中的远程地址。连接本地 Chroma 时覆盖：
 
 ```bash
-sudo apt-get install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng
+export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_HOST='http://localhost'
+export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 ```
 
-OCR 默认使用 `tesseract` 命令和 `chi_sim+eng` 语言组合。可通过 `OCR_COMMAND`、`OCR_LANGUAGES` 和 `OCR_TIMEOUT_SECONDS` 分别覆盖命令路径、语言与单次识别超时秒数。OCR 前会压白浅色、半透明背景水印，亮度阈值可通过 `OCR_WATERMARK_LIGHTNESS_THRESHOLD` 调整，默认值为 `215`；值越低，水印抑制越强，但过低可能同时削弱浅灰正文。
+常用可选变量：
 
-启动 Chroma：
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `ADMIN_ACCOUNTS` | 空 | 启动时把已有账号迁移为 `ADMIN` |
+| `AUTH_COOKIE_SECURE` | `false` | HTTPS 环境设为 `true` |
+| `AVATAR_DIRECTORY` | `data/avatars` | 头像目录 |
+| `EVAL_IMPORT_DIRECTORY` | `data/eval-imports` | 评测导入文件目录 |
+| `OCR_COMMAND` | `tesseract` | OCR 命令路径 |
+| `OCR_LANGUAGES` | `chi_sim+eng` | OCR 语言 |
+| `OCR_TIMEOUT_SECONDS` | `120` | 单页 OCR 超时 |
+| `PDF_BATCH_PAGES` | `50` | PDF 每批页数 |
+| `OCR_MAX_PAGES` | `5000` | PDF 最大总页数 |
+| `OCR_MAX_OCR_PAGES` | `50` | 单批 OCR 页数上限 |
+| `MANAGEMENT_SERVER_PORT` | `8081` | Actuator 管理端口 |
+| `WORKBENCH_EVAL_GATE_ENABLED` | `false` | 是否启用评测质量门禁 |
 
-```bash
-docker compose up -d chroma
-```
+完整默认项见 `src/main/resources/application.properties`。
+
+## 启动项目
 
 启动后端：
 
@@ -133,672 +111,248 @@ docker compose up -d chroma
 mvn spring-boot:run
 ```
 
-如果本机提示 `mvn: command not found`，需要先安装 Maven，例如 macOS 可以执行：
+或打包后启动：
 
 ```bash
-brew install maven
+mvn -DskipTests package
+java -jar target/my-knowledge-assistant-0.0.1-SNAPSHOT.jar
 ```
 
-启动前端：
+后端默认地址：`http://localhost:8080`。
+
+健康检查：
+
+```bash
+curl http://localhost:8080/api/health
+curl http://127.0.0.1:8081/actuator/health
+```
+
+前端：
 
 ```bash
 cd frontend
-npm install
-npm run dev
+yarn install --frozen-lockfile
+yarn dev
 ```
 
-前端默认运行在：
+前端默认地址：`http://localhost:5173`。开发代理目标由 `frontend/vite.config.js` 配置；修改该文件后，才能把 `/api` 请求切换到本地后端。
+
+生产构建：
+
+```bash
+cd frontend
+yarn build
+yarn preview
+```
+
+## 登录和空间使用
+
+API 使用 Cookie 会话。调试时保存 Cookie：
+
+```bash
+curl -c cookies.txt -X POST http://localhost:8080/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"account":"user@example.com","password":"your-password"}'
+
+curl -c cookies.txt -b cookies.txt -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"account":"user@example.com","password":"your-password"}'
+
+curl -b cookies.txt http://localhost:8080/api/auth/me
+curl -b cookies.txt http://localhost:8080/api/workspaces
+```
+
+空间类型：
+
+- `PERSONAL`：用户个人空间，自动创建。
+- `TEAM`：团队空间，可由用户创建。
+- `PUBLIC`：公共空间，需要管理员权限创建。
+
+非成员访问空间会被隐藏为不存在。聊天、文档、会话和检索都按空间隔离。
+
+## 文档导入
+
+推荐使用异步空间文档流程。上传时必须提供唯一的 `clientRequestId`：
+
+```bash
+curl -b cookies.txt -c cookies.txt -X POST \
+  'http://localhost:8080/api/documents/upload?workspaceId=personal-1&clientRequestId=upload-001' \
+  -F 'file=@docs/example.pdf'
+```
+
+上传返回任务信息后，通过任务接口查看处理状态：
+
+```bash
+curl -b cookies.txt 'http://localhost:8080/api/document-tasks?workspaceId=personal-1'
+curl -b cookies.txt 'http://localhost:8080/api/document-tasks/<taskId>/batches?workspaceId=personal-1'
+curl -X POST -b cookies.txt \
+  'http://localhost:8080/api/document-tasks/<taskId>/retry?workspaceId=personal-1'
+```
+
+文档任务支持批次进度、失败原因和可重试判断。长 PDF 重试时会跳过已成功批次；确定性的页数、尺寸或 OCR 限制错误不能直接重试。
+
+管理员还可以使用旧的同步全局接口：
+
+```bash
+curl -b cookies.txt -X POST http://localhost:8080/api/ingest
+curl -b cookies.txt -X POST http://localhost:8080/api/documents/rebuild
+curl -b cookies.txt -X POST http://localhost:8080/api/documents/sync
+```
+
+旧接口和全局导入仅限 `ADMIN` 或 `SUPER_ADMIN`。当前推荐优先使用 `/api/documents/*` 的异步任务接口。
+
+## RAG 问答
+
+普通问答：
+
+```bash
+curl -b cookies.txt -X POST http://localhost:8080/api/rag/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"conversationId":"demo","workspaceId":"personal-1","message":"总结当前知识库的主要内容"}'
+```
+
+工作台流式问答：
+
+```bash
+curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"conversationId":"demo","workspaceId":"personal-1","message":"什么是 RAG？"}'
+```
+
+流式接口返回 `text/event-stream`。前端会处理文本片段、来源和工具调用事件。当前 RAG 默认启用混合检索和答案依据校验；知识库没有足够依据时可以使用模型兜底，但默认不连接真实 Web 搜索。
+
+## 会话和学习记录
+
+会话接口：
 
 ```text
-http://localhost:5173
+GET    /api/conversations
+GET    /api/conversations/{conversationId}/messages
+DELETE /api/conversations/{conversationId}
+POST   /api/conversations/{conversationId}/stop
 ```
 
-Vite 会把 `/api` 请求代理到后端 `http://localhost:8080`。
+学习记录接口：
 
-## 如何测试
+```text
+GET    /api/learning-records
+GET    /api/learning-records/{date}
+PUT    /api/learning-records/{date}
+DELETE /api/learning-records/{date}
+POST   /api/learning-records/{date}/promote
+```
 
-运行后端单元测试：
+## API 总览
+
+| 模块 | 主要接口 | 说明 |
+| --- | --- | --- |
+| 认证 | `/api/auth/*` | 注册、登录、资料、头像、注销 |
+| 用户管理 | `/api/admin/users/*` | 管理员查看用户和调整角色 |
+| 空间 | `/api/workspaces/*` | 创建空间、成员管理、审计 |
+| 文档 | `/api/documents/*` | 上传、导入、同步、重建、删除 |
+| 文档任务 | `/api/document-tasks/*` | 查询、批次、重试、源文件 |
+| 会话 | `/api/conversations/*` | 会话列表、消息、停止、删除 |
+| 问答 | `/api/rag/chat`、`/api/workbench/chat*` | 普通和 SSE 流式问答 |
+| 评测 | `/api/eval/*` | 题库、运行、结果和导入文件 |
+| 记录 | `/api/learning-records/*` | 学习记录和正式笔记 |
+| 状态 | `/api/health`、`/actuator/*` | 服务和依赖状态 |
+
+## 评测
+
+确定性评测脚本实际位于：
+
+```bash
+bash eval/run-deterministic-evals.sh
+```
+
+它只运行不依赖真实模型和外部服务的规则测试。仓库不存在 `scripts/run-evals.sh`，不要使用旧 README 中的命令。
+
+前端评测页面支持题库导入、标准/增强检索对比和历史运行查看。模板位于：
+
+```text
+eval/templates/
+```
+
+真实模型评测需要 PostgreSQL、Chroma、模型 API Key 和评测数据：
+
+```bash
+mvn -DskipTests package
+java -jar target/my-knowledge-assistant-0.0.1-SNAPSHOT.jar --app.mode=eval
+```
+
+## 测试和检查
+
+后端全量测试：
 
 ```bash
 mvn test
 ```
 
-当前测试覆盖：
-
-- Markdown 文档切分和 heading metadata。
-- TXT、HTML、PDF 和 DOCX 的结构解析与切分。
-- 文档类型路由。
-- 文档索引读写、删除、清空。
-- RAG 规则评测器。
-
-运行前端构建检查：
+前端生产构建：
 
 ```bash
 cd frontend
-npm run build
+yarn build
 ```
 
-## 一键 Eval
-
-项目提供 RAG 评测脚本：
+仓库当前没有独立的前端单元测试、Lint 或 TypeScript 检查命令。代码修改后建议至少执行以上两项和：
 
 ```bash
-./scripts/run-evals.sh
 ```
 
-脚本会读取 `src/main/resources/application.properties`，并以 `app.mode=eval` 启动 Spring Boot，执行 `eval/questions.jsonl` 中的用例。运行汇总和每题完整检索结果会保存到：
+## 数据库、日志和监控
+
+当前配置同时启用 Flyway 基线和 `spring.jpa.hibernate.ddl-auto=update`。部分结构由迁移脚本提供，JPA 实体仍会在启动时更新结构；生产环境上线前应明确迁移边界，并评估关闭 `ddl-auto=update`。
+
+运行时目录：
 
 ```text
-PostgreSQL: eval_runs、eval_run_results
+data/                 头像和评测导入文件
+docs/workspaces/      空间上传源文件
+logs/                 Log4j2 日志
+target/               Maven 构建产物
 ```
 
-命令行运行记录不绑定 Web 用户；在前端“检索记录”中查看的记录，来自当前登录用户通过评测页面发起的运行。
-
-只跑少量样例：
-
-```bash
-./scripts/run-evals.sh --sample
-```
-
-开启 LLM judge：
-
-```bash
-./scripts/run-evals.sh --judge
-```
-
-运行独立 eval 前，除了 `src/main/resources/application.properties` 中的模型和服务地址，还需要在启动脚本的终端中设置 API Key：
-
-```bash
-export OPENAI_API_KEY='你的聊天模型 API Key'
-export OPENAI_EMBEDDING_API_KEY='你的 Embedding API Key'
-./scripts/run-evals.sh
-```
-
-如果应用已经运行在 `http://localhost:8080`，直接执行 `./scripts/run-evals.sh` 会复用该实例；此时 API Key 由运行该应用的 IntelliJ Run Configuration 或系统环境提供。
-
-如果使用 IntelliJ，建议修改代码后执行：
+Actuator 默认绑定 `127.0.0.1:8081`，暴露：
 
 ```text
-Build -> Rebuild Project
+/actuator/health
+/actuator/info
+/actuator/prometheus
 ```
 
-## 检索评测与题目导入
+日志会记录请求 ID、接口耗时、任务阶段、模型调用和错误摘要，并自动脱敏密码、Token、Authorization 等字段。不要把真实 API Key、数据库密码或生产数据提交到仓库。
 
-前端“检索评测”页面提供 Eval Case 题库管理、标准检索/增强检索对比和历史运行查看：
+## 搜索和 Agent 扩展
 
-- 评测题保存在 PostgreSQL 的 `eval_cases`，按登录用户隔离。
-- 标准检索使用当前全局检索配置；增强检索仅对本次运行开启查询改写和多查询，不修改全局配置。
-- 运行结果保存在 `eval_runs` 与 `eval_run_results`，可在“检索记录”中查看标准/增强模式、运行时间、通过率、检索命中率和每题明细。
-- 后端接口：
+项目保留 `WebSearchService`、工具调用事件和任务状态接口，便于继续学习 Agent。当前联网搜索默认关闭，`WebSearchService` 不是已接入的商业搜索服务。建议在现有只读接口基础上先实现知识库维护 Agent，再逐步加入需要确认的同步、重试和删除操作。
+
+## 目录结构
 
 ```text
-GET  /api/eval/cases
-POST /api/eval/cases
-PUT  /api/eval/cases/{id}
-DELETE /api/eval/cases/{id}
-POST /api/eval/run
-GET  /api/eval/runs
-GET  /api/eval/runs/{runId}
-```
-
-### 导入评测题
-
-题库页面的“导入”支持以下格式：
-
-```text
-.xlsx
-.md
-.json
-```
-
-- 知识库文档单文件上限为 `50 MB`。
-- Excel 与 Markdown 使用首行表头；JSON 支持对象数组或 JSONL。
-- 每条题目至少需要“问题”；未填写“类型”时默认使用 `fact`。
-- 支持的字段：`模式`、`类型`、`问题`、`期望来源`、`期望标题路径`、`期望关键词`、`禁用关键词`、`期望无回答`、`要求本地证据`、`允许模型兜底`。
-- 列表字段可使用逗号、顿号或换行分隔；布尔值支持“是/否”、`true/false`、`1/0`。
-- Case ID 始终由服务端生成，导入文件中的 Case ID 不会保留。
-- 任一题目无效时，整批导入回滚，不会留下部分题目。
-
-可直接编辑并上传以下模板：
-
-```text
-eval/templates/eval-case-template.xlsx
-eval/templates/eval-case-template.md
-eval/templates/eval-case-template.json
-```
-
-每次成功导入都会保留原始文件。文件按用户隔离保存在：
-
-```text
-data/eval-imports/user-<用户ID>/<随机UUID>.<扩展名>
-```
-
-导入元数据保存在 PostgreSQL 的 `eval_imports`，包括原始文件名、类型、大小、导入题目数和时间。可在前端“导入记录”查看和下载自己的文件，或调用：
-
-```text
-GET /api/eval/imports
-GET /api/eval/imports/{id}/download
-```
-
-存储根目录可通过环境变量配置：
-
-```bash
-export EVAL_IMPORT_DIRECTORY='/path/to/eval-imports'
-```
-
-健康检查可以访问：
-
-```bash
-curl http://localhost:8080
-```
-
-如果没有根路径接口，看到 404 也说明服务已启动，继续调用业务接口即可。
-
-## 如何导入文档
-
-把 Markdown、UTF-8 文本、HTML、DOCX、PDF、PNG 或 JPEG 文件放到 `docs` 目录：
-
-```text
-docs/
-  spring-ai-notes.md
-  mcp-notes.md
-  rag-notes.md
-```
-
-调用导入接口：
-
-```bash
-curl -X POST http://localhost:8080/api/ingest
-```
-
-也可以使用文档管理接口。单文件导入：
-
-```bash
-curl -X POST http://localhost:8080/api/documents/ingest \
-  -H 'Content-Type: application/json' \
-  -d '{"path":"docs/mcp-notes.md"}'
-```
-
-目录批量导入，默认读取 `docs`：
-
-```bash
-curl -X POST http://localhost:8080/api/documents/ingest-directory
-```
-
-指定目录批量导入：
-
-```bash
-curl -X POST http://localhost:8080/api/documents/ingest-directory \
-  -H 'Content-Type: application/json' \
-  -d '{"path":"docs"}'
-```
-
-强制重新导入单文件：
-
-```bash
-curl -X POST http://localhost:8080/api/documents/ingest \
-  -H 'Content-Type: application/json' \
-  -d '{"path":"docs/mcp-notes.md","force":true}'
-```
-
-完全重建索引：
-
-```bash
-curl -X POST http://localhost:8080/api/documents/rebuild
-```
-
-全局文档导入、目录扫描、同步、重建以及公共文档删除仅允许数据库系统角色为 `ADMIN` 或 `SUPER_ADMIN` 的用户执行。账号 `admin` 固定为最高权限 `SUPER_ADMIN`，应用启动时会自动修正存量 `admin` 的数据库角色；该账号不能通过公开注册接口创建，也不能在用户管理接口中被降级。
-
-旧版本通过环境变量配置的管理员账号仍可平滑迁移，多个账号使用逗号分隔：
-
-```text
-ADMIN_ACCOUNTS=admin,owner@example.com
-```
-
-应用启动时会把 `ADMIN_ACCOUNTS` 中已存在的账号一次性写为数据库 `ADMIN` 角色；之后可以在用户管理页面调整，运行期授权不再依赖环境变量。未配置时，除数据库中已有管理员和固定的 `admin` 超级管理员外，其他普通用户不能执行全局管理操作。普通用户只能枚举公共文档和自己有权访问的空间文档。
-
-### 用户管理
-
-管理员登录后，顶部导航会显示“用户管理”页面：
-
-```text
-GET /api/admin/users
-PUT /api/admin/users/{publicId}/role
-```
-
-- `ADMIN` 和 `SUPER_ADMIN` 可以查看全部用户、账号、公开 ID、注册时间和系统角色。
-- 只有 `SUPER_ADMIN` 可以将其他用户在 `USER` 与 `ADMIN` 之间切换。
-- 不允许通过接口授予第二个 `SUPER_ADMIN`。
-- `admin` 账号永久保持 `SUPER_ADMIN`，不能降级。
-- 用户角色变更会持久化为 `USER_ROLE_CHANGE` 业务审计事件。
-- 当前不提供物理删除用户，避免级联破坏会话、文档、空间成员关系和审计记录。
-
-## 知识空间与成员角色
-
-系统已建立知识空间与成员关系模型：
-
-```text
-WorkspaceType = PERSONAL | TEAM | PUBLIC
-WorkspaceRole = OWNER | EDITOR | VIEWER
-```
-
-用户首次访问空间列表时会自动创建 `personal-<userId>` 个人空间，存量用户不需要单独执行迁移。团队空间可由普通用户创建；公共空间仅允许通过 `ADMIN_ACCOUNTS` 配置的系统管理员创建。
-
-空间 API：
-
-```text
-GET    /api/workspaces
-POST   /api/workspaces/team
-POST   /api/workspaces/public
-GET    /api/workspaces/{workspaceId}/members
-POST   /api/workspaces/{workspaceId}/members
-PUT    /api/workspaces/{workspaceId}/members/{memberPublicId}
-DELETE /api/workspaces/{workspaceId}/members/{memberPublicId}
-GET    /api/workspaces/{workspaceId}/audit-events
-```
-
-创建团队空间：
-
-```json
-{
-  "name": "研发团队"
-}
-```
-
-添加成员：
-
-```json
-{
-  "account": "member@example.com",
-  "role": "EDITOR"
-}
-```
-
-当前成员权限规则：
-
-- `OWNER` 可以添加、移除成员以及修改成员角色。
-- `EDITOR` 和 `VIEWER` 可以查看空间成员，但不能管理成员。
-- 个人空间不能添加其他成员。
-- 不能添加第二个 `OWNER`，也不能降级或移除现有 `OWNER`。
-- 非成员访问空间统一返回空间不存在，避免泄露空间是否存在。
-- 暂不支持所有权转移。
-- 仅 `OWNER` 可以查看当前空间最近 200 条业务审计事件。
-
-文档索引和 Chroma chunk metadata 已增加 `workspaceId` 与 `visibility`。旧数据按安全规则转换：有 owner 的文档归入 `personal-<ownerUserId>` 并设为 `PRIVATE`，无 owner 的文档归入 `public-default` 并设为 `PUBLIC`。
-
-Chroma 相似度查询会在向量库召回阶段强制附加 `ownerUserId`、`workspaceId` 和 `visibility` metadata 过滤，只召回公共文档、当前用户在当前空间的私有文档以及当前空间文档。应用层仍会再次执行相同的可见性校验；Chroma 不可用时，内存回退也会在排序和截断前执行范围过滤。
-
-当前文档可见性规则：
-
-- `PUBLIC`：登录用户可读取和检索。
-- `PRIVATE`：只有 `ownerUserId` 对应用户可读取和检索。
-- `WORKSPACE`：仅对应空间成员可读取和检索。
-
-聊天、流式聊天、检索调试和文档管理请求已接入 `workspaceId`。未传该字段时默认使用用户的 `personal-<userId>` 空间；传入其他空间时，服务会先通过 `workspace_members` 验证成员关系，非成员统一返回 404。
-
-空间上下文传递方式：
-
-```text
-POST /api/workbench/chat                 JSON workspaceId
-POST /api/workbench/chat/stream          JSON workspaceId
-POST /api/rag/chat                       JSON workspaceId
-POST /api/rag/debug                      JSON workspaceId
-GET  /api/documents                      Query workspaceId
-GET  /api/documents/{id}/content         Query workspaceId
-DELETE /api/documents/{id}               Query workspaceId
-```
-
-空间文档权限：
-
-- `PUBLIC` 文档在任意已授权空间上下文中可读取和检索。
-- `PRIVATE` 文档仅在其个人空间中对 owner 可见。
-- `WORKSPACE` 文档仅对对应空间成员可读取和检索。
-- `VIEWER` 不能删除 `WORKSPACE` 文档。
-- `EDITOR` 和 `OWNER` 可以删除当前空间的 `WORKSPACE` 文档。
-- 伪造其他团队的 `workspaceId` 会在检索或文档读取前被拒绝。
-
-前端登录后会初始化个人空间，并在顶部提供个人、团队和公共空间切换器。聊天、SSE、检索调试和文档请求会自动携带当前空间 ID；切换空间时会停止当前流式回答、清空旧空间前端上下文并恢复目标空间的会话历史，避免跨空间混用检索上下文。现有服务器路径导入仍属于管理员全局管理能力。
-
-空间切换器旁提供空间管理入口：所有登录用户可以创建团队空间，空间成员可以查看成员列表；团队和公共空间的 `OWNER` 可以添加成员、在 `EDITOR/VIEWER` 间调整角色、移除非所有者成员，并查看当前空间最近 200 条业务审计事件。公共空间创建仍由管理员 API 控制，前端不会依据客户端状态猜测系统管理员身份。
-
-会话列表、消息读取、停止和删除同样按 `userId + workspaceId` 双重约束。新会话会持久化所属空间；升级前没有 `workspaceId` 的历史会话仅归入该用户个人空间。空间切换后前端只恢复新空间的会话历史。
-
-### 空间文档上传
-
-空间成员可以通过 multipart 接口上传文档：
-
-```text
-POST /api/documents/upload?workspaceId=<workspaceId>
-Content-Type: multipart/form-data
-file=<Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 文件>
-```
-
-上传限制与归属规则：
-
-- `.md`、`.txt`、`.html` 和 `.htm` 必须使用 UTF-8 编码；`.pdf` 支持文本层和扫描页；图片支持 `.png`、`.jpg` 和 `.jpeg`。
-- HTML 仅支持上传文件，不抓取网页 URL；解析时删除脚本、样式及嵌入资源，不执行脚本或加载远程资源，并按标题、正文、列表、代码块和表格的 DOM 顺序建立索引。HTML 预览始终显示清洗后的纯文本，不直接渲染上传内容。
-- PDF 按原始页码解析和引用；文本页使用原生文本层，扫描页以 300 DPI 渲染后执行 OCR，混合 PDF 会逐页选择解析方式。
-- 至少三页的 PDF 会过滤出现在 60% 以上页面中的重复短行，减少文字水印、重复页眉和页脚进入索引；单行页面和短 PDF 会保守保留，避免把缺少证据的正文当作水印删除。
-- PNG 和 JPEG 图片通过 OCR 提取文字，单张图片不能超过 4000 万像素。
-- DOCX 按主文档中的标题、正文、列表和表格顺序解析；不支持旧 `.doc`，也不提取图片文字。
-- 单个知识库文档最大 50 MB。
-- `VIEWER` 不能上传，`EDITOR` 和 `OWNER` 可以上传。
-- 上传到个人空间时自动设为 `PRIVATE`。
-- 上传到团队空间时自动设为 `WORKSPACE`。
-- 上传到公共空间时自动设为 `PUBLIC`。
-- 服务端使用随机存储文件名，客户端原文件名仅用于展示。
-- 磁盘目录按 `docs/workspaces/<workspaceId>/` 隔离。
-- 文档 ID 和 chunk ID 由 `workspaceId + contentHash` 生成；不同空间上传相同内容不会发生 ID 覆盖。
-
-前端知识库页面已经提供“上传到当前空间”入口。删除通过空间上传接口保存的文档时，会先安全删除 `docs/workspaces/<workspaceId>/` 下对应的 UUID 源文件，再删除索引与向量，防止后续同步或重建让已删除文档重新出现。删除路径必须精确匹配当前空间的系统生成文件名，并校验规范化路径与真实路径，拒绝目录穿越和符号链接逃逸。管理员手工维护或全局导入的非 UUID 源文件仍只删除索引与向量，不自动操作磁盘文件。
-
-### 业务审计
-
-系统将以下高风险操作的成功、权限拒绝和执行失败结果持久化到 `audit_events`：
-
-```text
-WORKSPACE_CREATE
-WORKSPACE_MEMBER_ADD
-WORKSPACE_MEMBER_ROLE_CHANGE
-WORKSPACE_MEMBER_REMOVE
-DOCUMENT_UPLOAD
-DOCUMENT_DELETE
-```
-
-审计事件包含操作用户 `publicId`、空间 ID、动作、资源类型与标识、结果、固定失败代码、服务端生成的 `requestId` 和发生时间。审计表不保存账号、成员查询账号、文档正文、上传内容、文件路径、请求体、异常消息、密码、Cookie 或 Token。审计采用独立事务；审计存储故障不会回滚已经完成的业务操作，也不会覆盖原始权限错误响应。
-
-查看已导入文档：
-
-```bash
-curl http://localhost:8080/api/documents
-```
-
-删除文档索引：
-
-```bash
-curl -X DELETE http://localhost:8080/api/documents/<documentId>
-```
-
-出于安全限制，导入路径必须在项目 `docs` 目录下，支持 `.md`、`.txt`、`.docx` 和文本型 `.pdf`。
-
-响应示例：
-
-```json
-{
-  "files": 3,
-  "chunks": 28,
-  "imported": 3,
-  "skipped": 0,
-  "failed": 0,
-  "documents": [
-    {
-      "fileName": "mcp-notes.md",
-      "path": "docs/mcp-notes.md",
-      "documentId": "abc123...",
-      "status": "imported",
-      "chunks": 8,
-      "reason": "Document imported"
-    }
-  ]
-}
-```
-
-含义：
-
-- `files`: 读取到的 `.md`、`.txt`、`.docx` 和 `.pdf` 文件数量。
-- `chunks`: 本次成功导入的 chunk 数量。
-- `imported`: 本次导入的文件数量。
-- `skipped`: 因重复或空文档跳过的文件数量。
-- `failed`: 不支持或失败的文件数量。
-- `documents`: 每个文件的导入明细。
-
-每个 chunk 会保留 metadata：
-
-```json
-{
-  "source": "mcp-notes.md",
-  "path": "docs/mcp-notes.md",
-  "chunkIndex": 0,
-  "title": "MCP Notes"
-}
-```
-
-导入后可以在 Chroma 默认位置找到 collection：
-
-```text
-default_tenant / default_database / knowledge_assistant
-```
-
-查看 Chroma collections：
-
-```bash
-curl http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections
-```
-
-## 如何提问
-
-RAG 问答接口：
-
-```bash
-curl -X POST http://localhost:8080/api/rag/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"default","message":"MCP 是什么？"}'
-```
-
-响应示例：
-
-```json
-{
-  "answer": "MCP 是 Model Context Protocol 的缩写...",
-  "sources": [
-    {
-      "file": "mcp-notes.md",
-      "chunkIndex": 0
-    }
-  ]
-}
-```
-
-多轮追问：
-
-```bash
-curl -X POST http://localhost:8080/api/rag/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"default","message":"那它和 Tool Calling 有什么区别？"}'
-```
-
-`conversationId` 相同的请求会共享会话上下文，系统可以理解“它”指代上一轮提到的 MCP。
-
-空消息会返回固定错误：
-
-```bash
-curl -X POST http://localhost:8080/api/rag/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"default","message":""}'
-```
-
-响应：
-
-```json
-{
-  "error": "message cannot be empty"
-}
-```
-
-## 如何启用搜索
-
-当前项目的搜索入口是 `WebSearchService`。策略是：
-
-```text
-先 RAG
-如果 RAG 没有结果或上下文不足
-再 Search
-搜索结果进入 Prompt
-回答中标明来自 Web
-```
-
-示例：
-
-```bash
-curl -X POST http://localhost:8080/api/rag/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"default","message":"Spring AI 2.0 MCP 有哪些新特性？"}'
-```
-
-响应会包含类似：
-
-```json
-{
-  "answer": "知识库没有足够信息，我将使用搜索工具...\n\n...\n\n来自 Web",
-  "sources": [
-    {
-      "file": "Web: https://docs.spring.io/spring-ai/reference/api/mcp/",
-      "chunkIndex": -1
-    }
-  ]
-}
-```
-
-目前 `WebSearchService` 是本地搜索工具占位实现。要接真实搜索服务，可以把它替换为：
-
-- Tavily
-- Bing Search
-- SerpAPI
-- 自建搜索 API
-- MCP search tool
-
-替换位置：
-
-```text
-src/main/java/com/example/workbench/tools/WebSearchService.java
-```
-
-保持返回模型不变即可：
-
-```java
-public record WebSearchResult(
-        String title,
-        String url,
-        String snippet
-) {
-}
-```
-
-## 工具调用日志
-
-项目会记录工具调用原因和 confidence。
-
-## Log4j2 日志
-
-项目使用 Log4j2 输出后端日志，配置文件在：
-
-```text
-src/main/resources/log4j2-spring.xml
-```
-
-控制台日志格式包含时间、级别、线程、logger 和消息：
-
-```text
-2026-07-24 19:20:00.123 INFO  [http-nio-8080-exec-1] c.e.w.config.HttpRequestLoggingFilter - HTTP request completed requestId=... method=POST path=/api/workbench/chat status=200 durationMs=1234
-```
-
-API 请求日志会按日期和接口路径拆分文件：
-
-```text
-logs/2026-07-24/api_workbench_chat.log
-logs/2026-07-24/api_documents_ingest.log
-logs/2026-07-24/api_documents.log
-```
-
-同时保留全局应用日志和全局错误日志：
-
-```text
-logs/my-knowledge-assistant.log
-logs/my-knowledge-assistant-error.log
-```
-
-全局日志记录应用启动、Spring/Tomcat 日志、业务日志和 API 请求日志；接口路径日志只记录 `HttpRequestLoggingFilter` 产生的 HTTP 请求/响应摘要。
-
-每条 API 日志包含：
-
-- `requestId`
-- HTTP method
-- path
-- status
-- durationMs
-- query 参数
-- JSON body 请求参数 `requestBody`
-- JSON body 返回参数 `responseBody`
-
-模型调用日志会记录：
-
-- `primaryModel` 和 `fallbackModels`
-- `requestTimeoutMs`
-- `retryMaxAttempts` 和 `retryBackoffMs`
-- `fallbackStrategy`
-- 实际调用的 `model` 和 `responseModel`
-- 模型返回 `responseId`
-- `finishReason`
-- token usage：`promptTokens`、`completionTokens`、`totalTokens`
-- 结构化错误：`errorType`、`httpStatus`、`exceptionClass`、`rootCauseClass`
-- 是否可重试：`retryable`、`willRetry`、`willSwitchModel`
-
-示例：
-
-```text
-AI model call completed provider=openai-compatible model=gpt-5.5 responseModel=gpt-5.5 responseId=chatcmpl-... conversationId=default attempt=1 finishReason=stop promptTokens=1024 completionTokens=256 totalTokens=1280 answerLength=512 durationMs=1180
-AI model call failed provider=openai-compatible model=gpt-5.5 conversationId=default attempt=1 maxAttempts=2 durationMs=30000 errorType=timeout httpStatus=null exceptionClass=AiModelCallException rootCauseClass=TimeoutException retryable=true willRetry=true willSwitchModel=false fallbackStrategy=local-answer errorMessage=AI model request timed out after 30000ms responseBody=
-```
-
-SSE 流式接口不缓存返回流，`responseBody` 会记录为 `<streaming response not captured>`，避免影响流式输出。
-
-示例：
-
-```text
-2026-07-24 19:30:00.123 INFO [http-nio-8080-exec-1] requestId=abc c.e.w.config.HttpRequestLoggingFilter - HTTP request completed requestId=abc method=POST path=/api/documents/ingest status=200 durationMs=45 query= requestBody={"path":"docs/mcp-notes.md"} responseBody={"imported":1,"skipped":0,"failed":0}
-```
-
-日志会自动脱敏常见敏感字段，例如 `apiKey`、`authorization`、`token`、`password`、`secret`。
-
-日志会按日期和大小滚动，归档到：
-
-```text
-logs/2026-07-24/archive/
-```
-
-示例日志：
-
-```text
-Tool call: tool=RAG, reason=用户要求总结知识库内容，需要先检索相关文档, confidence=0.92
-Tool call: tool=judge, reason=检查总结是否基于检索上下文, confidence=0.86
-```
-
-实现位置：
-
-```text
-src/main/java/com/example/workbench/advisor/ToolCallLogger.java
-```
-
-## 目录说明
-
-```text
-docs/      知识库源文档
-src/       Spring Boot 应用源码
-frontend/  Vue 前端源码
+src/main/java/com/example/workbench/  后端领域代码
+src/main/resources/                  配置、日志和数据库迁移
+src/test/java/                       后端测试
+frontend/src/                        Vue 前端
+eval/                                 评测数据、模板和确定性评测脚本
+docs/                                 知识库源文档和设计资料
+.github/workflows/                   CI 和真实模型评测工作流
 ```
 
 ## 常见问题
 
-如果启动时报 Chroma collection 不存在，确认 Chroma 正在运行，并重启应用。项目会自动创建：
+### Chroma collection 不存在
 
-```text
-default_tenant / default_database / knowledge_assistant
-```
+确认 Chroma 地址、租户、数据库和 collection 配置正确，并确认应用拥有创建 collection 的权限。默认 collection 名称为 `knowledge_assistant`。
 
-如果 IntelliJ 仍使用旧 class，执行：
+### 模型调用失败
 
-```text
-Build -> Rebuild Project
-```
+确认 PostgreSQL、Chroma、聊天模型 API Key、Embedding API Key 和 OpenAI-compatible base URL 均正确。应用会在可配置范围内重试或使用本地保守回答，但这不代表外部模型配置已经正常。
 
-如果模型调用失败，应用会 fallback 到本地占位回答，并打印 warn 日志。
+### OCR 失败
+
+确认 `tesseract --version` 可执行，并安装 `chi_sim` 和 `eng` 语言包。超长 PDF 还需要检查页数、OCR 页数、页面尺寸和像素限制。
+
+### 前端请求了错误的后端
+
+检查 `frontend/vite.config.js` 的代理目标。当前代理目标不是由 `VITE_*` 环境变量自动控制；需要修改配置文件后重启 Vite。

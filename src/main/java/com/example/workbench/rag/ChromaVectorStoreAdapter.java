@@ -29,7 +29,6 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     private final ObjectProvider<ChromaVectorStoreProperties> chromaPropertiesProvider;
     private final InMemoryVectorStore fallbackVectorStore;
     private final Optional<PostgresSparseRetriever> sparseRetriever;
-    private List<String> currentDocumentIds = List.of();
 
     @Autowired
     public ChromaVectorStoreAdapter(
@@ -63,7 +62,6 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         fallbackVectorStore.clear();
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
-            currentDocumentIds = List.of();
             sparseRetriever.ifPresent(PostgresSparseRetriever::clear);
             return;
         }
@@ -71,7 +69,6 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         try {
             // 全量重建不能依赖当前进程记住的 ID；按写入时必备的 id metadata 清除集合内全部项目向量。
             chromaVectorStore.delete(new FilterExpressionBuilder().ne("id", "").build());
-            currentDocumentIds = List.of();
             sparseRetriever.ifPresent(PostgresSparseRetriever::clear);
         } catch (RuntimeException exception) {
             throw new IllegalStateException("Failed to clear all documents from Chroma", exception);
@@ -99,13 +96,6 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     @Override
     public void addAll(List<SourceDocument> documents) {
         fallbackVectorStore.addAll(documents);
-        currentDocumentIds = java.util.stream.Stream.concat(
-                        currentDocumentIds.stream(),
-                        documents.stream().map(SourceDocument::id)
-                )
-                .distinct()
-                .toList();
-
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
             log.warn("Spring AI Chroma VectorStore is not available, using in-memory vector store only");

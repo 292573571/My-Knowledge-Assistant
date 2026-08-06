@@ -13,7 +13,6 @@ interface DocumentTaskRepository extends JpaRepository<DocumentTaskEntity, Strin
     List<DocumentTaskEntity> findTop20ByWorkspaceIdOrderByCreatedAtDesc(String workspaceId);
     List<DocumentTaskEntity> findByStatusInAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
             Collection<DocumentTaskStatus> statuses, Instant nextAttemptAt);
-    List<DocumentTaskEntity> findByStatus(DocumentTaskStatus status);
     List<DocumentTaskEntity> findByStatusAndWorkerId(DocumentTaskStatus status, String workerId);
     java.util.Optional<DocumentTaskEntity> findByClientRequestIdAndActorUserIdAndWorkspaceId(
             String clientRequestId, String actorUserId, String workspaceId);

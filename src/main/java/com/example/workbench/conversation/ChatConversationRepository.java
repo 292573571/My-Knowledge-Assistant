@@ -7,9 +7,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface ChatConversationRepository extends JpaRepository<ChatConversation, String> {
-    List<ChatConversation> findByUserIdOrderByUpdatedAtDesc(Long userId);
-    Optional<ChatConversation> findByIdAndUserId(String id, Long userId);
-
     @Query("select c from ChatConversation c where c.user.id = :userId and "
             + "(c.workspaceId = :workspaceId or (c.workspaceId is null and :workspaceId = :personalWorkspaceId)) "
             + "order by c.updatedAt desc")
