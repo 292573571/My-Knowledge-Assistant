@@ -4,6 +4,7 @@ import { formatApiError } from '../api/apiError'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
+import MaintenanceAgentPanel from './MaintenanceAgentPanel.vue'
 
 const props = defineProps({
   workspace: { type: Object, default: null }
@@ -210,6 +211,7 @@ async function confirmMaintenance() {
     </section>
 
     <div v-if="activeTool === 'maintenance'" class="maintenance-sections">
+      <MaintenanceAgentPanel :workspace="workspace" />
       <section class="maintenance-section maintenance-index-section">
         <header class="maintenance-section-heading">
           <div>

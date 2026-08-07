@@ -2057,6 +2057,9 @@ textarea:focus-visible,
 }
 
 @media (max-width: 760px) {
+  .maintenance-agent-header { display: grid; }
+  .maintenance-agent-form { grid-template-columns: 1fr; }
+  .maintenance-agent-form button { width: 100%; }
   .document-rebuild-status { padding: 14px; }
   .document-rebuild-counts { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .document-rebuild-counts > div { border-bottom: 1px solid rgba(154,174,225,.45); }
@@ -2739,6 +2742,34 @@ textarea:focus-visible,
 .maintenance-message { display: grid; gap: 4px; margin: 0 0 12px; border: 1px solid #bde5d1; border-radius: 10px; padding: 11px 13px; color: #267052; background: #eefaf4; font-size: 12px; }
 .maintenance-message.error { border-color: #efc9cc; color: #a33e47; background: #fff3f4; }
 .maintenance-message small { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.maintenance-agent-panel { display: grid; gap: 14px; border: 1px solid #cfdcf7; border-radius: 16px; padding: 18px; background: radial-gradient(circle at 92% 0, rgba(101,132,238,.13), transparent 18rem), linear-gradient(135deg,#fbfcff,#f2f6ff); box-shadow: 0 8px 24px rgba(47,66,105,.05); }
+.maintenance-agent-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.maintenance-agent-heading { display: flex; align-items: flex-start; gap: 12px; }
+.maintenance-agent-heading h2 { margin: 0; color: #263552; font-size: 19px; letter-spacing: -.02em; }
+.maintenance-agent-heading > div > span { display: block; margin-top: 4px; color: #8491a5; font-size: 11px; }
+.maintenance-agent-mark { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; border-radius: 12px; color: #fff; background: linear-gradient(145deg,#607ee1,#3856bd); box-shadow: 0 7px 14px rgba(56,86,189,.2); }
+.maintenance-agent-mark svg { width: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.65; }
+.maintenance-agent-badge { border: 1px solid #b9dcca; border-radius: 999px; padding: 6px 9px; color: #287452; background: #edf9f2; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.maintenance-agent-suggestions { display: flex; flex-wrap: wrap; gap: 7px; }
+.maintenance-agent-suggestions button { border: 1px solid #d1dcf1; border-radius: 999px; padding: 7px 10px; color: #54698f; background: rgba(255,255,255,.76); font-size: 11px; }
+.maintenance-agent-suggestions button:hover { border-color: #8ca6e9; color: #315fc9; background: #fff; }
+.maintenance-agent-form { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 9px; align-items: end; }
+.maintenance-agent-form textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #cbd7ea; border-radius: 10px; padding: 10px 11px; outline: 0; color: #33445f; background: rgba(255,255,255,.9); font: inherit; font-size: 12px; line-height: 1.5; }
+.maintenance-agent-form textarea:focus { border-color: #6b87e4; box-shadow: 0 0 0 3px rgba(71,105,210,.1); }
+.maintenance-agent-form button { border: 0; border-radius: 9px; padding: 10px 15px; color: #fff; background: #3d63d8; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.maintenance-agent-form button:disabled, .maintenance-agent-suggestions button:disabled { cursor: wait; opacity: .55; }
+.maintenance-agent-error { margin: 0; border: 1px solid #efc9cc; border-radius: 9px; padding: 9px 11px; color: #a33e47; background: #fff3f4; font-size: 12px; }
+.maintenance-agent-answer { border: 1px solid #dce5f2; border-radius: 11px; padding: 13px; background: #fff; }
+.maintenance-agent-answer header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; color: #3b57ad; font-size: 11px; font-weight: 800; }
+.maintenance-agent-answer header small { color: #8a96aa; font-size: 10px; font-weight: 500; }
+.maintenance-agent-answer > p { margin: 0; color: #44536c; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.maintenance-agent-trace { margin-top: 11px; border-top: 1px solid #edf0f5; padding-top: 9px; }
+.maintenance-agent-trace > button { border: 0; padding: 0; color: #5a70bd; background: transparent; font-size: 10px; font-weight: 750; }
+.maintenance-agent-trace ul { display: grid; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }
+.maintenance-agent-trace li { display: flex; justify-content: space-between; gap: 10px; border-radius: 6px; padding: 6px 8px; color: #60718d; background: #f6f8fc; font-size: 10px; }
+.maintenance-agent-trace li span { font-weight: 800; }
+.maintenance-agent-trace li span.succeeded { color: #2d8a62; }
+.maintenance-agent-trace li span.failed, .maintenance-agent-trace li span.rejected { color: #b24d57; }
 .maintenance-tabs { display: flex; gap: 5px; width: fit-content; margin: 0 0 14px; border: 1px solid #dce4f0; border-radius: 10px; padding: 4px; background: #eef2f7; }
 .maintenance-tabs button { display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 7px; padding: 8px 12px; color: #718097; background: transparent; font-size: 12px; font-weight: 750; }
 .maintenance-tabs button:hover { color: #405779; }
