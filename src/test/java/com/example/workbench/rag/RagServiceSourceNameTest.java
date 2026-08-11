@@ -45,4 +45,25 @@ class RagServiceSourceNameTest {
 
         assertThat(service.originalSourceFileName(source, List.of(indexed))).isEqualTo("redis-cache.pdf");
     }
+
+    @Test
+    void prefersOriginalNameFromExactPhysicalPathWhenOldIndexAlsoMatchesDocumentId() {
+        RagService service = new RagService(mock(DocumentIngestionService.class), mock(VectorStore.class),
+                mock(LocalChatClient.class), new ConversationMemory(), mock(WebSearchService.class),
+                new RagQualityGate(mock(LocalChatClient.class), false), true, 5, 0.85, "distance",
+                false, false, 3, false, false);
+        String storageName = "636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf";
+        String path = "docs/workspaces/d574059c-1a50-49af-904a-494a3c044d9f/" + storageName;
+        SourceDocument source = new SourceDocument("chunk", "content", "Agent", storageName, path, 20,
+                "shared-id", storageName, "hash", 0.64, "", 0, 0, 7, "pdf-page", "SOURCE",
+                "user-1", "workspace-a", DocumentVisibility.WORKSPACE, 20);
+        DocumentIndexEntry old = new DocumentIndexEntry("shared-id", storageName, "legacy/old.pdf", "old-hash",
+                1, 1L, "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
+        DocumentIndexEntry current = new DocumentIndexEntry("new-id", "AI-Agents-in-Depth-zh-CN.pdf", path,
+                "new-hash", 598, 2L, "SOURCE", "INDEXED", "user-1", "workspace-a",
+                DocumentVisibility.WORKSPACE);
+
+        assertThat(service.originalSourceFileName(source, List.of(old, current)))
+                .isEqualTo("AI-Agents-in-Depth-zh-CN.pdf");
+    }
 }

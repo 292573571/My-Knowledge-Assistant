@@ -45,6 +45,7 @@ public class DocumentIngestionService {
     private final Path docsDirectory;
     private final int pdfBatchPages;
     private DocumentTaskBatchArtifactStore batchArtifactStore;
+    private DocumentTaskRepository documentTaskRepository;
 
     /**
      * 注入异步任务批次产物存储。
@@ -54,6 +55,11 @@ public class DocumentIngestionService {
     @Autowired(required = false)
     public void setBatchArtifactStore(DocumentTaskBatchArtifactStore batchArtifactStore) {
         this.batchArtifactStore = batchArtifactStore;
+    }
+
+    @Autowired(required = false)
+    public void setDocumentTaskRepository(DocumentTaskRepository documentTaskRepository) {
+        this.documentTaskRepository = documentTaskRepository;
     }
 
     @Autowired
@@ -698,7 +704,7 @@ public class DocumentIngestionService {
         Map<String, String> originalNamesByPath = existingEntries.stream()
                 .collect(Collectors.toMap(
                         entry -> entry.path().replace('\\', '/'),
-                        DocumentIndexEntry::fileName,
+                        entry -> originalFileName(entry.path(), access.workspaceId(), entry.fileName()),
                         (left, right) -> left));
         List<Path> sources = new ArrayList<>(existingSources);
         for (Path source : supportedFiles(workspaceDirectory(access))) {
@@ -896,7 +902,8 @@ public class DocumentIngestionService {
         for (Path file : files) {
             String relativePath = workspaceRelativePath(file);
             DocumentIndexEntry existing = entriesByPath.get(relativePath);
-            String originalFileName = existing == null ? file.getFileName().toString() : existing.fileName();
+            String originalFileName = originalFileName(relativePath, access.workspaceId(),
+                    existing == null ? file.getFileName().toString() : existing.fileName());
             IngestedFile candidate = ingestWorkspaceFile(file, originalFileName, access);
             if (candidate.indexEntry() == null) {
                 if (existing != null) {
@@ -1247,6 +1254,16 @@ public class DocumentIngestionService {
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access) {
         return ingestWorkspaceFile(path, originalFileName, access, (stage, progress) -> { });
+    }
+
+    private String originalFileName(String sourcePath, String workspaceId, String fallback) {
+        if (documentTaskRepository == null) return fallback;
+        return documentTaskRepository
+                .findFirstBySourcePathAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
+                        sourcePath.replace('\\', '/'), workspaceId, DocumentTaskType.UPLOAD)
+                .map(DocumentTaskEntity::getFileName)
+                .filter(name -> name != null && !name.isBlank())
+                .orElse(fallback);
     }
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,

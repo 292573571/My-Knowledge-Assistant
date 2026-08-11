@@ -1684,14 +1684,22 @@ public class RagService {
             return displayFileName(source);
         }
         String normalizedPath = source.path() == null ? "" : source.path().replace('\\', '/');
+        String sourceName = source.source() == null ? "" : source.source().replace('\\', '/');
         String sourceFileName = source.fileName() == null ? "" : source.fileName().replace('\\', '/');
-        String sourceBaseName = baseName(sourceFileName.isBlank() ? normalizedPath : sourceFileName);
+        java.util.Set<String> storageNames = java.util.stream.Stream.of(
+                        baseName(normalizedPath), baseName(sourceName), baseName(sourceFileName))
+                .filter(name -> name != null && !name.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
         String exactMatch = indexedDocuments.stream()
-                .filter(entry -> entry.documentId().equals(source.documentId())
-                        || (!source.contentHash().isBlank() && entry.contentHash().equals(source.contentHash()))
-                        || entry.path().replace('\\', '/').equals(normalizedPath)
-                        || baseName(entry.path()).equals(sourceBaseName))
-                .map(DocumentIndexEntry::fileName)
+                .filter(entry -> !looksLikeGeneratedStorageName(entry.fileName()))
+                .map(entry -> new java.util.AbstractMap.SimpleImmutableEntry<>(entry, sourceMatchScore(
+                        source, entry, normalizedPath, storageNames)))
+                .filter(candidate -> candidate.getValue() > 0)
+                .sorted(java.util.Comparator
+                        .<java.util.Map.Entry<DocumentIndexEntry, Integer>>comparingInt(java.util.Map.Entry::getValue)
+                        .reversed()
+                        .thenComparing(candidate -> candidate.getKey().ingestedAt(), java.util.Comparator.reverseOrder()))
+                .map(candidate -> candidate.getKey().fileName())
                 .findFirst()
                 .orElse(null);
         if (exactMatch != null) {
@@ -1712,20 +1720,18 @@ public class RagService {
 
         // 兼容旧版向量 metadata：旧版可能只保留了上传文件被改名后的 UUID 文件名。
         // 此时 documentId、hash 或完整 path 可能已经不一致，但 workspace 目录中的 UUID 文件名仍可对应。
-        String generatedName = generatedStorageName(sourceBaseName) ? sourceBaseName : baseName(normalizedPath);
-        if (generatedStorageName(generatedName)) {
-            String generatedStem = generatedName.substring(0, generatedName.lastIndexOf('.'));
-            String legacyMatch = indexedDocuments.stream()
-                    .filter(entry -> generatedStem.equalsIgnoreCase(storageStem(baseName(entry.path())))
-                            || generatedStem.equalsIgnoreCase(storageStem(entry.fileName())))
-                    .map(DocumentIndexEntry::fileName)
-                    .findFirst()
-                    .orElse(null);
-            if (legacyMatch != null) {
-                return legacyMatch;
-            }
-        }
         return displayFileName(source);
+    }
+
+    private int sourceMatchScore(SourceDocument source, DocumentIndexEntry entry, String normalizedPath,
+                                 java.util.Set<String> storageNames) {
+        String entryPath = entry.path().replace('\\', '/');
+        if (!normalizedPath.isBlank() && entryPath.equalsIgnoreCase(normalizedPath)) return 100;
+        if (storageNames.stream().anyMatch(name -> name.equalsIgnoreCase(baseName(entryPath)))) return 90;
+        if (source.documentId() != null && entry.documentId().equals(source.documentId())) return 80;
+        if (source.contentHash() != null && !source.contentHash().isBlank()
+                && entry.contentHash().equals(source.contentHash())) return 70;
+        return 0;
     }
 
     private String displayFileName(SourceDocument source) {
@@ -1745,16 +1751,6 @@ public class RagService {
     private boolean looksLikeGeneratedStorageName(String fileName) {
         return fileName.matches("(?i)[0-9a-f]{8}-[0-9a-f-]{27,}\\.[a-z0-9]+")
                 || fileName.matches("(?i)[0-9a-f]{16}\\.[a-z0-9]+");
-    }
-
-    private boolean generatedStorageName(String fileName) {
-        return fileName != null && looksLikeGeneratedStorageName(fileName);
-    }
-
-    private String storageStem(String fileName) {
-        if (fileName == null) return "";
-        int dot = fileName.lastIndexOf('.');
-        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     private List<RagSource> toWebSources(List<WebSearchResult> webResults) {
