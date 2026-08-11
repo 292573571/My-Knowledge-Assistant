@@ -94,18 +94,48 @@ class RagServiceHybridRetrievalTest {
         assertThat(response.get(2, TimeUnit.SECONDS).candidates()).isEmpty();
     }
 
+    @Test
+    void expandsPdfContextAcrossAdjacentPageBoundary() {
+        VectorStore vectorStore = mock(VectorStore.class);
+        SparseRetriever sparseRetriever = mock(SparseRetriever.class);
+        SourceDocument matched = pdfSource("redis", 3, 8, "1. 缓存雪崩及解决方案");
+        SourceDocument nextPage = pdfSource("redis", 4, 9, "2. 缓存击穿及解决方案");
+        when(sparseRetriever.adjacent("redis", 3, "user-1", "workspace-a"))
+                .thenReturn(List.of(nextPage));
+
+        RagService service = service(vectorStore, sparseRetriever, true, 5);
+        service.debugRetrieval("redis缓存", "user-1", "workspace-a");
+
+        assertThat(service.expandAdjacent(List.of(matched)))
+                .extracting(SourceDocument::content)
+                .containsExactly("1. 缓存雪崩及解决方案", "2. 缓存击穿及解决方案");
+    }
+
     private RagService service(VectorStore vectorStore, SparseRetriever sparseRetriever) {
+        return service(vectorStore, sparseRetriever, false, 2);
+    }
+
+    private RagService service(VectorStore vectorStore, SparseRetriever sparseRetriever,
+                               boolean adjacentEnabled, int maxChunksPerDocument) {
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
         beanFactory.addBean("sparseRetriever", sparseRetriever);
         LocalChatClient chatClient = mock(LocalChatClient.class);
         return new RagService(mock(DocumentIngestionService.class), vectorStore, chatClient,
                 new ConversationMemory(), mock(WebSearchService.class), new RagQualityGate(chatClient, false),
                 true, 5, 0.85, "distance", false, false, 3, false, false,
-                beanFactory.getBeanProvider(SparseRetriever.class), true, 60, 3000, 2, false);
+                beanFactory.getBeanProvider(SparseRetriever.class), true, 60, 4500,
+                maxChunksPerDocument, adjacentEnabled);
     }
 
     private SourceDocument source(String id, String content, double score) {
         return new SourceDocument(id, content, id, id + ".md", "docs/" + id + ".md", 0).withScore(score);
+    }
+
+    private SourceDocument pdfSource(String documentId, int chunkIndex, int pageNumber, String content) {
+        return new SourceDocument(documentId + "-" + chunkIndex, content, "Redis", "redis.pdf",
+                "docs/redis.pdf", chunkIndex, documentId, "redis.pdf", "hash", 0.3, "", 0,
+                chunkIndex * 100, chunkIndex * 100 + content.length(), "pdf-page", "SOURCE", "user-1",
+                "workspace-a", com.example.workbench.workspace.DocumentVisibility.PRIVATE, pageNumber);
     }
 
     private List<SourceDocument> awaitOtherRetriever(CountDownLatch bothStarted, CountDownLatch release)
