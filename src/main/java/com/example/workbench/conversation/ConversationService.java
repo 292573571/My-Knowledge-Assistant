@@ -5,6 +5,7 @@ import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.rag.DocumentIndexEntry;
 import com.example.workbench.rag.DocumentIngestionService;
+import com.example.workbench.rag.DocumentDisplayNameResolver;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -26,6 +27,7 @@ public class ConversationService {
     private final ConversationExecutionRegistry executionRegistry;
     private final ObjectMapper objectMapper;
     private final DocumentIngestionService documentIngestionService;
+    private final DocumentDisplayNameResolver displayNameResolver;
 
     public ConversationService(
             ChatConversationRepository conversationRepository,
@@ -33,7 +35,8 @@ public class ConversationService {
             ConversationMemory conversationMemory,
             ConversationExecutionRegistry executionRegistry,
             ObjectMapper objectMapper,
-            DocumentIngestionService documentIngestionService
+            DocumentIngestionService documentIngestionService,
+            DocumentDisplayNameResolver displayNameResolver
     ) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -41,6 +44,7 @@ public class ConversationService {
         this.executionRegistry = executionRegistry;
         this.objectMapper = objectMapper;
         this.documentIngestionService = documentIngestionService;
+        this.displayNameResolver = displayNameResolver;
     }
 
     /**
@@ -53,7 +57,7 @@ public class ConversationService {
             ConversationExecutionRegistry executionRegistry,
             ObjectMapper objectMapper
     ) {
-        this(conversationRepository, messageRepository, conversationMemory, executionRegistry, objectMapper, null);
+        this(conversationRepository, messageRepository, conversationMemory, executionRegistry, objectMapper, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -174,7 +178,7 @@ public class ConversationService {
      * 读取历史时按当前索引表的路径恢复原始文件名，避免旧引用永久显示 UUID。
      */
     private JsonNode normalizeSources(JsonNode sources, String workspaceId) {
-        if (sources == null || !sources.isArray() || documentIngestionService == null) return sources;
+        if (sources == null || !sources.isArray() || documentIngestionService == null || displayNameResolver == null) return sources;
         List<DocumentIndexEntry> entries = documentIngestionService.listIndexedDocuments().stream()
                 .filter(entry -> workspaceId == null || workspaceId.isBlank() || workspaceId.equals(entry.workspaceId()))
                 .toList();
@@ -185,26 +189,11 @@ public class ConversationService {
                 continue;
             }
             ObjectNode copy = source.deepCopy();
-            String file = text(copy, "file");
-            String path = text(copy, "path").replace('\\', '/');
-            String displayName = entries.stream()
-                    .filter(entry -> sameFile(entry, file, path))
-                    .map(DocumentIndexEntry::fileName)
-                    .findFirst()
-                    .orElse(null);
+            String displayName = displayNameResolver.resolve(text(copy, "file"), text(copy, "path"), workspaceId, entries);
             if (displayName != null && !displayName.isBlank()) copy.put("file", displayName);
             normalized.add(copy);
         }
         return normalized;
-    }
-
-    private boolean sameFile(DocumentIndexEntry entry, String file, String path) {
-        String entryPath = entry.path().replace('\\', '/');
-        String entryBase = baseName(entryPath);
-        String sourceBase = baseName(path.isBlank() ? file : path);
-        return entryBase.equalsIgnoreCase(sourceBase)
-                || entry.fileName().equalsIgnoreCase(file)
-                || entry.documentId().equals(file);
     }
 
     private String text(ObjectNode node, String field) {
@@ -212,10 +201,6 @@ public class ConversationService {
         return value == null || value.isNull() ? "" : value.asText("");
     }
 
-    private String baseName(String path) {
-        int slash = path.lastIndexOf('/');
-        return slash < 0 ? path : path.substring(slash + 1);
-    }
 
     private String json(Object value) {
         try {

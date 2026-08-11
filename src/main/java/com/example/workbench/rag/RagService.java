@@ -80,6 +80,7 @@ public class RagService {
     private final int maxChunksPerDocument;
     private final boolean adjacentEnabled;
     private final DocumentTaskRepository documentTaskRepository;
+    private final DocumentDisplayNameResolver displayNameResolver;
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private RagMetrics metrics;
@@ -117,7 +118,8 @@ public class RagService {
             @Value("${workbench.rag.context.max-tokens:4500}") int contextMaxTokens,
             @Value("${workbench.rag.context.max-chunks-per-document:5}") int maxChunksPerDocument,
             @Value("${workbench.rag.context.adjacent-enabled:true}") boolean adjacentEnabled,
-            DocumentTaskRepository documentTaskRepository
+            DocumentTaskRepository documentTaskRepository,
+            DocumentDisplayNameResolver displayNameResolver
     ) {
         this.documentIngestionService = documentIngestionService;
         this.vectorStore = vectorStore;
@@ -141,6 +143,7 @@ public class RagService {
         this.maxChunksPerDocument = Math.max(1, maxChunksPerDocument);
         this.adjacentEnabled = adjacentEnabled;
         this.documentTaskRepository = documentTaskRepository;
+        this.displayNameResolver = displayNameResolver;
     }
 
     RagService(
@@ -154,7 +157,7 @@ public class RagService {
                 retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
                 multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory().getBeanProvider(SparseRetriever.class),
-                false, 60, 3000, 2, false, null);
+                false, 60, 3000, 2, false, null, null);
     }
 
     /** 保留混合检索测试和轻量调用方使用的完整旧构造器。 */
@@ -170,7 +173,7 @@ public class RagService {
                 retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
                 multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
                 sparseRetrieverProvider, hybridEnabled, rrfK, contextMaxTokens, maxChunksPerDocument,
-                adjacentEnabled, null);
+                adjacentEnabled, null, null);
     }
 
     public RagChatResponse chat(RagChatRequest request) {
@@ -1667,7 +1670,7 @@ public class RagService {
         List<DocumentIndexEntry> indexedDocuments = documentIngestionService.listIndexedDocuments();
         return sources.stream()
                 .map(source -> new RagSource(
-                        originalSourceFileName(source, indexedDocuments),
+                        displayNameResolver == null ? source.fileName() : displayNameResolver.resolve(source, indexedDocuments),
                         source.chunkIndex(),
                         snippet(source.content()),
                         source.score(),
@@ -1680,6 +1683,11 @@ public class RagService {
     }
 
     String originalSourceFileName(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
+        String sourceTitle = source.title() == null ? "" : source.title().strip();
+        if (!sourceTitle.isBlank() && !looksLikeGeneratedStorageName(sourceTitle)
+                && sourceTitle.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+            return sourceTitle;
+        }
         if (indexedDocuments == null || indexedDocuments.isEmpty()) {
             return displayFileName(source);
         }
@@ -1728,6 +1736,10 @@ public class RagService {
         String entryPath = entry.path().replace('\\', '/');
         if (!normalizedPath.isBlank() && entryPath.equalsIgnoreCase(normalizedPath)) return 100;
         if (storageNames.stream().anyMatch(name -> name.equalsIgnoreCase(baseName(entryPath)))) return 90;
+        if (storageNames.stream().anyMatch(this::looksLikeGeneratedStorageName)
+                && storageNames.stream().anyMatch(name -> generatedStem(name).equalsIgnoreCase(generatedStem(baseName(entryPath))))) {
+            return 95;
+        }
         if (source.documentId() != null && entry.documentId().equals(source.documentId())) return 80;
         if (source.contentHash() != null && !source.contentHash().isBlank()
                 && entry.contentHash().equals(source.contentHash())) return 70;
@@ -1735,12 +1747,18 @@ public class RagService {
     }
 
     private String displayFileName(SourceDocument source) {
+        if (source.title() != null && !source.title().isBlank()
+                && !looksLikeGeneratedStorageName(source.title())
+                && source.title().contains(".")) {
+            return source.title();
+        }
         if (source.fileName() != null && !source.fileName().isBlank()
                 && !looksLikeGeneratedStorageName(source.fileName())) {
             return source.fileName();
         }
         String path = source.path() == null ? "" : source.path().replace('\\', '/');
-        return path.isBlank() ? source.fileName() : baseName(path);
+        if (!path.isBlank() && !looksLikeGeneratedStorageName(baseName(path))) return baseName(path);
+        return "知识库文档";
     }
 
     private String baseName(String path) {
@@ -1749,8 +1767,15 @@ public class RagService {
     }
 
     private boolean looksLikeGeneratedStorageName(String fileName) {
+        if (fileName == null || fileName.isBlank()) return false;
         return fileName.matches("(?i)[0-9a-f]{8}-[0-9a-f-]{27,}\\.[a-z0-9]+")
                 || fileName.matches("(?i)[0-9a-f]{16}\\.[a-z0-9]+");
+    }
+
+    private String generatedStem(String fileName) {
+        if (fileName == null) return "";
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     private List<RagSource> toWebSources(List<WebSearchResult> webResults) {

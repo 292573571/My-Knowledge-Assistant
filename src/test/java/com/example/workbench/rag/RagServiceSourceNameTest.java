@@ -66,4 +66,34 @@ class RagServiceSourceNameTest {
         assertThat(service.originalSourceFileName(source, List.of(old, current)))
                 .isEqualTo("AI-Agents-in-Depth-zh-CN.pdf");
     }
+
+    @Test
+    void neverUsesUuidAsCitationWhenSourceCarriesOriginalPdfTitle() {
+        RagService service = new RagService(mock(DocumentIngestionService.class), mock(VectorStore.class),
+                mock(LocalChatClient.class), new ConversationMemory(), mock(WebSearchService.class),
+                new RagQualityGate(mock(LocalChatClient.class), false), true, 5, 0.85, "distance",
+                false, false, 3, false, false);
+        SourceDocument source = new SourceDocument("chunk", "content", "AI-Agents-in-Depth-zh-CN.pdf",
+                "636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf", "unknown", 1);
+
+        assertThat(service.originalSourceFileName(source, List.of()))
+                .isEqualTo("AI-Agents-in-Depth-zh-CN.pdf");
+    }
+
+    @Test
+    void mapsUuidVectorNameToOriginalNameUsingCurrentIndexedPath() {
+        RagService service = new RagService(mock(DocumentIngestionService.class), mock(VectorStore.class),
+                mock(LocalChatClient.class), new ConversationMemory(), mock(WebSearchService.class),
+                new RagQualityGate(mock(LocalChatClient.class), false), true, 5, 0.85, "distance",
+                false, false, 3, false, false);
+        String uuidFile = "636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf";
+        SourceDocument source = new SourceDocument("stale#chunk-20", "content", uuidFile,
+                uuidFile, "old/path/" + uuidFile, 20);
+        DocumentIndexEntry current = new DocumentIndexEntry("current-id", "AI-Agents-in-Depth-zh-CN.pdf",
+                "docs/workspaces/workspace-a/" + uuidFile, "current-hash", 598, 10L,
+                "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
+
+        assertThat(service.originalSourceFileName(source, List.of(current)))
+                .isEqualTo("AI-Agents-in-Depth-zh-CN.pdf");
+    }
 }
