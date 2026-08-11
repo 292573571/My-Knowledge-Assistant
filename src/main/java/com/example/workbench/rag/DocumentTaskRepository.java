@@ -11,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 interface DocumentTaskRepository extends JpaRepository<DocumentTaskEntity, String> {
     List<DocumentTaskEntity> findTop20ByWorkspaceIdOrderByCreatedAtDesc(String workspaceId);
+    java.util.Optional<DocumentTaskEntity> findFirstBySourcePathAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
+            String sourcePath, String workspaceId, DocumentTaskType type);
     List<DocumentTaskEntity> findByStatusInAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
             Collection<DocumentTaskStatus> statuses, Instant nextAttemptAt);
     List<DocumentTaskEntity> findByStatusAndWorkerId(DocumentTaskStatus status, String workerId);

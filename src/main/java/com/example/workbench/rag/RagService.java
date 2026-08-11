@@ -79,6 +79,7 @@ public class RagService {
     private final int contextMaxTokens;
     private final int maxChunksPerDocument;
     private final boolean adjacentEnabled;
+    private final DocumentTaskRepository documentTaskRepository;
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private RagMetrics metrics;
@@ -115,7 +116,8 @@ public class RagService {
             @Value("${workbench.rag.hybrid.rrf-k:60}") int rrfK,
             @Value("${workbench.rag.context.max-tokens:4500}") int contextMaxTokens,
             @Value("${workbench.rag.context.max-chunks-per-document:5}") int maxChunksPerDocument,
-            @Value("${workbench.rag.context.adjacent-enabled:true}") boolean adjacentEnabled
+            @Value("${workbench.rag.context.adjacent-enabled:true}") boolean adjacentEnabled,
+            DocumentTaskRepository documentTaskRepository
     ) {
         this.documentIngestionService = documentIngestionService;
         this.vectorStore = vectorStore;
@@ -138,6 +140,7 @@ public class RagService {
         this.contextMaxTokens = Math.max(256, contextMaxTokens);
         this.maxChunksPerDocument = Math.max(1, maxChunksPerDocument);
         this.adjacentEnabled = adjacentEnabled;
+        this.documentTaskRepository = documentTaskRepository;
     }
 
     RagService(
@@ -151,7 +154,23 @@ public class RagService {
                 retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
                 multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory().getBeanProvider(SparseRetriever.class),
-                false, 60, 3000, 2, false);
+                false, 60, 3000, 2, false, null);
+    }
+
+    /** 保留混合检索测试和轻量调用方使用的完整旧构造器。 */
+    RagService(
+            DocumentIngestionService documentIngestionService, VectorStore vectorStore, LocalChatClient chatClient,
+            ConversationMemory conversationMemory, WebSearchService webSearchService, RagQualityGate qualityGate,
+            boolean retrievalDebugEnabled, int topK, double similarityThreshold, String scoreDirection,
+            boolean queryRewriteEnabled, boolean multiQueryEnabled, int multiQueryMaxQueries,
+            boolean modelFallbackEnabled, boolean webSearchEnabled, ObjectProvider<SparseRetriever> sparseRetrieverProvider,
+            boolean hybridEnabled, int rrfK, int contextMaxTokens, int maxChunksPerDocument, boolean adjacentEnabled
+    ) {
+        this(documentIngestionService, vectorStore, chatClient, conversationMemory, webSearchService, qualityGate,
+                retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
+                multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
+                sparseRetrieverProvider, hybridEnabled, rrfK, contextMaxTokens, maxChunksPerDocument,
+                adjacentEnabled, null);
     }
 
     public RagChatResponse chat(RagChatRequest request) {
@@ -201,6 +220,10 @@ public class RagService {
         String question = request.message();
         // 历史仅用于补足当前问题语境；最终事实依据仍应来自本次检索到的文档。
         List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
+        // 相同问题重复提交时，上一轮答案不能参与上下文判断，否则同问会被改写成不同意图。
+        if (hasSameRecentUserQuestion(history, question)) {
+            history = List.of();
+        }
         log.info(
                 "RAG chat started conversationId={} questionLength={} historyMessages={} topK={} threshold={} scoreDirection={}",
                 conversationId,
@@ -332,6 +355,13 @@ public class RagService {
         return new RagChatResponse(answer, ragSources, retrievalDebug(includeDebug, question, retrievedSources, sources));
     }
 
+    private boolean hasSameRecentUserQuestion(List<ChatMessage> history, String question) {
+        if (history == null || question == null || question.isBlank()) return false;
+        String normalized = question.strip();
+        return history.stream().anyMatch(message -> "user".equalsIgnoreCase(message.role())
+                && normalized.equals(message.content() == null ? "" : message.content().strip()));
+    }
+
     private RagChatResponse withDebug(RagChatResponse response, boolean includeDebug, String question,
                                       List<SourceDocument> retrievedSources, List<SourceDocument> contextSources) {
         if (!includeDebug || response.retrievalDebug() != null) {
@@ -374,6 +404,9 @@ public class RagService {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
         List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
+        if (hasSameRecentUserQuestion(history, question)) {
+            history = List.of();
+        }
 
         if (isLearningAssistantIntroductionQuestion(question)) {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION), List.of());
@@ -1663,6 +1696,18 @@ public class RagService {
                 .orElse(null);
         if (exactMatch != null) {
             return exactMatch;
+        }
+
+        if (documentTaskRepository != null) {
+            String workspace = source.workspaceId() == null ? "" : source.workspaceId();
+            String path = source.path() == null ? "" : source.path().replace('\\', '/');
+            String taskName = documentTaskRepository
+                    .findFirstBySourcePathAndWorkspaceIdAndTypeOrderByCreatedAtDesc(path, workspace, DocumentTaskType.UPLOAD)
+                    .map(DocumentTaskEntity::getFileName)
+                    .orElse(null);
+            if (taskName != null && !taskName.isBlank() && !looksLikeGeneratedStorageName(taskName)) {
+                return taskName;
+            }
         }
 
         // 兼容旧版向量 metadata：旧版可能只保留了上传文件被改名后的 UUID 文件名。
