@@ -1646,17 +1646,40 @@ public class RagService {
                 .toList();
     }
 
-    private String originalSourceFileName(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
+    String originalSourceFileName(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
         if (indexedDocuments == null || indexedDocuments.isEmpty()) {
-            return source.fileName();
+            return displayFileName(source);
         }
         String normalizedPath = source.path() == null ? "" : source.path().replace('\\', '/');
+        String sourceFileName = source.fileName() == null ? "" : source.fileName().replace('\\', '/');
+        String sourceBaseName = baseName(sourceFileName.isBlank() ? normalizedPath : sourceFileName);
         return indexedDocuments.stream()
                 .filter(entry -> entry.documentId().equals(source.documentId())
-                        || entry.path().replace('\\', '/').equals(normalizedPath))
+                        || (!source.contentHash().isBlank() && entry.contentHash().equals(source.contentHash()))
+                        || entry.path().replace('\\', '/').equals(normalizedPath)
+                        || baseName(entry.path()).equals(sourceBaseName))
                 .map(DocumentIndexEntry::fileName)
                 .findFirst()
-                .orElse(source.fileName());
+                .orElse(displayFileName(source));
+    }
+
+    private String displayFileName(SourceDocument source) {
+        if (source.fileName() != null && !source.fileName().isBlank()
+                && !looksLikeGeneratedStorageName(source.fileName())) {
+            return source.fileName();
+        }
+        String path = source.path() == null ? "" : source.path().replace('\\', '/');
+        return path.isBlank() ? source.fileName() : baseName(path);
+    }
+
+    private String baseName(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? path : path.substring(slash + 1);
+    }
+
+    private boolean looksLikeGeneratedStorageName(String fileName) {
+        return fileName.matches("(?i)[0-9a-f]{8}-[0-9a-f-]{27,}\\.[a-z0-9]+")
+                || fileName.matches("(?i)[0-9a-f]{16}\\.[a-z0-9]+");
     }
 
     private List<RagSource> toWebSources(List<WebSearchResult> webResults) {
