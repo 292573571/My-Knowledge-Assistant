@@ -1653,14 +1653,34 @@ public class RagService {
         String normalizedPath = source.path() == null ? "" : source.path().replace('\\', '/');
         String sourceFileName = source.fileName() == null ? "" : source.fileName().replace('\\', '/');
         String sourceBaseName = baseName(sourceFileName.isBlank() ? normalizedPath : sourceFileName);
-        return indexedDocuments.stream()
+        String exactMatch = indexedDocuments.stream()
                 .filter(entry -> entry.documentId().equals(source.documentId())
                         || (!source.contentHash().isBlank() && entry.contentHash().equals(source.contentHash()))
                         || entry.path().replace('\\', '/').equals(normalizedPath)
                         || baseName(entry.path()).equals(sourceBaseName))
                 .map(DocumentIndexEntry::fileName)
                 .findFirst()
-                .orElse(displayFileName(source));
+                .orElse(null);
+        if (exactMatch != null) {
+            return exactMatch;
+        }
+
+        // 兼容旧版向量 metadata：旧版可能只保留了上传文件被改名后的 UUID 文件名。
+        // 此时 documentId、hash 或完整 path 可能已经不一致，但 workspace 目录中的 UUID 文件名仍可对应。
+        String generatedName = generatedStorageName(sourceBaseName) ? sourceBaseName : baseName(normalizedPath);
+        if (generatedStorageName(generatedName)) {
+            String generatedStem = generatedName.substring(0, generatedName.lastIndexOf('.'));
+            String legacyMatch = indexedDocuments.stream()
+                    .filter(entry -> generatedStem.equalsIgnoreCase(storageStem(baseName(entry.path())))
+                            || generatedStem.equalsIgnoreCase(storageStem(entry.fileName())))
+                    .map(DocumentIndexEntry::fileName)
+                    .findFirst()
+                    .orElse(null);
+            if (legacyMatch != null) {
+                return legacyMatch;
+            }
+        }
+        return displayFileName(source);
     }
 
     private String displayFileName(SourceDocument source) {
@@ -1680,6 +1700,16 @@ public class RagService {
     private boolean looksLikeGeneratedStorageName(String fileName) {
         return fileName.matches("(?i)[0-9a-f]{8}-[0-9a-f-]{27,}\\.[a-z0-9]+")
                 || fileName.matches("(?i)[0-9a-f]{16}\\.[a-z0-9]+");
+    }
+
+    private boolean generatedStorageName(String fileName) {
+        return fileName != null && looksLikeGeneratedStorageName(fileName);
+    }
+
+    private String storageStem(String fileName) {
+        if (fileName == null) return "";
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     private List<RagSource> toWebSources(List<WebSearchResult> webResults) {

@@ -3,8 +3,12 @@ package com.example.workbench.conversation;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.rag.DocumentIndexEntry;
+import com.example.workbench.rag.DocumentIngestionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
@@ -21,7 +25,27 @@ public class ConversationService {
     private final ConversationMemory conversationMemory;
     private final ConversationExecutionRegistry executionRegistry;
     private final ObjectMapper objectMapper;
+    private final DocumentIngestionService documentIngestionService;
 
+    public ConversationService(
+            ChatConversationRepository conversationRepository,
+            ChatMessageRepository messageRepository,
+            ConversationMemory conversationMemory,
+            ConversationExecutionRegistry executionRegistry,
+            ObjectMapper objectMapper,
+            DocumentIngestionService documentIngestionService
+    ) {
+        this.conversationRepository = conversationRepository;
+        this.messageRepository = messageRepository;
+        this.conversationMemory = conversationMemory;
+        this.executionRegistry = executionRegistry;
+        this.objectMapper = objectMapper;
+        this.documentIngestionService = documentIngestionService;
+    }
+
+    /**
+     * 保留测试和轻量调用方使用的旧构造器；Spring 使用上面的完整构造器注入索引服务。
+     */
     public ConversationService(
             ChatConversationRepository conversationRepository,
             ChatMessageRepository messageRepository,
@@ -29,11 +53,7 @@ public class ConversationService {
             ConversationExecutionRegistry executionRegistry,
             ObjectMapper objectMapper
     ) {
-        this.conversationRepository = conversationRepository;
-        this.messageRepository = messageRepository;
-        this.conversationMemory = conversationMemory;
-        this.executionRegistry = executionRegistry;
-        this.objectMapper = objectMapper;
+        this(conversationRepository, messageRepository, conversationMemory, executionRegistry, objectMapper, null);
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +76,7 @@ public class ConversationService {
     public List<MessageResponse> messages(AppUser user, String workspaceId, String conversationId) {
         ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
         return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
-                .map(this::messageResponse)
+                .map(message -> messageResponse(message, workspaceId))
                 .toList();
     }
 
@@ -143,8 +163,58 @@ public class ConversationService {
         return new ConversationResponse(conversation.getClientConversationId(), conversation.getTitle(), conversation.getMode(), conversation.getUpdatedAt());
     }
 
-    private MessageResponse messageResponse(ChatMessageEntity message) {
-        return new MessageResponse(message.getId(), message.getRole(), message.getContent(), readJson(message.getSourcesJson()), readJson(message.getToolCallsJson()), message.getCreatedAt());
+    private MessageResponse messageResponse(ChatMessageEntity message, String workspaceId) {
+        return new MessageResponse(message.getId(), message.getRole(), message.getContent(),
+                normalizeSources(readJson(message.getSourcesJson()), workspaceId), readJson(message.getToolCallsJson()),
+                message.getCreatedAt());
+    }
+
+    /**
+     * 历史消息可能保存了旧版向量 metadata 中的 UUID 存储文件名。
+     * 读取历史时按当前索引表的路径恢复原始文件名，避免旧引用永久显示 UUID。
+     */
+    private JsonNode normalizeSources(JsonNode sources, String workspaceId) {
+        if (sources == null || !sources.isArray() || documentIngestionService == null) return sources;
+        List<DocumentIndexEntry> entries = documentIngestionService.listIndexedDocuments().stream()
+                .filter(entry -> workspaceId == null || workspaceId.isBlank() || workspaceId.equals(entry.workspaceId()))
+                .toList();
+        ArrayNode normalized = objectMapper.createArrayNode();
+        for (JsonNode source : sources) {
+            if (!source.isObject()) {
+                normalized.add(source);
+                continue;
+            }
+            ObjectNode copy = source.deepCopy();
+            String file = text(copy, "file");
+            String path = text(copy, "path").replace('\\', '/');
+            String displayName = entries.stream()
+                    .filter(entry -> sameFile(entry, file, path))
+                    .map(DocumentIndexEntry::fileName)
+                    .findFirst()
+                    .orElse(null);
+            if (displayName != null && !displayName.isBlank()) copy.put("file", displayName);
+            normalized.add(copy);
+        }
+        return normalized;
+    }
+
+    private boolean sameFile(DocumentIndexEntry entry, String file, String path) {
+        String entryPath = entry.path().replace('\\', '/');
+        String entryBase = baseName(entryPath);
+        String sourceBase = baseName(path.isBlank() ? file : path);
+        return entryBase.equalsIgnoreCase(sourceBase)
+                || entry.fileName().equalsIgnoreCase(file)
+                || entry.documentId().equals(file);
+    }
+
+    private String text(ObjectNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? "" : value.asText("");
+    }
+
+    private String baseName(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? path : path.substring(slash + 1);
     }
 
     private String json(Object value) {

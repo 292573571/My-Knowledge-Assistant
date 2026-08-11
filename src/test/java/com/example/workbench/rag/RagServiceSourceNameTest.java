@@ -27,4 +27,22 @@ class RagServiceSourceNameTest {
 
         assertThat(service.originalSourceFileName(source, List.of(indexed))).isEqualTo("redis-cache.pdf");
     }
+
+    @Test
+    void resolvesOriginalFileNameWhenLegacyVectorIdentifiersDoNotMatch() {
+        RagService service = new RagService(mock(DocumentIngestionService.class), mock(VectorStore.class),
+                mock(LocalChatClient.class), new ConversationMemory(), mock(WebSearchService.class),
+                new RagQualityGate(mock(LocalChatClient.class), false), true, 5, 0.85, "distance",
+                false, false, 3, false, false);
+        SourceDocument source = new SourceDocument(
+                "old#chunk-0", "content", "title", "636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf",
+                "legacy/636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf", 0, "old-id", "636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf",
+                "old-hash", 0.2, "", 0, 0, 7, "pdf-page", "SOURCE", "user-1", "workspace-a",
+                DocumentVisibility.WORKSPACE, 11);
+        DocumentIndexEntry indexed = new DocumentIndexEntry("new-id", "redis-cache.pdf",
+                "docs/636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf", "new-hash", 1, 2L,
+                "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
+
+        assertThat(service.originalSourceFileName(source, List.of(indexed))).isEqualTo("redis-cache.pdf");
+    }
 }
