@@ -742,7 +742,8 @@ public class RagService {
         if (answer == null || answer.isBlank()) {
             return answer == null ? "" : answer;
         }
-        String sanitized = FALLBACK_PROMPT_LEAK_LINE.matcher(answer.replace("\uFFFD", "")).replaceAll("");
+        String sanitized = ModelOutputSanitizer.complete(
+                FALLBACK_PROMPT_LEAK_LINE.matcher(answer.replace("\uFFFD", "")).replaceAll(""));
         if (question != null && !question.isBlank()) {
             Pattern promptEcho = Pattern.compile("(?is)^\\s*\\d+\\s*\\R\\s*user\\s*\\R\\s*"
                     + Pattern.quote(question.strip()) + "\\s*\\R?");

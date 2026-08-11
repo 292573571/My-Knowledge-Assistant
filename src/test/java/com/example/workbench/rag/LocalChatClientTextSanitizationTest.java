@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import reactor.core.publisher.Flux;
 
 class LocalChatClientTextSanitizationTest {
 
@@ -39,6 +40,28 @@ class LocalChatClientTextSanitizationTest {
                 .satisfiesExactly(
                         message -> assertThat(message).isInstanceOf(UserMessage.class),
                         message -> assertThat(message).isInstanceOf(AssistantMessage.class));
+    }
+
+    @Test
+    void removesLeakedAssistantTemplateWhenProtocolIsSplitAcrossTokens() {
+        assertThat(ModelOutputSanitizer.stream(Flux.just("1", "\nass", "istant\n\"", "正常回答", "\""))
+                .collectList()
+                .block())
+                .containsExactly("正常回答");
+    }
+
+    @Test
+    void keepsARealNumberedAnswerWhenItIsNotAnAssistantTemplate() {
+        assertThat(String.join("", ModelOutputSanitizer.stream(Flux.just("1", ". 第一项\n", "2. 第二项"))
+                .collectList()
+                .block()))
+                .isEqualTo("1. 第一项\n2. 第二项");
+    }
+
+    @Test
+    void removesCompleteAssistantTemplatePrefixFromNonStreamingText() {
+        assertThat(ModelOutputSanitizer.complete("1\nassistant\n\"正常回答\""))
+                .isEqualTo("正常回答");
     }
 
     private LocalChatClient client() {

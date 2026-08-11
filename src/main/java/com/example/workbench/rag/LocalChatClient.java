@@ -155,7 +155,7 @@ public class LocalChatClient {
      * @return 模型文本，模型不可用时返回 {@code null}
      */
     public String generate(String prompt, List<ChatMessage> history, Map<String, String> options) {
-        return sanitizeModelText(callSpringAi(prompt, history, options));
+        return ModelOutputSanitizer.complete(sanitizeModelText(callSpringAi(prompt, history, options)));
     }
 
     public Flux<String> stream(String prompt, Map<String, String> options) {
@@ -177,15 +177,16 @@ public class LocalChatClient {
 
         String conversationId = options.getOrDefault("conversationId", "default");
         AtomicBoolean receivedToken = new AtomicBoolean(false);
-        return streamModel(prompt, history, conversationId, chatModel, requestTimeout)
+        Flux<String> primary = ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId, chatModel, requestTimeout))
                 .map(this::sanitizeModelText)
                 .filter(token -> !token.isEmpty())
                 .doOnNext(token -> receivedToken.set(true))
                 .onErrorResume(error -> !receivedToken.get() && !fallbackModels.isEmpty()
-                        ? streamModel(prompt, history, conversationId, fallbackModels.get(0), fallbackRequestTimeout)
+                        ? ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId, fallbackModels.get(0), fallbackRequestTimeout))
                                 .map(this::sanitizeModelText)
                                 .filter(token -> !token.isEmpty())
                         : Flux.error(error));
+        return primary;
     }
 
     String sanitizeModelText(String text) {
