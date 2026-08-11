@@ -10,5 +10,6 @@ import java.util.List;
  * @param steps 执行步骤数
  * @param readOnly 是否全程只读
  */
-public record MaintenanceAgentResult(String answer, List<MaintenanceAgentTrace> traces, int steps, boolean readOnly) {
+public record MaintenanceAgentResult(String answer, List<MaintenanceAgentTrace> traces, int steps, boolean readOnly,
+                                     MaintenancePendingAction pendingAction) {
 }

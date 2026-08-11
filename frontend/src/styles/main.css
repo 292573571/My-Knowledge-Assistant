@@ -2060,6 +2060,8 @@ textarea:focus-visible,
   .maintenance-agent-header { display: grid; }
   .maintenance-agent-form { grid-template-columns: 1fr; }
   .maintenance-agent-form button { width: 100%; }
+  .maintenance-agent-confirmation { align-items: stretch; flex-direction: column; }
+  .maintenance-agent-confirmation button { width: 100%; }
   .document-rebuild-status { padding: 14px; }
   .document-rebuild-counts { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .document-rebuild-counts > div { border-bottom: 1px solid rgba(154,174,225,.45); }
@@ -2763,6 +2765,9 @@ textarea:focus-visible,
 .maintenance-agent-answer header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; color: #3b57ad; font-size: 11px; font-weight: 800; }
 .maintenance-agent-answer header small { color: #8a96aa; font-size: 10px; font-weight: 500; }
 .maintenance-agent-answer > p { margin: 0; color: #44536c; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.maintenance-agent-confirmation { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; border: 1px solid #f0d7aa; border-radius: 9px; padding: 9px 10px; color: #8a632b; background: #fff9ed; font-size: 11px; }
+.maintenance-agent-confirmation button { border: 0; border-radius: 7px; padding: 7px 10px; color: #fff; background: #bd7a2d; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.maintenance-agent-confirmation button:disabled { cursor: wait; opacity: .55; }
 .maintenance-agent-trace { margin-top: 11px; border-top: 1px solid #edf0f5; padding-top: 9px; }
 .maintenance-agent-trace > button { border: 0; padding: 0; color: #5a70bd; background: transparent; font-size: 10px; font-weight: 750; }
 .maintenance-agent-trace ul { display: grid; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }

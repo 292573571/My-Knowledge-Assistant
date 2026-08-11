@@ -34,4 +34,12 @@ public class MaintenanceAgentController {
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
         return agentService.chat(user, workspaceService.access(user, request.workspaceId()), request.message());
     }
+
+    @PostMapping("/confirm")
+    public MaintenanceWriteResult confirm(@Valid @RequestBody MaintenanceConfirmationRequest request,
+                                           HttpServletRequest httpRequest) {
+        AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
+        return agentService.confirm(user, workspaceService.access(user, request.workspaceId()), request.confirmationToken());
+    }
 }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { chatWithMaintenanceAgent } from '../api/maintenanceAgentApi'
+import { chatWithMaintenanceAgent, confirmMaintenanceAgentAction } from '../api/maintenanceAgentApi'
 import { formatApiError } from '../api/apiError'
 
 const props = defineProps({
@@ -12,6 +12,7 @@ const answer = ref(null)
 const error = ref('')
 const loading = ref(false)
 const showTrace = ref(false)
+const confirming = ref(false)
 const suggestions = [
   '检查当前空间的知识库状态',
   '有哪些失败的文档处理任务？',
@@ -37,6 +38,20 @@ async function ask(message = question.value) {
 
 function handleSubmit() {
   ask()
+}
+
+async function confirmAction() {
+  if (!answer.value?.pendingAction?.confirmationToken || confirming.value) return
+  confirming.value = true
+  error.value = ''
+  try {
+    const result = await confirmMaintenanceAgentAction(answer.value.pendingAction.confirmationToken, props.workspace?.id)
+    answer.value = { ...answer.value, answer: result.answer, pendingAction: null, readOnly: false }
+  } catch (exception) {
+    error.value = formatApiError(exception, '维护操作执行失败。')
+  } finally {
+    confirming.value = false
+  }
 }
 </script>
 
@@ -69,6 +84,10 @@ function handleSubmit() {
     <article v-if="answer" class="maintenance-agent-answer" aria-live="polite">
       <header><span>助手回答</span><small>{{ answer.readOnly ? '只读' : '请核对执行状态' }} · {{ answer.steps }} 步</small></header>
       <p>{{ answer.answer }}</p>
+      <div v-if="answer.pendingAction?.confirmationToken" class="maintenance-agent-confirmation">
+        <strong>{{ answer.pendingAction.action === 'DELETE_DOCUMENT' ? '这是不可撤销的删除操作。' : '请确认后才会执行。' }}</strong>
+        <button type="button" :disabled="confirming" @click="confirmAction">{{ confirming ? '执行中...' : '确认执行' }}</button>
+      </div>
       <div v-if="answer.toolCalls?.length || answer.traces?.length" class="maintenance-agent-trace">
         <button type="button" @click="showTrace = !showTrace">{{ showTrace ? '收起调用记录' : '查看调用记录' }}</button>
         <ul v-if="showTrace">
