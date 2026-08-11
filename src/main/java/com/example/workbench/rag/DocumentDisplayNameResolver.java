@@ -10,6 +10,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class DocumentDisplayNameResolver {
 
+    private static final Logger log = LoggerFactory.getLogger(DocumentDisplayNameResolver.class);
     private final DocumentTaskRepository taskRepository;
 
     @Autowired
@@ -30,15 +33,20 @@ public class DocumentDisplayNameResolver {
 
     public String resolve(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
         if (source == null) return "知识库文档";
-        Set<String> identifiers = Stream.of(source.path(), source.source(), source.fileName())
+        String workspaceId = value(source.workspaceId());
+        boolean scopedWorkspace = !workspaceId.isBlank() && !"public-default".equals(workspaceId);
+        List<DocumentIndexEntry> entries = (indexedDocuments == null ? List.<DocumentIndexEntry>of() : indexedDocuments).stream()
+                .filter(entry -> !scopedWorkspace || workspaceId.equals(value(entry.workspaceId())))
+                .toList();
+        Set<String> identifiers = Stream.of(source.path(), source.source(), source.fileName(), source.title())
                 .map(this::normalize)
                 .filter(value -> !value.isBlank())
                 .map(this::baseName)
+                .map(value -> value.toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
-        String matched = indexedDocuments == null ? null : indexedDocuments.stream()
-                .filter(entry -> !isGeneratedName(entry.fileName()))
+        String matched = entries.stream()
                 .map(entry -> new AbstractMap.SimpleImmutableEntry<>(entry, score(source, entry, identifiers)))
-                .filter(candidate -> candidate.getValue() > 0)
+                .filter(candidate -> candidate.getValue() > 0 && !isGeneratedName(candidate.getKey().fileName()))
                 .sorted(Comparator.<Map.Entry<DocumentIndexEntry, Integer>>comparingInt(Map.Entry::getValue)
                         .reversed()
                         .thenComparing(candidate -> candidate.getKey().ingestedAt(), Comparator.reverseOrder()))
@@ -47,14 +55,39 @@ public class DocumentDisplayNameResolver {
                 .orElse(null);
         if (matched != null && !matched.isBlank()) return matched;
 
+        String documentId = value(source.documentId());
+        if (!documentId.isBlank()) {
+            String taskName = taskRepository.findFirstByDocumentIdAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
+                            documentId, workspaceId, DocumentTaskType.UPLOAD)
+                    .map(DocumentTaskEntity::getFileName)
+                    .filter(name -> !isGeneratedName(name))
+                    .orElse(null);
+            if (taskName != null) return taskName;
+        }
+
         String taskName = taskRepository.findFirstBySourcePathAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
-                        normalize(source.path()), source.workspaceId(), DocumentTaskType.UPLOAD)
+                        normalize(source.path()), workspaceId, DocumentTaskType.UPLOAD)
                 .map(DocumentTaskEntity::getFileName)
                 .filter(name -> !isGeneratedName(name))
                 .orElse(null);
         if (taskName != null) return taskName;
 
-        return firstHumanName(source.title(), source.fileName(), source.source(), source.path());
+        String taskByStorageName = taskRepository.findByWorkspaceIdAndTypeOrderByCreatedAtDesc(
+                        workspaceId, DocumentTaskType.UPLOAD).stream()
+                .filter(task -> sameStorageFile(source, task.getSourcePath()))
+                .map(DocumentTaskEntity::getFileName)
+                .filter(name -> !isGeneratedName(name))
+                .findFirst()
+                .orElse(null);
+        if (taskByStorageName != null) return taskByStorageName;
+
+        String fallback = firstHumanName(source.title(), source.fileName(), source.source(), source.path());
+        if (isGeneratedName(fallback)) {
+            log.warn("Unable to resolve generated citation name documentId={} workspaceId={} file={} source={} path={} indexedEntries={}",
+                    documentId, workspaceId, source.fileName(), source.source(), source.path(), entries.size());
+            return "知识库文档";
+        }
+        return fallback;
     }
 
     public String resolve(String file, String path, String workspaceId, List<DocumentIndexEntry> indexedDocuments) {
@@ -66,12 +99,29 @@ public class DocumentDisplayNameResolver {
 
     private int score(SourceDocument source, DocumentIndexEntry entry, Set<String> identifiers) {
         String entryPath = normalize(entry.path());
-        if (!normalize(source.path()).isBlank() && entryPath.equals(normalize(source.path()))) return 100;
-        if (identifiers.contains(baseName(entryPath))) return 90;
-        if (!source.documentId().isBlank() && entry.documentId().equals(source.documentId())) return 80;
-        if (!source.contentHash().isBlank() && entry.contentHash().equals(source.contentHash())) return 70;
-        if (sameGeneratedStem(identifiers, baseName(entryPath))) return 60;
+        String sourcePath = normalize(source.path());
+        if (!value(source.documentId()).isBlank() && value(entry.documentId()).equals(source.documentId())) return 140;
+        if (!value(source.contentHash()).isBlank() && value(entry.contentHash()).equals(source.contentHash())) return 130;
+        if (!sourcePath.isBlank() && entryPath.equalsIgnoreCase(sourcePath)) return 120;
+        if (!sourcePath.isBlank() && pathEquivalent(sourcePath, entryPath)) return 115;
+        if (identifiers.contains(baseName(entryPath).toLowerCase(Locale.ROOT))) return 110;
+        if (sameGeneratedStem(identifiers, baseName(entryPath))) return 100;
         return 0;
+    }
+
+    private boolean pathEquivalent(String left, String right) {
+        String normalizedLeft = left.toLowerCase(Locale.ROOT);
+        String normalizedRight = right.toLowerCase(Locale.ROOT);
+        return normalizedLeft.endsWith("/" + normalizedRight)
+                || normalizedRight.endsWith("/" + normalizedLeft);
+    }
+
+    private boolean sameStorageFile(SourceDocument source, String taskPath) {
+        String taskFile = baseName(normalize(taskPath));
+        if (taskFile.isBlank()) return false;
+        return Stream.of(source.path(), source.source(), source.fileName())
+                .map(value -> baseName(normalize(value)))
+                .anyMatch(value -> !value.isBlank() && value.equalsIgnoreCase(taskFile));
     }
 
     private boolean sameGeneratedStem(Set<String> identifiers, String candidate) {
@@ -109,6 +159,10 @@ public class DocumentDisplayNameResolver {
 
     private String normalize(String value) {
         return value == null ? "" : value.replace('\\', '/').strip();
+    }
+
+    private String value(String value) {
+        return value == null ? "" : value.strip();
     }
 
     private String baseName(String value) {

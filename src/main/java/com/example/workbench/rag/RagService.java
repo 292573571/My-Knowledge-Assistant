@@ -1670,15 +1670,23 @@ public class RagService {
     private List<RagSource> toRagSources(List<SourceDocument> sources) {
         List<DocumentIndexEntry> indexedDocuments = documentIngestionService.listIndexedDocuments();
         return sources.stream()
-                .map(source -> new RagSource(
-                        displayNameResolver == null ? source.fileName() : displayNameResolver.resolve(source, indexedDocuments),
-                        source.chunkIndex(),
-                        snippet(source.content()),
-                        source.score(),
-                        source.headingPath(),
-                        source.path(),
-                        source.pageNumber() > 0 ? source.pageNumber() : null
-                ))
+                .map(source -> {
+                    String displayName = displayNameResolver == null
+                            ? source.fileName()
+                            : displayNameResolver.resolve(source, indexedDocuments);
+                    log.info("RAG citation resolved documentId={} workspaceId={} rawFile={} rawSource={} rawPath={} displayFile={} indexedDocuments={}",
+                            source.documentId(), source.workspaceId(), source.fileName(), source.source(), source.path(),
+                            displayName, indexedDocuments.size());
+                    return new RagSource(
+                            displayName,
+                            source.chunkIndex(),
+                            snippet(source.content()),
+                            source.score(),
+                            source.headingPath(),
+                            source.path(),
+                            source.pageNumber() > 0 ? source.pageNumber() : null
+                    );
+                })
                 .distinct()
                 .toList();
     }
