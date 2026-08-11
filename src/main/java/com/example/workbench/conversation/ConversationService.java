@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,7 @@ public class ConversationService {
     private final DocumentIngestionService documentIngestionService;
     private final DocumentDisplayNameResolver displayNameResolver;
 
+    @Autowired
     public ConversationService(
             ChatConversationRepository conversationRepository,
             ChatMessageRepository messageRepository,

@@ -14,9 +14,16 @@ import java.util.Optional;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 class ConversationServiceTest {
+
+    @Test
+    void marksTheProductionConstructorForSpringInjectionWhenTestConstructorAlsoExists() {
+        assertThat(ConversationService.class.getConstructors())
+                .anySatisfy(constructor -> assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue());
+    }
 
     @Test
     void createsScopedInternalIdWhenAnotherUserUsesSameClientConversationId() {

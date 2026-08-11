@@ -20,7 +20,9 @@ eval/reports/*
 !eval/reports/.gitkeep
 
 # 本地部署和执行脚本
-deploy/
+deploy/*
+!deploy/release-local.sh
+!deploy/deploy-zhihai
 scripts/
 docker-compose.yml
 
