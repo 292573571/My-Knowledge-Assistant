@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { chatWithTeachingAgent } from '../api/teachingAgentApi'
+import { chatWithTeachingAgent, submitTeachingCheck } from '../api/teachingAgentApi'
 import { formatApiError } from '../api/apiError'
 import { createUuid } from '../utils/uuid'
 import { renderMarkdown } from '../utils/markdown'
@@ -13,10 +13,12 @@ const props = defineProps({
 const topic = ref('')
 const userLevel = ref('BEGINNER')
 const message = ref('')
+const checkAnswer = ref('')
 const sessionId = ref('')
 const result = ref(null)
 const error = ref('')
 const loading = ref(false)
+const checking = ref(false)
 const showTrace = ref(false)
 
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
@@ -36,7 +38,9 @@ const stageLabels = {
   REVIEW: '复习'
 }
 const actionLabels = {
-  CHECK: '回答检查问题'
+  CHECK: '回答检查问题',
+  PRACTICE: '进入实践练习',
+  REVIEW: '回顾薄弱点'
 }
 const suggestions = [
   { topic: 'Agent', message: '请解释什么是 Agent，并说明它和普通 RAG 问答有什么区别。' },
@@ -60,6 +64,7 @@ async function ask(suggestion = null) {
   const previousTopic = result.value?.topic
   error.value = ''
   result.value = null
+  checkAnswer.value = ''
   showTrace.value = false
   loading.value = true
 
@@ -82,9 +87,29 @@ async function ask(suggestion = null) {
   }
 }
 
+async function submitCheck() {
+  if (checking.value || !result.value?.check?.checkId || !checkAnswer.value.trim() || !props.workspace?.id) return
+  checking.value = true
+  error.value = ''
+  try {
+    const checked = await submitTeachingCheck({
+      workspaceId: props.workspace.id,
+      sessionId: sessionId.value,
+      checkId: result.value.check.checkId,
+      answer: checkAnswer.value.trim()
+    })
+    result.value = { ...result.value, ...checked }
+  } catch (exception) {
+    error.value = formatApiError(exception, '教学检查暂时无法评分。')
+  } finally {
+    checking.value = false
+  }
+}
+
 function startNewLesson() {
   sessionId.value = ''
   result.value = null
+  checkAnswer.value = ''
   error.value = ''
   showTrace.value = false
 }
@@ -171,7 +196,7 @@ function startNewLesson() {
                 <h2>{{ result.topic }}</h2>
               </div>
             </div>
-            <span class="teaching-readonly-badge">只读教学</span>
+            <span class="teaching-readonly-badge">{{ result.readOnly ? '只读教学' : '已记录检查' }}</span>
           </header>
           <div class="teaching-answer-meta">
             <span>当前阶段：{{ stageLabels[result.stage] || result.stage }}</span>
@@ -180,12 +205,19 @@ function startNewLesson() {
           </div>
           <div class="teaching-answer-markdown markdown-body" v-html="answerHtml"></div>
 
-          <div class="teaching-check-prompt">
+          <div v-if="result.nextAction === 'CHECK' && result.check" class="teaching-check-prompt">
             <span class="teaching-check-icon">?</span>
             <div>
               <strong>接下来检查你的理解</strong>
-              <p>当前接口已经提出 CHECK 阶段，但答案提交和自动评分将在下一课实现。</p>
+              <p>{{ result.check.question }}</p>
+              <textarea v-model="checkAnswer" maxlength="4000" rows="4" :disabled="checking" placeholder="用自己的话回答，不必追求术语完整。" aria-label="理解检查答案"></textarea>
+              <button type="button" :disabled="checking || !checkAnswer.trim()" @click="submitCheck">{{ checking ? '正在评分...' : '提交答案' }}</button>
             </div>
+          </div>
+          <div v-else-if="result.nextAction === 'PRACTICE' || result.nextAction === 'REVIEW'" class="teaching-check-result" :class="{ passed: result.passed }">
+            <strong>{{ result.passed ? '理解检查通过' : '建议回顾后再练习' }} · {{ result.score }}/{{ result.maxScore }}</strong>
+            <p>{{ result.feedback }}</p>
+            <small>{{ result.saved ? `已加入 ${result.recordDate} 学习记录。` : '评分已返回，但学习记录暂时未保存。' }}</small>
           </div>
 
           <div v-if="result.traces?.length" class="teaching-trace">
@@ -205,9 +237,9 @@ function startNewLesson() {
           <span class="teaching-side-label">学习节奏</span>
           <h2>先理解，再证明你理解了。</h2>
           <div class="teaching-steps">
-            <div class="active"><span>1</span><p><strong>讲解</strong><small>建立概念模型</small></p></div>
-            <div><span>2</span><p><strong>检查</strong><small>回答一个理解问题</small></p></div>
-            <div><span>3</span><p><strong>练习</strong><small>迁移到真实任务</small></p></div>
+            <div :class="{ active: result?.stage === 'EXPLAIN' }"><span>1</span><p><strong>讲解</strong><small>建立概念模型</small></p></div>
+            <div :class="{ active: result?.stage === 'CHECK' }"><span>2</span><p><strong>检查</strong><small>回答一个理解问题</small></p></div>
+            <div :class="{ active: result?.nextAction === 'PRACTICE' }"><span>3</span><p><strong>练习</strong><small>迁移到真实任务</small></p></div>
           </div>
         </section>
         <section class="teaching-side-card teaching-source-card">

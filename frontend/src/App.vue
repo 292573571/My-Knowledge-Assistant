@@ -233,8 +233,8 @@ async function submitPasswordChange() {
           </div>
         </div>
       </header>
-       <TeachingAgentPanel v-if="activeSection === 'teaching'" :key="`teaching-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
-       <LearningRecords v-else-if="activeSection === 'records'" />
+      <TeachingAgentPanel v-if="activeSection === 'teaching'" :key="`teaching-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+      <LearningRecords v-else-if="activeSection === 'records'" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
       <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />

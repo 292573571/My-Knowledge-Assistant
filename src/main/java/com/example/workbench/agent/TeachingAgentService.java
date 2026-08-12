@@ -23,14 +23,19 @@ public class TeachingAgentService {
 
     private final ChatClient chatClient;
     private final TeachingReadOnlyService readOnlyService;
+    private final TeachingCheckService checkService;
 
-    public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService) {
+    public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
+                                TeachingCheckService checkService) {
         this.chatClient = chatClient;
         this.readOnlyService = readOnlyService;
+        this.checkService = checkService;
     }
 
     public TeachingAgentResult chat(AppUser user, WorkspaceAccessContext access, TeachingAgentRequest request) {
-        TeachingAgentContext context = new TeachingAgentContext(user, access, request.normalizedSessionId(),
+        String sessionId = "default".equals(request.normalizedSessionId())
+                ? java.util.UUID.randomUUID().toString() : request.normalizedSessionId();
+        TeachingAgentContext context = new TeachingAgentContext(user, access, sessionId,
                 request.topic().strip(), TeachingStage.EXPLAIN, request.normalizedUserLevel());
         TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
         long startedAt = System.nanoTime();
@@ -46,8 +51,9 @@ public class TeachingAgentService {
                 .call()
                 .content();
         List<TeachingAgentTrace> traces = traces(tools, startedAt);
+        TeachingCheckPrompt check = checkService.createPending(user, access, context.sessionId(), context.topic(), answer);
         return new TeachingAgentResult(answer == null ? "模型未返回教学内容。" : answer.strip(),
-                context.sessionId(), context.topic(), TeachingStage.EXPLAIN, TeachingNextAction.CHECK,
+                context.sessionId(), context.topic(), TeachingStage.EXPLAIN, TeachingNextAction.CHECK, check,
                 tools.sources(), traces, Math.max(1, traces.size()), true);
     }
 

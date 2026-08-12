@@ -94,6 +94,28 @@ public class LearningRecordService {
         }
     }
 
+    public synchronized String recordTeachingCheck(AppUser user, String attemptId, String topic,
+                                                   String question, String answer, int score, int maxScore,
+                                                   boolean passed, String feedback) {
+        Path record = recordPath(user);
+        try {
+            Files.createDirectories(record.getParent());
+            if (!Files.exists(record)) {
+                Files.writeString(record, "# " + LocalDate.now(clock) + " 学习记录\n", StandardCharsets.UTF_8);
+            }
+            String existingContent = Files.readString(record, StandardCharsets.UTF_8);
+            if (existingContent.contains("attemptId：" + attemptId)) {
+                return DATE_FORMAT.format(LocalDate.now(clock));
+            }
+            String entry = formatTeachingCheck(attemptId, topic, question, answer, score, maxScore, passed, feedback);
+            Files.writeString(record, entry, StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
+            return DATE_FORMAT.format(LocalDate.now(clock));
+        } catch (IOException exception) {
+            log.warn("Teaching check record could not be saved userId={} errorType={}", user.getId(), exception.getClass().getSimpleName());
+            throw new IllegalStateException("Failed to save teaching check record", exception);
+        }
+    }
+
     public List<LearningRecordSummary> list(AppUser user) {
         Path directory = recordsDirectory.resolve(userDirectory(user));
         if (!Files.exists(directory)) {
@@ -249,6 +271,22 @@ public class LearningRecordService {
                 + "\n\n## 回答\n\n"
                 + withoutReferences(answer)
                 + "\n";
+    }
+
+    private String formatTeachingCheck(String attemptId, String topic, String question, String answer,
+                                       int score, int maxScore, boolean passed, String feedback) {
+        return "\n## 教学检查\n\n"
+                + "- 主题：" + singleLine(topic) + "\n"
+                + "- 检查问题：" + singleLine(question) + "\n"
+                + "- 我的回答：" + singleLine(answer) + "\n"
+                + "- 得分：" + score + "/" + maxScore + "\n"
+                + "- 结果：" + (passed ? "通过" : "需要复习") + "\n"
+                + "- 反馈：" + singleLine(feedback) + "\n"
+                + "- attemptId：" + singleLine(attemptId) + "\n";
+    }
+
+    private String singleLine(String value) {
+        return value == null ? "" : value.strip().replaceAll("\\s*\\R\\s*", " ");
     }
 
     private String replaceAnswerForQuestion(String content, String question, String entry) {

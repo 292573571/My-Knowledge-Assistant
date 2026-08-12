@@ -9,6 +9,7 @@ public record TeachingAgentResult(
         String topic,
         TeachingStage stage,
         TeachingNextAction nextAction,
+        TeachingCheckPrompt check,
         List<RagSource> sources,
         List<TeachingAgentTrace> traces,
         int steps,

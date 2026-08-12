@@ -21,8 +21,9 @@ import org.springframework.web.server.ResponseStatusException;
 class TeachingAgentControllerTest {
 
     private final TeachingAgentService agentService = mock(TeachingAgentService.class);
+    private final TeachingCheckService checkService = mock(TeachingCheckService.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
-    private final TeachingAgentController controller = new TeachingAgentController(agentService, workspaceService);
+    private final TeachingAgentController controller = new TeachingAgentController(agentService, checkService, workspaceService);
 
     @Test
     void bindsAuthenticatedUserAndAuthorizedWorkspaceBeforeCallingAgent() {
@@ -33,6 +34,7 @@ class TeachingAgentControllerTest {
                 "workspace-a", "lesson-1", "Agent", TeachingUserLevel.BEGINNER, "请解释 Agent");
         TeachingAgentResult expected = new TeachingAgentResult(
                 "讲解", "lesson-1", "Agent", TeachingStage.EXPLAIN, TeachingNextAction.CHECK,
+                new TeachingCheckPrompt("check-1", "请解释 Agent？"),
                 List.of(), List.of(), 1, true);
         HttpServletRequest httpRequest = mock(HttpServletRequest.class);
         when(httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE)).thenReturn(user);
@@ -54,5 +56,25 @@ class TeachingAgentControllerTest {
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         exception -> assertThat(exception.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
         verifyNoInteractions(workspaceService, agentService);
+    }
+
+    @Test
+    void rechecksWorkspaceBeforeSubmittingCheckAnswer() {
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        WorkspaceAccessContext access =
+                new WorkspaceAccessContext("user-1", "workspace-a", WorkspaceRole.VIEWER);
+        SubmitTeachingCheckRequest request = new SubmitTeachingCheckRequest(
+                "workspace-a", "lesson-1", "check-1", "我的答案");
+        TeachingCheckResponse expected = new TeachingCheckResponse(
+                "check-1", "lesson-1", "Agent", TeachingStage.CHECK, TeachingNextAction.REVIEW,
+                2, 5, false, "需要复习", true, "2026-08-12", false);
+        HttpServletRequest httpRequest = mock(HttpServletRequest.class);
+        when(httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE)).thenReturn(user);
+        when(workspaceService.access(user, "workspace-a")).thenReturn(access);
+        when(checkService.submit(user, access, request)).thenReturn(expected);
+
+        assertThat(controller.check(request, httpRequest)).isSameAs(expected);
+        verify(workspaceService).access(user, "workspace-a");
+        verify(checkService).submit(user, access, request);
     }
 }

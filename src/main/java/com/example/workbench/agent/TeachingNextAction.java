@@ -1,5 +1,7 @@
 package com.example.workbench.agent;
 
 public enum TeachingNextAction {
-    CHECK
+    CHECK,
+    PRACTICE,
+    REVIEW
 }
