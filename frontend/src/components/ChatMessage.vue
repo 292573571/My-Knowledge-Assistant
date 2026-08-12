@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
+import { deduplicateDisplayedSources } from '../utils/sources'
 
 const props = defineProps({
   message: {
@@ -20,6 +21,7 @@ const displayContent = computed(() => (props.message.content || '')
 const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
+const displayedSources = computed(() => deduplicateDisplayedSources(props.message.sources))
 const isModelSupplement = computed(() => isAssistant.value && !props.message.error && !props.message.sources?.length
   && props.message.content?.includes('以上回答基于通用大模型知识'))
 function sourceLabel(source) {
@@ -74,8 +76,8 @@ async function copyCode(event) {
         <span>当前知识库没有找到足够依据，已尝试使用通用大模型知识补充回答。</span>
       </div>
       <div v-if="!streaming && isModelSupplement" class="model-supplement-label"><strong>模型补充</strong><span>不含本地资料依据，请对关键事实进行核实。</span></div>
-      <div v-if="isAssistant && message.sources?.length" class="source-chips">
-        <span v-for="source in message.sources" :key="`${sourceLabel(source)}-${source.chunkIndex ?? ''}`">
+      <div v-if="isAssistant && displayedSources.length" class="source-chips">
+        <span v-for="source in displayedSources" :key="sourceLabel(source)">
           {{ sourceLabel(source) }}
         </span>
       </div>

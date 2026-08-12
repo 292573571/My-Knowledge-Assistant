@@ -1,15 +1,21 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { deduplicateDisplayedSources } from '../utils/sources'
 
-defineProps({
+const props = defineProps({
   sources: {
     type: Array,
     default: () => []
+  },
+  emptyMessage: {
+    type: String,
+    default: '如果当前是 RAG 模式，说明本次回答没有返回 source；可能是知识库未命中、后端降级回答，或接口没有携带 sources。'
   }
 })
 
 const hoveredSource = ref(null)
 const tooltipPosition = ref({ x: 0, y: 0 })
+const displayedSources = computed(() => deduplicateDisplayedSources(props.sources))
 
 function getSourceKey(source) {
   return `${source.file || source.title || source.name || 'source'}-${source.pageNumber ?? ''}-${source.chunkIndex ?? source.id ?? ''}`
@@ -34,12 +40,12 @@ function getPageLabel(source) {
 }
 
 function getScoreLabel(source) {
-  if (source.score == null) return '相似度 -'
+  if (source.score == null) return '匹配分数 -'
 
   const score = Number(source.score)
-  if (Number.isNaN(score)) return '相似度 -'
+  if (Number.isNaN(score)) return '匹配分数 -'
 
-  return `相似度：${score.toFixed(2)}`
+  return `匹配分数：${score.toFixed(2)}`
 }
 
 function getPath(source) {
@@ -69,13 +75,13 @@ function hideSourceTooltip() {
 
 <template>
   <div class="source-panel">
-    <div v-if="!sources.length" class="muted-card source-empty">
+    <div v-if="!displayedSources.length" class="muted-card source-empty">
       <strong>暂无引用来源</strong>
-      <span>如果当前是 RAG 模式，说明本次回答没有返回 source；可能是知识库未命中、后端降级回答，或接口没有携带 sources。</span>
+      <span>{{ emptyMessage }}</span>
     </div>
     <template v-else>
       <article
-        v-for="source in sources"
+        v-for="source in displayedSources"
         :key="getSourceKey(source)"
         class="source-card"
         @mouseenter="showSourceTooltip(source, $event)"

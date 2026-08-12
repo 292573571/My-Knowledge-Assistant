@@ -10,6 +10,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import WorkspaceManager from './components/WorkspaceManager.vue'
 import UserManagement from './components/UserManagement.vue'
 import SystemMaintenance from './components/SystemMaintenance.vue'
+import TeachingAgentPanel from './components/TeachingAgentPanel.vue'
 import { useChatStore } from './stores/chatStore'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
@@ -178,6 +179,10 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a7 7 0 0 0-7 7v2.5a3.5 3.5 0 0 0 3.5 3.5H10v2H8.5a1.5 1.5 0 0 0 0 3H12a3 3 0 0 0 3-3v-2h.5a3.5 3.5 0 0 0 3.5-3.5V10a7 7 0 0 0-7-7Z"/><path d="M9 10h.01M15 10h.01M9.5 13.5c1.4 1 3.6 1 5 0"/></svg>
             <span>AI 学习助手</span>
           </button>
+          <button :class="{ active: activeSection === 'teaching' }" type="button" @click="activeSection = 'teaching'">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20M8 7h8M8 10.5h6"/></svg>
+            <span>主题教学</span>
+          </button>
           <button :class="{ active: activeSection === 'records' }" type="button" @click="activeSection = 'records'">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 4.5A2.5 2.5 0 0 1 8 2h9.5a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L15 17l-2.7 1.9a.5.5 0 0 1-.6 0L9 17l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z"/><path d="M9 6.5h5.5M9 10h5.5"/></svg>
             <span>学习记录</span>
@@ -228,7 +233,8 @@ async function submitPasswordChange() {
           </div>
         </div>
       </header>
-      <LearningRecords v-if="activeSection === 'records'" />
+       <TeachingAgentPanel v-if="activeSection === 'teaching'" :key="`teaching-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+       <LearningRecords v-else-if="activeSection === 'records'" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
       <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />

@@ -403,6 +403,22 @@ public class RagService {
         );
     }
 
+    /**
+     * 为只读 Agent 检索当前授权空间的知识片段，并复用聊天链路的过滤和引用名称解析。
+     */
+    public List<RagSource> retrieveForAgent(String question, String ownerUserId, String workspaceId, int limit) {
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("query cannot be empty");
+        }
+        int safeLimit = Math.max(1, Math.min(10, limit));
+        List<SourceDocument> candidates = retrieveCandidates(
+                question.strip(), ownerUserId, workspaceId,
+                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return toRagSources(filterByThreshold(question.strip(), candidates)).stream()
+                .limit(safeLimit)
+                .toList();
+    }
+
     public RagStreamResponse stream(RagChatRequest request) {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
