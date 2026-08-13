@@ -155,11 +155,21 @@ yarn preview
 
 它会在本地完成后端测试打包、前端构建、上传发布包，然后在服务器上停止并启动 `zhihai` 服务，执行服务器本地和公网健康检查。服务器部署端使用同一个脚本的内部子命令，不再维护第二份启动逻辑。
 
-首次配置服务器时，将脚本安装为：
+首次配置或更新服务器部署脚本时，在本地项目根目录执行一次：
 
 ```bash
-sudo install -m 750 deploy/deploy-zhihai /usr/local/sbin/deploy-zhihai
+scp -i "$DEPLOY_KEY" -P "$DEPLOY_PORT" deploy/deploy-zhihai "$DEPLOY_USER@$DEPLOY_HOST:/tmp/deploy-zhihai"
+ssh -tt -i "$DEPLOY_KEY" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+  "sudo install -m 750 /tmp/deploy-zhihai /usr/local/sbin/deploy-zhihai && rm -f /tmp/deploy-zhihai"
 ```
+
+并为 `deploy` 用户配置只允许执行这个固定脚本的免密 sudo，例如：
+
+```text
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/deploy-zhihai *
+```
+
+发版脚本不会要求 `sudo -n true`，也不会要求 `deploy` 用户免密执行任意 root 命令。后续发版只上传发布包并调用这个固定部署脚本；修改部署脚本本身时，需要重新手工安装一次。脚本会在发版前检查服务器脚本是否支持 `remote` 和 `cleanup` 子命令。
 
 只有服务器本地健康检查和公网健康检查都成功后，脚本才会删除旧的 release 和备份；任一检查失败时，旧版本仍会保留用于回滚。
 
