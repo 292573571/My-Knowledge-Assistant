@@ -250,7 +250,7 @@ EOF
 
   local remote_help
   remote_help=$(ssh "${ssh_options[@]}" "$remote" \
-    "test -x '$remote_deploy_script' && sudo -n '$remote_deploy_script' --help" 2>&1) || {
+    "sudo -n '$remote_deploy_script' --help" 2>&1) || {
     echo "服务器预检失败：deploy 用户不能免密执行 $remote_deploy_script --help。" >&2
     echo "请确认 sudoers 中包含：" >&2
     echo "  deploy ALL=(root) NOPASSWD: $remote_deploy_script *" >&2
