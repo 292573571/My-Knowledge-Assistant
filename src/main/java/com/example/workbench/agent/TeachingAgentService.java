@@ -52,8 +52,10 @@ public class TeachingAgentService {
                 .content();
         List<TeachingAgentTrace> traces = traces(tools, startedAt);
         TeachingCheckPrompt check = checkService.createPending(user, access, context.sessionId(), context.topic(), answer);
+        TeachingSessionSummary sessionSummary = checkService.summary(user, access, context.sessionId());
         return new TeachingAgentResult(answer == null ? "模型未返回教学内容。" : answer.strip(),
                 context.sessionId(), context.topic(), TeachingStage.EXPLAIN, TeachingNextAction.CHECK, check,
+                sessionSummary,
                 tools.sources(), traces, Math.max(1, traces.size()), true);
     }
 

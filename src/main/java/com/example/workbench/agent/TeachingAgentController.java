@@ -44,4 +44,13 @@ public class TeachingAgentController {
         WorkspaceAccessContext access = workspaceService.access(user, request.workspaceId());
         return checkService.submit(user, access, request);
     }
+
+    @PostMapping("/practice")
+    public TeachingPracticeResponse practice(@Valid @RequestBody SubmitTeachingPracticeRequest request,
+                                             HttpServletRequest httpRequest) {
+        AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
+        WorkspaceAccessContext access = workspaceService.access(user, request.workspaceId());
+        return checkService.submitPractice(user, access, request);
+    }
 }

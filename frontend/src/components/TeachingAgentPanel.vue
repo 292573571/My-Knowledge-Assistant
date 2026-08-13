@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { chatWithTeachingAgent, submitTeachingCheck } from '../api/teachingAgentApi'
+import { chatWithTeachingAgent, submitTeachingCheck, submitTeachingPractice } from '../api/teachingAgentApi'
 import { formatApiError } from '../api/apiError'
 import { createUuid } from '../utils/uuid'
 import { renderMarkdown } from '../utils/markdown'
@@ -14,11 +14,13 @@ const topic = ref('')
 const userLevel = ref('BEGINNER')
 const message = ref('')
 const checkAnswer = ref('')
+const practiceAnswer = ref('')
 const sessionId = ref('')
 const result = ref(null)
 const error = ref('')
 const loading = ref(false)
 const checking = ref(false)
+const practicing = ref(false)
 const showTrace = ref(false)
 
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
@@ -40,7 +42,14 @@ const stageLabels = {
 const actionLabels = {
   CHECK: '回答检查问题',
   PRACTICE: '进入实践练习',
-  REVIEW: '回顾薄弱点'
+  REVIEW: '回顾薄弱点',
+  RECHECK: '复习后重新检查',
+  COMPLETE: '本课完成'
+}
+const summaryStatusLabels = {
+  IN_PROGRESS: '进行中',
+  NEEDS_REVIEW: '需要复习',
+  MASTERED: '已掌握'
 }
 const suggestions = [
   { topic: 'Agent', message: '请解释什么是 Agent，并说明它和普通 RAG 问答有什么区别。' },
@@ -65,6 +74,7 @@ async function ask(suggestion = null) {
   error.value = ''
   result.value = null
   checkAnswer.value = ''
+  practiceAnswer.value = ''
   showTrace.value = false
   loading.value = true
 
@@ -87,6 +97,29 @@ async function ask(suggestion = null) {
   }
 }
 
+async function submitPractice() {
+  if (practicing.value || !result.value?.practice?.practiceId || !practiceAnswer.value.trim() || !props.workspace?.id) return
+  practicing.value = true
+  error.value = ''
+  try {
+    const practiced = await submitTeachingPractice({
+      workspaceId: props.workspace.id,
+      sessionId: sessionId.value,
+      practiceId: result.value.practice.practiceId,
+      answer: practiceAnswer.value.trim()
+    })
+    result.value = {
+      ...result.value,
+      ...practiced,
+      practice: { ...result.value.practice, ...practiced }
+    }
+  } catch (exception) {
+    error.value = formatApiError(exception, '实践答案暂时无法评分。')
+  } finally {
+    practicing.value = false
+  }
+}
+
 async function submitCheck() {
   if (checking.value || !result.value?.check?.checkId || !checkAnswer.value.trim() || !props.workspace?.id) return
   checking.value = true
@@ -106,10 +139,15 @@ async function submitCheck() {
   }
 }
 
+function recheckAfterReview() {
+  ask()
+}
+
 function startNewLesson() {
   sessionId.value = ''
   result.value = null
   checkAnswer.value = ''
+  practiceAnswer.value = ''
   error.value = ''
   showTrace.value = false
 }
@@ -126,7 +164,7 @@ function startNewLesson() {
       <div class="teaching-lesson-note">
         <span class="teaching-note-dot"></span>
         <strong>本课范围</strong>
-        <span>EXPLAIN → CHECK</span>
+        <span>EXPLAIN → CHECK → REVIEW</span>
       </div>
     </section>
 
@@ -203,6 +241,21 @@ function startNewLesson() {
             <span>下一步：{{ actionLabels[result.nextAction] || result.nextAction }}</span>
             <span>{{ result.steps }} 步执行</span>
           </div>
+          <section v-if="result.sessionSummary" class="teaching-summary-card" :class="result.sessionSummary.status.toLowerCase()">
+            <header>
+              <div><small>SESSION MASTERY</small><h3>本节掌握度</h3></div>
+              <strong>{{ result.sessionSummary.masteryPercent }}%</strong>
+            </header>
+            <div class="teaching-summary-progress"><span :style="{ width: `${result.sessionSummary.masteryPercent}%` }"></span></div>
+            <div class="teaching-summary-stats">
+              <span>总分 <b>{{ result.sessionSummary.score }}/{{ result.sessionSummary.maxScore }}</b></span>
+              <span>完成 <b>{{ result.sessionSummary.completedItems }}/{{ result.sessionSummary.requiredItems }}</b></span>
+              <span>状态 <b>{{ summaryStatusLabels[result.sessionSummary.status] || result.sessionSummary.status }}</b></span>
+            </div>
+            <ul v-if="result.sessionSummary.weakPoints?.length" class="teaching-summary-weak-points">
+              <li v-for="point in result.sessionSummary.weakPoints" :key="point">{{ point }}</li>
+            </ul>
+          </section>
           <div class="teaching-answer-markdown markdown-body" v-html="answerHtml"></div>
 
           <div v-if="result.nextAction === 'CHECK' && result.check" class="teaching-check-prompt">
@@ -214,11 +267,40 @@ function startNewLesson() {
               <button type="button" :disabled="checking || !checkAnswer.trim()" @click="submitCheck">{{ checking ? '正在评分...' : '提交答案' }}</button>
             </div>
           </div>
-          <div v-else-if="result.nextAction === 'PRACTICE' || result.nextAction === 'REVIEW'" class="teaching-check-result" :class="{ passed: result.passed }">
-            <strong>{{ result.passed ? '理解检查通过' : '建议回顾后再练习' }} · {{ result.score }}/{{ result.maxScore }}</strong>
+          <div v-else-if="result.nextAction === 'PRACTICE' || result.nextAction === 'RECHECK'" class="teaching-check-result" :class="{ passed: result.passed }">
+            <strong>{{ result.passed ? '理解检查通过' : '建议回顾后再检查' }} · {{ result.score }}/{{ result.maxScore }}</strong>
             <p>{{ result.feedback }}</p>
             <small>{{ result.saved ? `已加入 ${result.recordDate} 学习记录。` : '评分已返回，但学习记录暂时未保存。' }}</small>
           </div>
+
+          <section v-if="result.stage === 'REVIEW' && result.review" class="teaching-review-card">
+            <header>
+              <span class="teaching-review-mark">R</span>
+              <div><small>REVIEW</small><h3>针对性复习</h3></div>
+            </header>
+            <dl>
+              <div><dt>薄弱点</dt><dd>{{ result.review.weakPoint }}</dd></div>
+              <div><dt>关键解释</dt><dd>{{ result.review.explanation }}</dd></div>
+              <div><dt>复习建议</dt><dd>{{ result.review.suggestion }}</dd></div>
+            </dl>
+            <button type="button" :disabled="loading" @click="recheckAfterReview">{{ loading ? '正在重新讲解...' : '复习后重新检查' }}</button>
+          </section>
+
+          <section v-if="result.practice && (result.nextAction === 'PRACTICE' || result.practice.status === 'COMPLETED')" class="teaching-practice-card">
+            <header>
+              <span class="teaching-practice-mark">P</span>
+              <div><small>PRACTICE</small><h3>{{ result.practice.status === 'COMPLETED' ? '实践结果' : '把概念带到真实任务' }}</h3></div>
+            </header>
+            <p class="teaching-practice-question">{{ result.practice.question }}</p>
+            <template v-if="result.practice.status === 'PENDING'">
+              <textarea v-model="practiceAnswer" maxlength="4000" rows="5" :disabled="practicing" placeholder="描述目标、行动、工具或知识库结果，以及结果如何影响下一步。" aria-label="实践答案"></textarea>
+              <button type="button" :disabled="practicing || !practiceAnswer.trim()" @click="submitPractice">{{ practicing ? '正在评估...' : '提交实践答案' }}</button>
+            </template>
+            <div v-else class="teaching-practice-complete" :class="{ passed: result.practice.passed }">
+              <strong>{{ result.practice.passed ? '实践完成' : '实践需要补充' }} · {{ result.practice.score }}/{{ result.practice.maxScore }}</strong>
+              <p>{{ result.practice.feedback }}</p>
+            </div>
+          </section>
 
           <div v-if="result.traces?.length" class="teaching-trace">
             <button type="button" @click="showTrace = !showTrace">{{ showTrace ? '收起工具链路' : '查看工具链路' }}</button>
@@ -239,7 +321,8 @@ function startNewLesson() {
           <div class="teaching-steps">
             <div :class="{ active: result?.stage === 'EXPLAIN' }"><span>1</span><p><strong>讲解</strong><small>建立概念模型</small></p></div>
             <div :class="{ active: result?.stage === 'CHECK' }"><span>2</span><p><strong>检查</strong><small>回答一个理解问题</small></p></div>
-            <div :class="{ active: result?.nextAction === 'PRACTICE' }"><span>3</span><p><strong>练习</strong><small>迁移到真实任务</small></p></div>
+            <div :class="{ active: result?.nextAction === 'PRACTICE' || result?.practice?.status === 'COMPLETED' }"><span>3</span><p><strong>练习</strong><small>迁移到真实任务</small></p></div>
+            <div :class="{ active: result?.stage === 'REVIEW' }"><span>4</span><p><strong>复习</strong><small>修正薄弱概念</small></p></div>
           </div>
         </section>
         <section class="teaching-side-card teaching-source-card">

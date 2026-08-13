@@ -30,3 +30,18 @@ export async function submitTeachingCheck({ workspaceId, sessionId, checkId, ans
     throw apiErrorFromException(error, '无法提交教学检查，请稍后重试。')
   }
 }
+
+export async function submitTeachingPractice({ workspaceId, sessionId, practiceId, answer }) {
+  try {
+    const response = await fetch('/api/agent/teaching/practice', {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ workspaceId, sessionId, practiceId, answer })
+    })
+    if (!response.ok) throw await apiErrorFromResponse(response, '实践提交失败。')
+    return response.json()
+  } catch (error) {
+    throw apiErrorFromException(error, '无法提交实践答案，请稍后重试。')
+  }
+}

@@ -1,9 +1,11 @@
 package com.example.workbench.agent;
 
-public record TeachingCheckResponse(
-        String attemptId,
+public record TeachingPracticeResponse(
+        String practiceId,
         String sessionId,
         String topic,
+        String question,
+        TeachingPracticeStatus status,
         TeachingStage stage,
         TeachingNextAction nextAction,
         int score,
@@ -11,7 +13,6 @@ public record TeachingCheckResponse(
         boolean passed,
         String feedback,
         TeachingReview review,
-        TeachingPracticePrompt practice,
         TeachingSessionSummary sessionSummary,
         boolean saved,
         String recordDate,

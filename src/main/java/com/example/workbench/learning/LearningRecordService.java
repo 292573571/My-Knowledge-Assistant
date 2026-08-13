@@ -96,7 +96,8 @@ public class LearningRecordService {
 
     public synchronized String recordTeachingCheck(AppUser user, String attemptId, String topic,
                                                    String question, String answer, int score, int maxScore,
-                                                   boolean passed, String feedback) {
+                                                   boolean passed, String feedback, String weakPoint,
+                                                   String reviewExplanation, String reviewSuggestion) {
         Path record = recordPath(user);
         try {
             Files.createDirectories(record.getParent());
@@ -107,7 +108,8 @@ public class LearningRecordService {
             if (existingContent.contains("attemptId：" + attemptId)) {
                 return DATE_FORMAT.format(LocalDate.now(clock));
             }
-            String entry = formatTeachingCheck(attemptId, topic, question, answer, score, maxScore, passed, feedback);
+            String entry = formatTeachingCheck(attemptId, topic, question, answer, score, maxScore, passed,
+                    feedback, weakPoint, reviewExplanation, reviewSuggestion);
             Files.writeString(record, entry, StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
             return DATE_FORMAT.format(LocalDate.now(clock));
         } catch (IOException exception) {
@@ -274,15 +276,23 @@ public class LearningRecordService {
     }
 
     private String formatTeachingCheck(String attemptId, String topic, String question, String answer,
-                                       int score, int maxScore, boolean passed, String feedback) {
-        return "\n## 教学检查\n\n"
-                + "- 主题：" + singleLine(topic) + "\n"
-                + "- 检查问题：" + singleLine(question) + "\n"
-                + "- 我的回答：" + singleLine(answer) + "\n"
-                + "- 得分：" + score + "/" + maxScore + "\n"
-                + "- 结果：" + (passed ? "通过" : "需要复习") + "\n"
-                + "- 反馈：" + singleLine(feedback) + "\n"
-                + "- attemptId：" + singleLine(attemptId) + "\n";
+                                       int score, int maxScore, boolean passed, String feedback,
+                                       String weakPoint, String reviewExplanation, String reviewSuggestion) {
+        StringBuilder entry = new StringBuilder("\n## 教学检查\n\n")
+                .append("- 主题：").append(singleLine(topic)).append('\n')
+                .append("- 检查问题：").append(singleLine(question)).append('\n')
+                .append("- 我的回答：").append(singleLine(answer)).append('\n')
+                .append("- 得分：").append(score).append('/').append(maxScore).append('\n')
+                .append("- 结果：").append(passed ? "通过" : "需要复习").append('\n')
+                .append("- 反馈：").append(singleLine(feedback)).append('\n')
+                .append("- attemptId：").append(singleLine(attemptId)).append('\n');
+        if (!passed && weakPoint != null) {
+            entry.append("\n### 针对性复习\n\n")
+                    .append("- 薄弱点：").append(singleLine(weakPoint)).append('\n')
+                    .append("- 关键解释：").append(singleLine(reviewExplanation)).append('\n')
+                    .append("- 复习建议：").append(singleLine(reviewSuggestion)).append('\n');
+        }
+        return entry.toString();
     }
 
     private String singleLine(String value) {

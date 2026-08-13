@@ -2813,6 +2813,26 @@ textarea:focus-visible,
 .teaching-readonly-badge { border: 1px solid #b9dcca; border-radius: 999px; padding: 6px 9px; color: #287452; background: #edf9f2; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .teaching-answer-meta { display: flex; flex-wrap: wrap; gap: 7px; margin: 17px 0 15px 39px; }
 .teaching-answer-meta span { border-radius: 999px; padding: 5px 8px; color: #5c709e; background: #edf2ff; font-size: 10px; }
+.teaching-summary-card { margin: 0 0 17px 39px; border: 1px solid #d5e0f2; border-radius: 12px; padding: 13px; color: #53698b; background: #f8faff; }
+.teaching-summary-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.teaching-summary-card header small { display: block; color: #8196bd; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
+.teaching-summary-card h3 { margin: 2px 0 0; color: #334d78; font-size: 14px; }
+.teaching-summary-card header > strong { color: #416bd0; font-size: 22px; letter-spacing: -.04em; }
+.teaching-summary-progress { height: 6px; margin-top: 11px; overflow: hidden; border-radius: 999px; background: #e5ebf6; }
+.teaching-summary-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#6b8fe8,#416bd0); transition: width 250ms ease; }
+.teaching-summary-stats { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: 10px; font-size: 10px; }
+.teaching-summary-stats b { color: #3d5f9d; }
+.teaching-summary-card.needs_review { border-color: #ead9ad; color: #80662e; background: #fffaf0; }
+.teaching-summary-card.needs_review header small { color: #b08b45; }
+.teaching-summary-card.needs_review h3, .teaching-summary-card.needs_review header > strong { color: #9b712c; }
+.teaching-summary-card.needs_review .teaching-summary-progress span { background: linear-gradient(90deg,#d8ae57,#b48632); }
+.teaching-summary-card.needs_review .teaching-summary-stats b { color: #8e692d; }
+.teaching-summary-card.mastered { border-color: #b9dfca; color: #287452; background: #effaf3; }
+.teaching-summary-card.mastered header small { color: #5d9b78; }
+.teaching-summary-card.mastered h3, .teaching-summary-card.mastered header > strong { color: #287452; }
+.teaching-summary-card.mastered .teaching-summary-progress span { background: linear-gradient(90deg,#65b388,#287452); }
+.teaching-summary-card.mastered .teaching-summary-stats b { color: #287452; }
+.teaching-summary-weak-points { display: grid; gap: 4px; margin: 10px 0 0; padding: 9px 0 0 17px; border-top: 1px solid rgba(176,139,69,.2); font-size: 10px; line-height: 1.5; }
 .teaching-answer-markdown { margin-left: 39px; color: #40516f; font-size: 13px; line-height: 1.75; }
 .teaching-answer-markdown > :first-child { margin-top: 0; }
 .teaching-answer-markdown > :last-child { margin-bottom: 0; }
@@ -2830,6 +2850,28 @@ textarea:focus-visible,
 .teaching-check-result.passed p { color: #4f7862; }
 .teaching-check-result small { color: #9b8550; font-size: 10px; }
 .teaching-check-result.passed small { color: #6f9b7e; }
+.teaching-review-card { margin: 14px 0 0 39px; border: 1px solid #d9d1f0; border-radius: 12px; padding: 14px; background: linear-gradient(145deg,#fbfaff,#f6f3ff); }
+.teaching-review-card header { display: flex; align-items: center; gap: 10px; }
+.teaching-review-card header small { display: block; color: #8b77bd; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
+.teaching-review-card h3 { margin: 2px 0 0; color: #59457f; font-size: 14px; }
+.teaching-review-mark { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #fff; background: #8067bb; font-family: Georgia, serif; font-size: 14px; font-weight: 800; }
+.teaching-review-card dl { display: grid; gap: 8px; margin: 13px 0; }
+.teaching-review-card dl > div { display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 9px; border-top: 1px solid #e8e2f4; padding-top: 8px; }
+.teaching-review-card dt { color: #8b77ad; font-size: 10px; font-weight: 800; }
+.teaching-review-card dd { margin: 0; color: #625673; font-size: 11px; line-height: 1.6; }
+.teaching-review-card > button { border: 0; border-radius: 8px; padding: 8px 12px; color: #fff; background: #765cae; font-size: 10px; font-weight: 800; }
+.teaching-practice-card { margin: 14px 0 0 39px; border: 1px solid #c7ddf3; border-radius: 12px; padding: 14px; background: linear-gradient(145deg,#f8fcff,#f2f7ff); }
+.teaching-practice-card header { display: flex; align-items: center; gap: 10px; }
+.teaching-practice-card header small { display: block; color: #5c88bf; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
+.teaching-practice-card h3 { margin: 2px 0 0; color: #315d91; font-size: 14px; }
+.teaching-practice-mark { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #fff; background: #5d8ec5; font-family: Georgia, serif; font-size: 14px; font-weight: 800; }
+.teaching-practice-question { margin: 13px 0 0; color: #506b8b; font-size: 11px; line-height: 1.65; }
+.teaching-practice-card textarea { display: block; width: 100%; margin-top: 10px; resize: vertical; border: 1px solid #c8daec; border-radius: 8px; padding: 9px 10px; outline: 0; color: #385573; background: #fff; font: inherit; font-size: 11px; line-height: 1.55; }
+.teaching-practice-card textarea:focus { border-color: #6c9bd0; box-shadow: 0 0 0 3px rgba(74,132,193,.12); }
+.teaching-practice-card > button { margin-top: 8px; border: 0; border-radius: 8px; padding: 8px 12px; color: #fff; background: #4e82b8; font-size: 10px; font-weight: 800; }
+.teaching-practice-complete { margin-top: 11px; border-radius: 8px; padding: 10px; color: #896b32; background: #fff9ea; font-size: 11px; }
+.teaching-practice-complete.passed { color: #287452; background: #effaf3; }
+.teaching-practice-complete p { margin: 4px 0 0; line-height: 1.55; }
 .teaching-trace { margin: 17px 0 0 39px; border-top: 1px solid #e8edf5; padding-top: 11px; }
 .teaching-trace > button { border: 0; padding: 0; color: #5a70bd; background: transparent; font-size: 10px; font-weight: 750; }
 .teaching-trace ul { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
@@ -3033,7 +3075,7 @@ textarea:focus-visible,
   .teaching-fields { grid-template-columns: 1fr; }
   .teaching-form-footer { align-items: stretch; flex-direction: column; }
   .teaching-form-footer button { width: 100%; }
-  .teaching-answer-meta, .teaching-answer-markdown, .teaching-check-prompt, .teaching-trace { margin-left: 0; }
+  .teaching-answer-meta, .teaching-answer-markdown, .teaching-summary-card, .teaching-check-prompt, .teaching-check-result, .teaching-review-card, .teaching-practice-card, .teaching-trace { margin-left: 0; }
   .teaching-answer-header { gap: 9px; }
   .teaching-readonly-badge { padding-inline: 7px; }
   .teaching-source-card { min-height: 0; }

@@ -3,5 +3,7 @@ package com.example.workbench.agent;
 public enum TeachingNextAction {
     CHECK,
     PRACTICE,
-    REVIEW
+    REVIEW,
+    RECHECK,
+    COMPLETE
 }

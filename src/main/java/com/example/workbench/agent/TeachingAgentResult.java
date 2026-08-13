@@ -10,6 +10,7 @@ public record TeachingAgentResult(
         TeachingStage stage,
         TeachingNextAction nextAction,
         TeachingCheckPrompt check,
+        TeachingSessionSummary sessionSummary,
         List<RagSource> sources,
         List<TeachingAgentTrace> traces,
         int steps,

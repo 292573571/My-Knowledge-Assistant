@@ -25,6 +25,31 @@ class LearningRecordServiceTest {
     Path tempDir;
 
     @Test
+    void recordsTeachingReviewOnceForTheSameAttempt() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(
+                ingestionService, clock, tempDir.resolve("docs/learning-records"));
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.recordTeachingCheck(user, "attempt-1", "Agent", "Agent 为什么需要工具？",
+                "Agent 会回答问题。", 2, 5, false, "需要复习", "没有说明工具调用",
+                "工具结果会回到模型上下文。", "请用例子重新说明。");
+        service.recordTeachingCheck(user, "attempt-1", "Agent", "Agent 为什么需要工具？",
+                "另一个答案", 2, 5, false, "需要复习", "另一个薄弱点", "另一个解释", "另一个建议");
+
+        String content = Files.readString(tempDir.resolve("docs/learning-records/user-alice/2026-07-26.md"));
+        assertThat(content)
+                .contains("## 教学检查")
+                .contains("### 针对性复习")
+                .contains("没有说明工具调用")
+                .contains("工具结果会回到模型上下文")
+                .containsOnlyOnce("attemptId：attempt-1")
+                .doesNotContain("另一个答案");
+        verify(ingestionService, never()).ingestDocument(Mockito.anyString(), eq(true));
+    }
+
+    @Test
     void replacesTheAnswerForARepeatedQuestionWithTheLatestReliableAnswer() throws Exception {
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
