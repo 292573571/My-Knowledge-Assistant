@@ -248,8 +248,11 @@ EOF
     exit 1
   }
   if [[ "$remote_help" != *"deploy-zhihai cleanup"* ]]; then
-    echo "服务器上的 $remote_deploy_script 不是新版统一发版脚本，请先手工更新一次" >&2
-    echo "预检输出: $remote_help" >&2
+    echo "服务器上的 $remote_deploy_script 仍是旧版，请先更新一次统一发版脚本。" >&2
+    echo "旧版输出: $remote_help" >&2
+    echo "请先运行：" >&2
+    echo "  scp -i \"$deploy_key\" -P \"$deploy_port\" deploy/deploy-zhihai \"$remote:/tmp/deploy-zhihai\"" >&2
+    echo "  ssh -tt -i \"$deploy_key\" -p \"$deploy_port\" \"$remote\" \"sudo install -m 750 /tmp/deploy-zhihai $remote_deploy_script && rm -f /tmp/deploy-zhihai\"" >&2
     exit 1
   fi
 
