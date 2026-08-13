@@ -27,7 +27,7 @@ public class TeachingReadOnlyService {
 
     public LearningHistorySummary recentLearningRecords(TeachingAgentContext context, int limit) {
         int safeLimit = Math.max(1, Math.min(20, limit));
-        return new LearningHistorySummary(learningRecordService.list(context.user()).stream()
+        return new LearningHistorySummary(learningRecordService.list(context.user(), context.access().workspaceId()).stream()
                 .limit(safeLimit)
                 .toList());
     }

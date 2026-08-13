@@ -152,4 +152,16 @@ class TeachingCheckServiceTest {
         assertThat(response.sessionSummary().status()).isEqualTo(TeachingSessionStatus.NEEDS_REVIEW);
         assertThat(response.sessionSummary().nextAction()).isEqualTo(TeachingNextAction.RECHECK);
     }
+
+    @Test
+    void doesNotAllowUnknownPracticeIdToBypassUnderstandingCheck() {
+        TeachingCheckPrompt prompt = service.createPending(user, access, "lesson-no-skip", "Agent", "检查问题？");
+        service.submit(user, access, new SubmitTeachingCheckRequest(
+                "workspace-a", "lesson-no-skip", prompt.checkId(), "Agent 是模型。"));
+
+        assertThatThrownBy(() -> service.submitPractice(user, access, new SubmitTeachingPracticeRequest(
+                "workspace-a", "lesson-no-skip", "forged-practice-id", "目标、工具、结果。")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("实践不存在或已过期");
+    }
 }

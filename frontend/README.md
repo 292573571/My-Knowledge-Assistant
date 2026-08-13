@@ -212,6 +212,29 @@ data: {}
 
 流式请求通过 `fetch` 读取 `text/event-stream`，身份由 HttpOnly Cookie 携带。Token 和完整问题不会出现在 URL 中。
 
+## 工作空间与学习记录
+
+学习记录页面的请求都绑定当前工作空间。以下接口必须通过查询参数提供 `workspaceId`，服务端会先校验访问权限，再只处理该空间的记录：
+
+```text
+GET    /api/learning-records?workspaceId=<workspaceId>
+GET    /api/learning-records/teaching-progress?workspaceId=<workspaceId>
+GET    /api/learning-records/{date}?workspaceId=<workspaceId>
+PUT    /api/learning-records/{date}?workspaceId=<workspaceId>
+DELETE /api/learning-records/{date}?workspaceId=<workspaceId>
+POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
+```
+
+提升正式笔记时，请求体可携带当前页面编辑后的内容：
+
+```json
+{
+  "content": "整理后的学习记录内容"
+}
+```
+
+`workspaceId` 不应从用户可编辑的 Markdown 内容中信任。客户端只提交当前工作空间标识，记录和正式笔记的 workspace 归属由服务端校验并写入。
+
 ## 前端状态持久化
 
 会话和消息以 PostgreSQL 为唯一持久数据源；浏览器 `localStorage` 不保存 Token、聊天内容或知识库资料。

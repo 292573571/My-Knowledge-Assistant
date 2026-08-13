@@ -3,6 +3,7 @@ package com.example.workbench.agent;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.workbench.learning.TeachingTopicNormalizer;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.ai.chat.client.ChatClient;
@@ -41,7 +42,8 @@ public class TeachingAgentService {
         String sessionId = "default".equals(request.normalizedSessionId())
                 ? java.util.UUID.randomUUID().toString() : request.normalizedSessionId();
         TeachingAgentContext context = new TeachingAgentContext(user, access, sessionId,
-                request.topic().strip(), TeachingStage.EXPLAIN, request.normalizedUserLevel());
+                TeachingTopicNormalizer.display(request.topic()), TeachingStage.EXPLAIN,
+                request.normalizedUserLevel());
         TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
         long startedAt = System.nanoTime();
         String userPrompt = """

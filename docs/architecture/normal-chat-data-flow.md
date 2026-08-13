@@ -62,7 +62,7 @@ sequenceDiagram
         Conversation->>DB: 更新 chat_conversations.updated_at
         Conversation->>DB: 插入 assistant chat_messages<br/>保存回答、来源和工具元数据
 
-        Chat->>Learning: record(用户, 问题, 回答, 来源)
+        Chat->>Learning: record(用户, workspaceId, 问题, 回答, 来源)
         Learning->>Docs: 追加至 docs/learning-records/<br/>user-<id>/YYYY-MM-DD.md
         Learning->>Learning: 基于问题和回答哈希去重
         Learning->>Ingest: ingestDocument(当天文件, force=true)
@@ -81,8 +81,9 @@ sequenceDiagram
 2. RAG 回答优先使用本地知识库；无本地来源或资料不足时，才使用通用模型回退，并明确标记来源边界。
 3. `ConversationExecutionRegistry` 防止停止或删除会话后，模型迟到结果重新写入 PostgreSQL。
 4. 学习记录只在助手消息成功持久化后创建，因此被取消或删除的对话不会沉淀为知识。
-5. 每日学习记录按用户、日期聚合为单个 Markdown 文件；写入后仅重新索引该文件，而不是重建整个知识库。
-6. 当前学习记录在目录结构上按用户分开，但向量检索尚未实现用户级过滤，不能将目录隔离视为完整的数据访问隔离。
+5. 每日学习记录按用户、日期聚合为单个 Markdown 文件；每个问答条目带有 `workspaceId`，列表、详情、编辑、删除和正式笔记提升都按 workspace 过滤。写入后仅重新索引该文件，而不是重建整个知识库。
+6. 正式笔记按 `docs/manual-notes/user-<id>/workspace-<encoded-workspace-id>/YYYY-MM-DD-learning-note.md` 分目录保存，并以当前 workspace 的文档路径重新索引。
+7. 旧学习记录没有 workspace 标记时不会被自动归属到指定空间；向量检索的用户和 workspace 过滤仍需以索引元数据和查询条件为准，不能仅将目录结构视为完整的数据访问隔离。
 
 ## 关键数据落点
 
@@ -92,6 +93,7 @@ sequenceDiagram
 | 聊天消息 | PostgreSQL `chat_messages` | 恢复历史消息、来源和工具事件 |
 | 短期对话上下文 | `ConversationMemory` | 为当前 RAG 请求补充最近上下文 |
 | 原始知识文档 | `docs/` | 可重新索引的知识源 |
-| 每日学习记录 | `docs/learning-records/user-<id>/YYYY-MM-DD.md` | 自动沉淀的问答记录 |
+| 每日学习记录 | `docs/learning-records/user-<id>/YYYY-MM-DD.md` | 按条目保存 workspace 标记的自动问答记录 |
+| 正式笔记 | `docs/manual-notes/user-<id>/workspace-<encoded-workspace-id>/YYYY-MM-DD-learning-note.md` | 当前 workspace 的整理笔记 |
 | 文档索引 | `DocumentIndexStore` | 文件路径、内容哈希、分块数等索引元数据 |
 | 文档向量 | Chroma / `VectorStore` | 相似度召回 |

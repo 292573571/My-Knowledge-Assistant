@@ -18,6 +18,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
+import org.springframework.web.server.ResponseStatusException;
 
 class LearningRecordServiceTest {
 
@@ -47,6 +48,174 @@ class LearningRecordServiceTest {
                 .containsOnlyOnce("attemptId：attempt-1")
                 .doesNotContain("另一个答案");
         verify(ingestionService, never()).ingestDocument(Mockito.anyString(), eq(true));
+    }
+
+    @Test
+    void summarizesTeachingProgressByTopicFromPersistedChecks() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        Path records = tempDir.resolve("docs/learning-records");
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, records);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.recordTeachingCheck(user, "attempt-1", "Agent", "问题一", "答案一", 2, 5,
+                false, "需要复习", "薄弱点", "解释", "建议");
+        service.recordTeachingCheck(user, "attempt-2", "Agent", "问题二", "答案二", 5, 5,
+                true, "通过", null, null, null);
+        service.recordTeachingCheck(user, "attempt-3", "RAG", "问题三", "答案三", 4, 5,
+                true, "通过", null, null, null);
+
+        List<TeachingTopicProgress> progress = service.teachingProgress(user);
+
+        assertThat(progress).extracting(TeachingTopicProgress::topic)
+                .containsExactly("Agent", "RAG");
+        assertThat(progress.get(0).attempts()).isEqualTo(2);
+        assertThat(progress.get(0).passedAttempts()).isEqualTo(1);
+        assertThat(progress.get(0).bestScore()).isEqualTo(5);
+        assertThat(progress.get(0).latestScore()).isEqualTo(5);
+        assertThat(progress.get(0).latestPassed()).isTrue();
+        assertThat(progress.get(0).masteryPercent()).isEqualTo(100);
+    }
+
+    @Test
+    void mergesTopicProgressThatOnlyDiffersByCaseOrWhitespace() {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(ingestionService, clock,
+                tempDir.resolve("docs/learning-records"));
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.recordTeachingCheck(user, "attempt-1", " Agent ", "问题一", "答案一", 2, 5,
+                false, "需要复习", "薄弱点", "解释", "建议");
+        service.recordTeachingCheck(user, "attempt-2", "agent", "问题二", "答案二", 5, 5,
+                true, "通过", null, null, null);
+
+        List<TeachingTopicProgress> progress = service.teachingProgress(user);
+
+        assertThat(progress).hasSize(1);
+        assertThat(progress.get(0).topic()).isEqualTo("agent");
+        assertThat(progress.get(0).attempts()).isEqualTo(2);
+        assertThat(progress.get(0).latestPassed()).isTrue();
+    }
+
+    @Test
+    void filtersTeachingProgressByWorkspace() {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(ingestionService, clock,
+                tempDir.resolve("docs/learning-records"));
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.recordTeachingCheck(user, "workspace-a", "attempt-a", "Agent", "问题", "答案", 5, 5,
+                true, "通过", null, null, null);
+        service.recordTeachingCheck(user, "workspace-b", "attempt-b", "Agent", "问题", "答案", 1, 5,
+                false, "需要复习", "薄弱点", "解释", "建议");
+
+        assertThat(service.teachingProgress(user, "workspace-a"))
+                .extracting(TeachingTopicProgress::latestScore)
+                .containsExactly(5);
+        assertThat(service.teachingProgress(user, "workspace-b"))
+                .extracting(TeachingTopicProgress::latestScore)
+                .containsExactly(1);
+    }
+
+    @Test
+    void isolatesLearningRecordDetailAndUpdatesByWorkspace() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        Path records = tempDir.resolve("docs/learning-records");
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, records);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.record(user, "workspace-a", "A 空间问题", "A 空间回答内容。", List.of());
+        service.record(user, "workspace-b", "B 空间问题", "B 空间回答内容。", List.of());
+
+        assertThat(service.detail(user, "workspace-a", "2026-07-26").content())
+                .contains("A 空间问题")
+                .doesNotContain("B 空间问题");
+        assertThat(service.detail(user, "workspace-b", "2026-07-26").content())
+                .contains("B 空间问题")
+                .doesNotContain("A 空间问题");
+
+        service.update(user, "workspace-a", "2026-07-26",
+                "# 2026-07-26 学习记录\n\n## 问题\n\n- 知识空间：workspace-b\n\nA 空间更新问题\n\n## 回答\n\nA 空间更新回答。");
+
+        String stored = Files.readString(records.resolve("user-alice/2026-07-26.md"));
+        assertThat(stored)
+                .contains("- 知识空间：workspace-a")
+                .contains("A 空间更新问题")
+                .contains("- 知识空间：workspace-b")
+                .contains("B 空间问题");
+        assertThat(service.detail(user, "workspace-a", "2026-07-26").content())
+                .contains("A 空间更新问题")
+                .doesNotContain("B 空间问题");
+    }
+
+    @Test
+    void deletesOnlyTheSelectedWorkspaceLearningEntries() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        Path records = tempDir.resolve("docs/learning-records");
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, records);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.record(user, "workspace-a", "A 空间删除问题", "A 空间删除回答内容。", List.of());
+        service.record(user, "workspace-b", "B 空间保留问题", "B 空间保留回答内容。", List.of());
+
+        service.delete(user, "workspace-a", "2026-07-26");
+
+        assertThat(service.list(user, "workspace-a")).isEmpty();
+        assertThat(service.detail(user, "workspace-b", "2026-07-26").content())
+                .contains("B 空间保留问题")
+                .doesNotContain("A 空间删除问题");
+        assertThat(Files.readString(records.resolve("user-alice/2026-07-26.md")))
+                .contains("B 空间保留问题")
+                .doesNotContain("A 空间删除问题");
+        verify(ingestionService).deleteIndexedPath(records.resolve("user-alice/2026-07-26.md").toString());
+    }
+
+    @Test
+    void promotesEachWorkspaceIntoAnIndependentFormalNote() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        Path records = tempDir.resolve("docs/learning-records");
+        Path notes = tempDir.resolve("docs/manual-notes");
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, records, notes);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        service.record(user, "workspace-a", "A 空间正式笔记问题", "A 空间正式笔记回答内容。", List.of());
+        service.record(user, "workspace-b", "B 空间正式笔记问题", "B 空间正式笔记回答内容。", List.of());
+
+        FormalNoteResult noteA = service.promote(user, "workspace-a", "2026-07-26", null);
+        FormalNoteResult noteB = service.promote(user, "workspace-b", "2026-07-26", null);
+
+        assertThat(noteA.path()).isNotEqualTo(noteB.path());
+        assertThat(Files.readString(Path.of(noteA.path())))
+                .contains("A 空间正式笔记问题")
+                .doesNotContain("B 空间正式笔记问题");
+        assertThat(Files.readString(Path.of(noteB.path())))
+                .contains("B 空间正式笔记问题")
+                .doesNotContain("A 空间正式笔记问题");
+        assertThat(service.detail(user, "workspace-a", "2026-07-26").content())
+                .contains("A 空间正式笔记问题")
+                .doesNotContain("B 空间正式笔记问题");
+        assertThat(service.detail(user, "workspace-b", "2026-07-26").content())
+                .contains("B 空间正式笔记问题")
+                .doesNotContain("A 空间正式笔记问题");
+    }
+
+    @Test
+    void cannotPromoteAWorkspaceWithoutItsOwnLearningEntry() {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));
+        LearningRecordService service = new LearningRecordService(ingestionService, clock, tempDir.resolve("docs/learning-records"), tempDir.resolve("docs/manual-notes"));
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        service.record(user, "workspace-a", "A 空间问题", "A 空间回答内容。", List.of());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.promote(user, "workspace-b", "2026-07-26", null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("学习记录不存在");
+        assertThat(tempDir.resolve("docs/manual-notes/user-alice")).doesNotExist();
     }
 
     @Test

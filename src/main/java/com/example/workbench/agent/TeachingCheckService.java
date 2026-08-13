@@ -89,7 +89,7 @@ public class TeachingCheckService {
             String recordDate;
             boolean saved = true;
             try {
-                recordDate = learningRecordService.recordTeachingCheck(user, attempt.checkId, attempt.topic,
+                recordDate = learningRecordService.recordTeachingCheck(user, attempt.workspaceId, attempt.checkId, attempt.topic,
                         attempt.question, submittedAnswer, score, MAX_SCORE, passed, feedback,
                         review == null ? null : review.weakPoint(),
                         review == null ? null : review.explanation(),
@@ -136,6 +136,12 @@ public class TeachingCheckService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "该实践题已经提交过不同答案");
                 }
                 return attempt.practiceResponse;
+            }
+            if (!attempt.checkCompleted) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "理解检查尚未完成，不能提交实践");
+            }
+            if (attempt.response == null || !attempt.response.passed()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "理解检查未通过，不能提交实践");
             }
 
             int score = practiceScore(attempt, submittedAnswer);

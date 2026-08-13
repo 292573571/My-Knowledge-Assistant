@@ -167,7 +167,7 @@ public class WorkbenchStreamController {
                             normalizedMode, answerContent, answer.sources(), List.of());
                         if (recorded) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
-                            learningRecordService.record(user, message, answerContent, answer.sources());
+                            learningRecordService.record(user, workspace.workspaceId(), message, answerContent, answer.sources());
                             ragQualityAuditService.audit(scopedConversationId, message, answerContent, answer.sources());
                     }
                 }

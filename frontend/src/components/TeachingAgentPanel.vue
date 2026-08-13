@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { chatWithTeachingAgent, submitTeachingCheck, submitTeachingPractice } from '../api/teachingAgentApi'
+import { fetchTeachingProgress } from '../api/learningRecordApi'
 import { formatApiError } from '../api/apiError'
 import { createUuid } from '../utils/uuid'
 import { renderMarkdown } from '../utils/markdown'
@@ -26,6 +27,8 @@ const practicing = ref(false)
 const showTrace = ref(false)
 const qualityRetryCount = ref(0)
 const maxQualityRetries = 2
+const sessionUnavailable = ref(false)
+const teachingProgress = ref([])
 
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
 const answerHtml = computed(() => renderMarkdown(result.value?.answer || ''))
@@ -69,6 +72,11 @@ const practiceAnswer = computed(() => [
   `使用的工具：${practiceTool.value.trim()}`,
   `工具结果的作用：${practiceResult.value.trim()}`
 ].join('\n'))
+const normalizedTopic = (value) => (value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+const currentTopicProgress = computed(() => teachingProgress.value.find((item) => normalizedTopic(item.topic) === normalizedTopic(topic.value)) || null)
+const reviewTopics = computed(() => teachingProgress.value
+  .filter((item) => !item.latestPassed || item.masteryPercent < 60)
+  .slice(0, 3))
 const suggestions = [
   { topic: 'Agent', message: '请解释什么是 Agent，并说明它和普通 RAG 问答有什么区别。' },
   { topic: 'RAG', message: '请用一个简单例子解释 RAG 的工作流程。' },
@@ -91,6 +99,7 @@ async function ask(suggestion = null) {
   message.value = normalizedMessage
   const previousTopic = result.value?.topic
   error.value = ''
+  sessionUnavailable.value = false
   result.value = null
   checkAnswer.value = ''
   practiceScene.value = ''
@@ -121,6 +130,13 @@ async function ask(suggestion = null) {
   }
 }
 
+function reviewTopic(progress) {
+  ask({
+    topic: progress.topic,
+    message: `请带我复习“${progress.topic}”。我之前的理解检查得分是 ${progress.latestScore}/${progress.maxScore}，请先解释最容易混淆的部分，再给一个例子和新的检查问题。`
+  })
+}
+
 async function improveExplanation() {
   if (loading.value || !result.value?.quality || result.value.quality.status === 'PASS'
     || qualityRetryCount.value >= maxQualityRetries) return
@@ -149,7 +165,12 @@ async function submitPractice() {
       practice: { ...result.value.practice, ...practiced }
     }
   } catch (exception) {
-    error.value = formatApiError(exception, '实践答案暂时无法评分。')
+    if (exception?.status === 404) {
+      sessionUnavailable.value = true
+      error.value = ''
+    } else {
+      error.value = formatApiError(exception, '实践答案暂时无法评分。')
+    }
   } finally {
     practicing.value = false
   }
@@ -167,8 +188,14 @@ async function submitCheck() {
       answer: checkAnswer.value.trim()
     })
     result.value = { ...result.value, ...checked }
+    await loadTeachingProgress()
   } catch (exception) {
-    error.value = formatApiError(exception, '教学检查暂时无法评分。')
+    if (exception?.status === 404) {
+      sessionUnavailable.value = true
+      error.value = ''
+    } else {
+      error.value = formatApiError(exception, '教学检查暂时无法评分。')
+    }
   } finally {
     checking.value = false
   }
@@ -176,6 +203,18 @@ async function submitCheck() {
 
 function recheckAfterReview() {
   ask()
+}
+
+async function restartUnavailableSession() {
+  sessionId.value = ''
+  sessionUnavailable.value = false
+  result.value = null
+  checkAnswer.value = ''
+  practiceScene.value = ''
+  practiceTool.value = ''
+  practiceResult.value = ''
+  showTrace.value = false
+  await ask()
 }
 
 function startNewLesson() {
@@ -186,9 +225,24 @@ function startNewLesson() {
   practiceTool.value = ''
   practiceResult.value = ''
   error.value = ''
+  sessionUnavailable.value = false
   showTrace.value = false
   qualityRetryCount.value = 0
 }
+
+async function loadTeachingProgress() {
+  try {
+    if (!props.workspace?.id) {
+      teachingProgress.value = []
+      return
+    }
+    teachingProgress.value = await fetchTeachingProgress(props.workspace.id)
+  } catch {
+    teachingProgress.value = []
+  }
+}
+
+onMounted(loadTeachingProgress)
 </script>
 
 <template>
@@ -262,6 +316,16 @@ function startNewLesson() {
         </article>
 
         <p v-if="error" class="teaching-error" role="alert">{{ error }}</p>
+
+        <section v-if="sessionUnavailable" class="teaching-session-recovery" role="alert">
+          <div>
+            <strong>本次教学会话已失效</strong>
+            <p>会话可能已超过 30 分钟，或服务刚刚重启。原来的检查题和实践状态无法安全恢复，但你的主题和问题仍然保留。</p>
+          </div>
+          <button type="button" :disabled="loading" @click="restartUnavailableSession">
+            {{ loading ? '正在重新开始...' : '重新开始本主题' }}
+          </button>
+        </section>
 
         <article v-if="result" class="teaching-card teaching-answer-card" aria-live="polite">
           <header class="teaching-answer-header">
@@ -389,6 +453,31 @@ function startNewLesson() {
         <section class="teaching-side-card teaching-source-card">
           <header><span class="teaching-side-label">知识依据</span><span v-if="result?.sources?.length">{{ result.sources.length }} 条</span></header>
           <SourcePanel :sources="result?.sources || []" :empty-message="sourceEmptyMessage" />
+        </section>
+        <section class="teaching-side-card teaching-history-card">
+          <header><span class="teaching-side-label">长期进度</span><span v-if="teachingProgress.length">{{ teachingProgress.length }} 个主题</span></header>
+          <div v-if="currentTopicProgress" class="teaching-history-current">
+            <strong>{{ currentTopicProgress.topic }}</strong>
+            <span>最佳掌握度 {{ currentTopicProgress.masteryPercent }}%</span>
+            <small>最近 {{ currentTopicProgress.latestScore }}/{{ currentTopicProgress.maxScore }} · 通过 {{ currentTopicProgress.passedAttempts }} 次</small>
+          </div>
+          <div v-else-if="!teachingProgress.length" class="teaching-history-empty">完成一次理解检查后，这里会保留主题历史进度。</div>
+          <ul v-else class="teaching-history-list">
+            <li v-for="item in teachingProgress.slice(0, 4)" :key="item.topic">
+              <span><strong>{{ item.topic }}</strong><small>最近 {{ item.latestDate }}</small></span>
+              <b>{{ item.masteryPercent }}%</b>
+            </li>
+          </ul>
+        </section>
+        <section v-if="reviewTopics.length" class="teaching-side-card teaching-review-topics-card">
+          <header><span class="teaching-side-label">建议复习</span><span>优先补弱项</span></header>
+          <p>根据历史检查结果，先回顾这些还不稳定的主题。</p>
+          <ul class="teaching-review-topics-list">
+            <li v-for="item in reviewTopics" :key="item.topic">
+              <div><strong>{{ item.topic }}</strong><small>最近 {{ item.latestScore }}/{{ item.maxScore }} · 最佳 {{ item.masteryPercent }}%</small></div>
+              <button type="button" :disabled="loading" @click="reviewTopic(item)">开始复习</button>
+            </li>
+          </ul>
         </section>
         <section class="teaching-side-card teaching-safety-card">
           <span class="teaching-side-label">安全边界</span>

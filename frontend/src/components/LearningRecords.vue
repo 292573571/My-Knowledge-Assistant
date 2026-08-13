@@ -5,6 +5,7 @@ import { fetchLearningRecord, fetchLearningRecords, promoteLearningRecord, updat
 import { renderMarkdown } from '../utils/markdown'
 
 const records = ref([])
+const props = defineProps({ workspace: { type: Object, default: null } })
 const activeRecord = ref(null)
 const loading = ref(true)
 const reading = ref(false)
@@ -69,7 +70,7 @@ async function selectRecord(record) {
   reading.value = true
   error.value = ''
   try {
-    activeRecord.value = await fetchLearningRecord(record.date)
+    activeRecord.value = await fetchLearningRecord(record.date, props.workspace?.id)
     draftContent.value = activeRecord.value.content
     editing.value = false
   } catch (exception) {
@@ -95,7 +96,7 @@ async function saveRecord() {
   saving.value = true
   error.value = ''
   try {
-    activeRecord.value = await updateLearningRecord(activeRecord.value.date, draftContent.value)
+    activeRecord.value = await updateLearningRecord(activeRecord.value.date, props.workspace?.id, draftContent.value)
     editing.value = false
     notice.value = '学习记录草稿已暂存。'
     await refreshSummaries()
@@ -112,8 +113,8 @@ async function promoteRecord() {
   try {
     const promotedDate = activeRecord.value.date
     const contentToPromote = editing.value ? draftContent.value : activeRecord.value.content
-    const result = await promoteLearningRecord(promotedDate, contentToPromote)
-    activeRecord.value = await fetchLearningRecord(promotedDate)
+    const result = await promoteLearningRecord(promotedDate, props.workspace?.id, contentToPromote)
+    activeRecord.value = await fetchLearningRecord(promotedDate, props.workspace?.id)
     draftContent.value = activeRecord.value.content
     editing.value = false
     notice.value = `已提升为正式笔记：${result.fileName}，学习记录已同步为正式内容。`
@@ -126,14 +127,19 @@ async function promoteRecord() {
 }
 
 async function refreshSummaries() {
-  records.value = await fetchLearningRecords()
+  records.value = await fetchLearningRecords(props.workspace?.id)
 }
 
 async function load() {
   loading.value = true
   error.value = ''
+  if (!props.workspace?.id) {
+    records.value = []
+    loading.value = false
+    return
+  }
   try {
-    records.value = await fetchLearningRecords()
+    records.value = await fetchLearningRecords(props.workspace?.id)
     if (records.value.length) {
       const latest = new Date(`${records.value[0].date}T00:00:00`)
       calendarMonth.value = new Date(latest.getFullYear(), latest.getMonth(), 1)

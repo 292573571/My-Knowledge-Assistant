@@ -13,28 +13,32 @@ async function request(path, options = {}) {
   return response.json()
 }
 
-export function fetchLearningRecords() {
-  return request('/api/learning-records')
+export function fetchLearningRecords(workspaceId) {
+  return request(`/api/learning-records?workspaceId=${encodeURIComponent(workspaceId || '')}`)
 }
 
-export function fetchLearningRecord(date) {
-  return request(`/api/learning-records/${encodeURIComponent(date)}`)
+export function fetchTeachingProgress(workspaceId) {
+  return request(`/api/learning-records/teaching-progress?workspaceId=${encodeURIComponent(workspaceId || '')}`)
 }
 
-export function updateLearningRecord(date, content) {
-  return request(`/api/learning-records/${encodeURIComponent(date)}`, {
+export function fetchLearningRecord(date, workspaceId) {
+  return request(`/api/learning-records/${encodeURIComponent(date)}?workspaceId=${encodeURIComponent(workspaceId || '')}`)
+}
+
+export function updateLearningRecord(date, workspaceId, content) {
+  return request(`/api/learning-records/${encodeURIComponent(date)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content })
   })
 }
 
-export function deleteLearningRecord(date) {
-  return request(`/api/learning-records/${encodeURIComponent(date)}`, { method: 'DELETE' })
+export function deleteLearningRecord(date, workspaceId) {
+  return request(`/api/learning-records/${encodeURIComponent(date)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, { method: 'DELETE' })
 }
 
-export function promoteLearningRecord(date, content) {
-  return request(`/api/learning-records/${encodeURIComponent(date)}/promote`, {
+export function promoteLearningRecord(date, workspaceId, content) {
+  return request(`/api/learning-records/${encodeURIComponent(date)}/promote?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content })

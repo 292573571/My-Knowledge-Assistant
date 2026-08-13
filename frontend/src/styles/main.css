@@ -2807,6 +2807,10 @@ textarea:focus-visible,
 .teaching-form-footer small { color: #9aa6b8; font-size: 10px; }
 .teaching-form-footer button { border: 0; border-radius: 9px; padding: 10px 17px; color: #fff; background: linear-gradient(135deg,#4169db,#6385eb); box-shadow: 0 7px 15px rgba(65,105,219,.2); font-size: 11px; font-weight: 800; }
 .teaching-error { margin: 0; border: 1px solid #efc9cc; border-radius: 10px; padding: 10px 12px; color: #a33e47; background: #fff3f4; font-size: 12px; }
+.teaching-session-recovery { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 0; border: 1px solid #e4cf9f; border-radius: 11px; padding: 12px 13px; color: #80662e; background: #fffaf0; }
+.teaching-session-recovery strong { font-size: 12px; }
+.teaching-session-recovery p { margin: 4px 0 0; color: #9b8550; font-size: 10px; line-height: 1.55; }
+.teaching-session-recovery button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: 8px 11px; color: #fff; background: #b48632; font-size: 10px; font-weight: 800; }
 .teaching-answer-card { border-color: #cbd9f6; background: linear-gradient(145deg,#fff,#f8faff); }
 .teaching-answer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
 .teaching-answer-label { display: block; margin-bottom: 5px; color: #5270c0; letter-spacing: .08em; }
@@ -2899,6 +2903,29 @@ textarea:focus-visible,
 .teaching-safety-card { border-color: #ead9ad; background: linear-gradient(145deg,#fffdf7,#fff9ed); }
 .teaching-safety-card h2 { margin-bottom: 8px; color: #765d2d; font-size: 18px; }
 .teaching-safety-card p { margin: 0; color: #806f4e; font-size: 11px; line-height: 1.65; }
+.teaching-history-card header { display: flex; justify-content: space-between; gap: 8px; }
+.teaching-history-card header > span:last-child { color: #94a2b8; font-size: 10px; }
+.teaching-history-current { display: grid; gap: 4px; margin-top: 12px; border-radius: 9px; padding: 10px; color: #405f9a; background: #f1f5ff; }
+.teaching-history-current strong { color: #315dc8; font-size: 13px; }
+.teaching-history-current span, .teaching-history-current small { font-size: 10px; }
+.teaching-history-current small { color: #8393ad; }
+.teaching-history-empty { margin-top: 11px; color: #91a0b5; font-size: 10px; line-height: 1.55; }
+.teaching-history-list { display: grid; gap: 7px; margin: 11px 0 0; padding: 0; list-style: none; }
+.teaching-history-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #edf0f6; padding-bottom: 7px; }
+.teaching-history-list li > span { display: grid; gap: 2px; min-width: 0; }
+.teaching-history-list strong { overflow: hidden; color: #526a92; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.teaching-history-list small { color: #9aa7b9; font-size: 9px; }
+.teaching-history-list b { color: #416bd0; font-size: 12px; }
+.teaching-review-topics-card { border-color: #d9d1f0; background: linear-gradient(145deg,#fbfaff,#f7f4ff); }
+.teaching-review-topics-card header { display: flex; justify-content: space-between; gap: 8px; }
+.teaching-review-topics-card header > span:last-child { color: #8b77bd; font-size: 10px; }
+.teaching-review-topics-card > p { margin: 9px 0 0; color: #776a91; font-size: 10px; line-height: 1.55; }
+.teaching-review-topics-list { display: grid; gap: 8px; margin: 11px 0 0; padding: 0; list-style: none; }
+.teaching-review-topics-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #e8e2f4; padding-top: 8px; }
+.teaching-review-topics-list li > div { display: grid; gap: 2px; min-width: 0; }
+.teaching-review-topics-list strong { overflow: hidden; color: #59457f; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.teaching-review-topics-list small { color: #8b77ad; font-size: 9px; }
+.teaching-review-topics-list button { flex: 0 0 auto; border: 0; border-radius: 7px; padding: 6px 8px; color: #fff; background: #765cae; font-size: 9px; font-weight: 800; }
 .teaching-steps { display: grid; gap: 13px; }
 .teaching-steps > div { display: flex; align-items: flex-start; gap: 10px; color: #a1adbf; }
 .teaching-steps > div > span { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; border: 1px solid #dce3ef; border-radius: 50%; font-size: 10px; font-weight: 800; }

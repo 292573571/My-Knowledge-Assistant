@@ -270,11 +270,22 @@ POST   /api/conversations/{conversationId}/stop
 学习记录接口：
 
 ```text
-GET    /api/learning-records
-GET    /api/learning-records/{date}
-PUT    /api/learning-records/{date}
-DELETE /api/learning-records/{date}
-POST   /api/learning-records/{date}/promote
+GET    /api/learning-records?workspaceId=<workspaceId>
+GET    /api/learning-records/teaching-progress?workspaceId=<workspaceId>
+GET    /api/learning-records/{date}?workspaceId=<workspaceId>
+PUT    /api/learning-records/{date}?workspaceId=<workspaceId>
+DELETE /api/learning-records/{date}?workspaceId=<workspaceId>
+POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
+```
+
+学习记录接口都要求登录用户提供当前 `workspaceId`。服务端会先校验用户是否有该知识空间的访问权限，再只返回、修改、删除或提升该空间的记录。多个空间同一天的记录仍保存在用户的每日 Markdown 文件中，但按记录内的 `知识空间` 标记隔离；正式笔记则写入对应 workspace 的独立目录。旧记录没有 workspace 标记时不会被自动归属到任何空间。
+
+提升正式笔记时，可选提交 JSON：
+
+```json
+{
+  "content": "整理后的学习记录内容"
+}
 ```
 
 ## API 总览

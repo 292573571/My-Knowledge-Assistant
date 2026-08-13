@@ -94,7 +94,7 @@ public class WorkbenchChatService {
                     mode, ragResponse.answer(), response.sources(), response.toolCalls());
             if (recorded) {
                 // 只有助手消息成功持久化后才沉淀学习记录，避免收录已删除会话的迟到回答。
-                learningRecordService.record(user, request.message(), ragResponse.answer(), ragResponse.sources());
+                    learningRecordService.record(user, workspace.workspaceId(), request.message(), ragResponse.answer(), ragResponse.sources());
             }
             return response;
         } finally {
