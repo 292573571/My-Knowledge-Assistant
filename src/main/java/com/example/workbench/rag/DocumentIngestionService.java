@@ -162,6 +162,44 @@ public class DocumentIngestionService {
         return responseFrom(List.of(result));
     }
 
+    /**
+     * 将数据库正式笔记投影到检索副本，显式使用事实表中的 owner/workspace，避免从文件路径推断隔离边界。
+     */
+    public synchronized void ingestFormalNote(String path, String ownerUserId, String workspaceId) {
+        Path notePath = resolveAllowedPath(path);
+        if (!Files.isRegularFile(notePath)) {
+            throw new IllegalArgumentException("Formal note path must be a file: " + path);
+        }
+        IngestedFile parsed = ingestFile(notePath);
+        if (parsed.indexEntry() == null || parsed.documents().isEmpty()) {
+            throw new IllegalArgumentException("Formal note content cannot be empty");
+        }
+
+        String scopedHash = sha256(workspaceId + "\n" + parsed.indexEntry().contentHash());
+        String documentId = scopedHash.substring(0, 16);
+        DocumentVisibility visibility = workspaceId != null && workspaceId.startsWith("personal-")
+                ? DocumentVisibility.PRIVATE : DocumentVisibility.WORKSPACE;
+        String relativePath = workspaceRelativePath(notePath).replace('\\', '/');
+        List<SourceDocument> projectedDocuments = parsed.documents().stream().map(source -> new SourceDocument(
+                documentId + "#chunk-" + source.chunkIndex(), source.content(), source.title(), source.source(),
+                relativePath, source.chunkIndex(), documentId, parsed.indexEntry().fileName(), scopedHash,
+                source.score(), source.headingPath(), source.headingLevel(), source.startOffset(), source.endOffset(),
+                source.chunkType(), "FORMAL_NOTE", ownerUserId, workspaceId, visibility, source.pageNumber()
+        )).toList();
+        DocumentIndexEntry projectedEntry = new DocumentIndexEntry(
+                documentId, parsed.indexEntry().fileName(), relativePath, scopedHash, projectedDocuments.size(),
+                System.currentTimeMillis(), "FORMAL_NOTE", "INDEXED", ownerUserId, workspaceId, visibility
+        );
+
+        documentIndexStore.list().stream()
+                .filter(existing -> existing.path().equals(relativePath) && existing.workspaceId().equals(workspaceId))
+                .toList().forEach(this::removeIndexedDocument);
+        documents.removeIf(document -> document.documentId().equals(documentId));
+        documents.addAll(projectedDocuments);
+        vectorStore.addAll(projectedDocuments);
+        documentIndexStore.upsertAll(List.of(projectedEntry));
+    }
+
     public synchronized IngestResponse ingestDocument(String path, boolean force, WorkspaceAccessContext access) {
         requireWorkspaceWrite(access);
         Path documentPath = resolveAllowedPath(path);

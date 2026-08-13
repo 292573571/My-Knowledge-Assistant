@@ -2,6 +2,8 @@ package com.example.workbench.scheduling;
 
 import com.example.workbench.agent.MaintenancePendingActionCleanupService;
 import com.example.workbench.agent.TeachingAttemptCleanupService;
+import com.example.workbench.learning.LearningRecordProjectionService;
+import com.example.workbench.learning.FormalNoteProjectionService;
 import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -14,20 +16,35 @@ class DatabaseScheduledJobRunner {
 
     static final String TEACHING_ATTEMPT_CLEANUP = "teaching-attempt-cleanup";
     static final String MAINTENANCE_ACTION_CLEANUP = "maintenance-action-cleanup";
+    static final String LEARNING_RECORD_PROJECTION = "learning-record-projection";
+    static final String FORMAL_NOTE_PROJECTION = "formal-note-projection";
     private static final Logger log = LoggerFactory.getLogger(DatabaseScheduledJobRunner.class);
     private static final long LEASE_SECONDS = 60;
 
     private final ScheduledJobRepository jobRepository;
     private final TeachingAttemptCleanupService teachingAttemptCleanupService;
     private final MaintenancePendingActionCleanupService maintenanceActionCleanupService;
+    private final LearningRecordProjectionService learningRecordProjectionService;
+    private final FormalNoteProjectionService formalNoteProjectionService;
     private final String workerId = UUID.randomUUID().toString();
 
     DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
                                TeachingAttemptCleanupService teachingAttemptCleanupService,
                                MaintenancePendingActionCleanupService maintenanceActionCleanupService) {
+        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
+                               TeachingAttemptCleanupService teachingAttemptCleanupService,
+                               MaintenancePendingActionCleanupService maintenanceActionCleanupService,
+                               LearningRecordProjectionService learningRecordProjectionService,
+                               FormalNoteProjectionService formalNoteProjectionService) {
         this.jobRepository = jobRepository;
         this.teachingAttemptCleanupService = teachingAttemptCleanupService;
         this.maintenanceActionCleanupService = maintenanceActionCleanupService;
+        this.learningRecordProjectionService = learningRecordProjectionService;
+        this.formalNoteProjectionService = formalNoteProjectionService;
     }
 
     // 这里只负责高频唤醒；任务是否启用、何时执行和多实例抢占由 scheduled_jobs 控制。
@@ -35,6 +52,12 @@ class DatabaseScheduledJobRunner {
     void poll() {
         runIfDue(TEACHING_ATTEMPT_CLEANUP, () -> teachingAttemptCleanupService.cleanupExpired(Instant.now()));
         runIfDue(MAINTENANCE_ACTION_CLEANUP, () -> maintenanceActionCleanupService.cleanupExpired(Instant.now()));
+        if (learningRecordProjectionService != null) {
+            runIfDue(LEARNING_RECORD_PROJECTION, learningRecordProjectionService::projectOne);
+        }
+        if (formalNoteProjectionService != null) {
+            runIfDue(FORMAL_NOTE_PROJECTION, formalNoteProjectionService::projectOne);
+        }
     }
 
     private void runIfDue(String jobKey, Runnable task) {

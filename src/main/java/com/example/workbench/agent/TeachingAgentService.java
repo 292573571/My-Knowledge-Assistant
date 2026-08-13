@@ -4,6 +4,7 @@ import com.example.workbench.auth.AppUser;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.workbench.learning.TeachingTopicNormalizer;
+import com.example.workbench.learning.LearningRecordService;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.ai.chat.client.ChatClient;
@@ -27,14 +28,17 @@ public class TeachingAgentService {
     private final ChatClient chatClient;
     private final TeachingReadOnlyService readOnlyService;
     private final TeachingCheckService checkService;
+    private final LearningRecordService learningRecordService;
     private final TeachingAgentOutputParser outputParser;
     private final TeachingQualityGate qualityGate = new TeachingQualityGate();
 
     public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
-                                TeachingCheckService checkService, ObjectMapper objectMapper) {
+                                TeachingCheckService checkService, LearningRecordService learningRecordService,
+                                ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.readOnlyService = readOnlyService;
         this.checkService = checkService;
+        this.learningRecordService = learningRecordService;
         this.outputParser = new TeachingAgentOutputParser(objectMapper);
     }
 
@@ -75,6 +79,8 @@ public class TeachingAgentService {
         TeachingAgentDraft draft = outputParser.parse(rawAnswer);
         TeachingCheckPrompt check = checkService.createPending(user, access, context.sessionId(), context.topic(),
                 draft.explanation(), draft.checkQuestion());
+        learningRecordService.recordTeachingExplanation(user, access.workspaceId(), context.sessionId(),
+                context.topic(), draft.explanation(), tools.sources());
         TeachingSessionSummary sessionSummary = checkService.summary(user, access, context.sessionId());
         TeachingQualityAssessment quality = qualityGate.evaluate(draft.explanation(), check.question(), traces, true);
         return new TeachingAgentResult(draft.explanation(),

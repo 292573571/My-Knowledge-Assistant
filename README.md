@@ -13,6 +13,7 @@
 - 长 PDF 分批解析、批次状态、失败清理和成功批次跳过恢复。
 - Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。
 - 多轮聊天、SSE 流式回答、会话保存、停止和删除。
+- PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
 - Actuator、Prometheus、请求 ID、结构化日志和敏感信息脱敏。
@@ -262,6 +263,18 @@ Teaching Agent 的当前教学检查和实践状态保存在 PostgreSQL 的 `tea
 
 聊天历史以 PostgreSQL 的 `chat_conversations` 和 `chat_messages` 为事实来源。RAG 上下文按用户、workspace 和客户端会话标识查询最近消息，JVM 内的 `ConversationMemory` 只保留给旧版测试构造器使用，不作为生产业务状态来源。维护 Agent 的确认动作保存在 `maintenance_pending_actions` 表中，重启后仍可在有效期内确认，且同一确认令牌只能消费一次。
 
+学习资产的持久化边界如下：
+
+| 数据 | PostgreSQL 事实表 | 派生投影 | 说明 |
+| --- | --- | --- | --- |
+| 普通问答学习记录 | `learning_records` | `docs/learning-records/`、学习记录 Outbox | 默认不进入 RAG 知识库，避免把模型回答直接当成知识事实 |
+| Teaching 讲解、CHECK、PRACTICE | `learning_records` | `docs/learning-records/`、学习记录 Outbox | 与普通问答共享学习资产，可按类型、主题和 workspace 查询 |
+| 正式笔记 | `formal_notes` | `docs/manual-notes/`、文档索引、分块和向量库 | 经过整理后可以进入 RAG，作为用户或空间知识资产 |
+| 学习记录投影事件 | `learning_record_outbox` | Markdown 投影 | 支持租约、重试和多实例 `SKIP LOCKED` 抢占 |
+| 正式笔记投影事件 | `formal_note_outbox` | Markdown 与 RAG 投影 | 数据库提交成功后异步执行，投影失败可重试 |
+
+写入链路遵循“事实先提交、派生物异步生成”：业务请求先在 PostgreSQL 中保存学习记录或正式笔记，并在同一事务中写入 Outbox 事件；数据库调度器负责周期性抢占事件。文件、`document_indexes`、`document_chunks` 和 Chroma 出现故障时，不回滚已经提交的业务事实，而是记录失败并等待重试。应用本地 `docs/` 目录目前仍用于兼容导出和开发环境投影，生产环境应使用持久化卷或对象存储，并单独持久化检索副本。
+
 会话接口：
 
 ```text
@@ -282,7 +295,7 @@ DELETE /api/learning-records/{date}?workspaceId=<workspaceId>
 POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 ```
 
-学习记录接口都要求登录用户提供当前 `workspaceId`。服务端会先校验用户是否有该知识空间的访问权限，再只返回、修改、删除或提升该空间的记录。多个空间同一天的记录仍保存在用户的每日 Markdown 文件中，但按记录内的 `知识空间` 标记隔离；正式笔记则写入对应 workspace 的独立目录。旧记录没有 workspace 标记时不会被自动归属到任何空间。
+学习记录接口都要求登录用户提供当前 `workspaceId`。服务端会先校验用户是否有该知识空间的访问权限，再只返回、修改、删除或提升该空间的记录。数据库中的 `workspace_id` 是隔离依据；Markdown 只按用户、workspace 和日期生成可读投影，不是权限事实源。旧记录导入为 `LEGACY` 后保留空 workspace，不会被自动归属到任何空间。
 
 提升正式笔记时，可选提交 JSON：
 
@@ -354,6 +367,17 @@ yarn build
 
 当前配置同时启用 Flyway 基线和 `spring.jpa.hibernate.ddl-auto=update`。部分结构由迁移脚本提供，JPA 实体仍会在启动时更新结构；生产环境上线前应明确迁移边界，并评估关闭 `ddl-auto=update`。
 
+学习资产相关迁移包括：
+
+```text
+V5__create_learning_records_and_outbox.sql
+  learning_records、learning_record_outbox、formal_notes、formal_note_outbox
+V6__complete_learning_projection_schema.sql
+  为既有 learning_record_outbox 补充 workspace_id，并初始化 formal-note-projection 调度任务
+```
+
+数据库事实写入和 Outbox 写入必须保持在同一事务中。投影 worker 使用 `scheduled_jobs` 管理周期和租约，并使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 选择待处理事件；真实 PostgreSQL、多实例抢占、迁移升级和故障重试仍需在部署前完成集成验证。
+
 运行时目录：
 
 ```text
@@ -385,7 +409,7 @@ src/main/resources/                  配置、日志和数据库迁移
 src/test/java/                       后端测试
 frontend/src/                        Vue 前端
 eval/                                 评测数据、模板和确定性评测脚本
-docs/                                 知识库源文档和设计资料
+ docs/                                 知识库源文档、投影文件和设计资料
 .github/workflows/                   CI 和真实模型评测工作流
 ```
 

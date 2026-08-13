@@ -147,6 +147,15 @@ public class TeachingCheckService {
             int score = practiceScore(attempt, submittedAnswer);
             boolean passed = score >= PASS_SCORE;
             String feedback = practiceFeedback(score, passed);
+            String recordDate = null;
+            boolean saved = true;
+            try {
+                recordDate = learningRecordService.recordTeachingPractice(user, attempt.workspaceId, attempt.checkId,
+                        attempt.practiceId, attempt.topic, attempt.practiceQuestion, submittedAnswer, score, MAX_SCORE,
+                        passed, feedback);
+            } catch (RuntimeException exception) {
+                saved = false;
+            }
             attempt.practiceAnswer = submittedAnswer;
             attempt.practiceCompleted = true;
             attempt.practiceResponse = new TeachingPracticeResponse(
@@ -156,7 +165,7 @@ public class TeachingCheckService {
                     passed ? TeachingNextAction.COMPLETE : TeachingNextAction.RECHECK,
                     score, MAX_SCORE, passed, feedback, passed ? null : buildPracticeReview(attempt),
                      null,
-                     false, null, true);
+                     saved, recordDate, true);
             attemptStore.save(attempt);
             TeachingSessionSummary sessionSummary = buildSummary(attempt);
             attempt.practiceResponse = new TeachingPracticeResponse(attempt.practiceResponse.practiceId(),

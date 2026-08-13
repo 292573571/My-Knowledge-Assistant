@@ -13,6 +13,10 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -58,21 +62,28 @@ public class LearningRecordService {
     private final DocumentIngestionService documentIngestionService;
     private final Clock clock;
     private final Path notesDirectory;
+    private final LearningRecordStore recordStore;
 
     @Autowired
-    public LearningRecordService(DocumentIngestionService documentIngestionService) {
-        this(documentIngestionService, Clock.systemDefaultZone(), RECORDS_DIRECTORY, NOTES_DIRECTORY);
+    public LearningRecordService(DocumentIngestionService documentIngestionService, LearningRecordStore recordStore) {
+        this(documentIngestionService, Clock.systemDefaultZone(), RECORDS_DIRECTORY, NOTES_DIRECTORY, recordStore);
     }
 
     LearningRecordService(DocumentIngestionService documentIngestionService, Clock clock, Path recordsDirectory) {
-        this(documentIngestionService, clock, recordsDirectory, recordsDirectory.resolveSibling("manual-notes"));
+        this(documentIngestionService, clock, recordsDirectory, recordsDirectory.resolveSibling("manual-notes"), null);
     }
 
     LearningRecordService(DocumentIngestionService documentIngestionService, Clock clock, Path recordsDirectory, Path notesDirectory) {
+        this(documentIngestionService, clock, recordsDirectory, notesDirectory, null);
+    }
+
+    LearningRecordService(DocumentIngestionService documentIngestionService, Clock clock, Path recordsDirectory,
+                          Path notesDirectory, LearningRecordStore recordStore) {
         this.documentIngestionService = documentIngestionService;
         this.clock = clock;
         this.recordsDirectory = recordsDirectory;
         this.notesDirectory = notesDirectory;
+        this.recordStore = recordStore;
     }
 
     private final Path recordsDirectory;
@@ -85,6 +96,13 @@ public class LearningRecordService {
                                     List<RagSource> sources) {
         if (question == null || question.isBlank() || !isRecordableAnswer(answer)) {
             log.info("Learning record skipped userId={} reason=no_reliable_answer", user.getId());
+            return;
+        }
+
+        if (recordStore != null) {
+            LocalDate date = LocalDate.now(clock);
+            recordStore.recordChat(user, workspaceId, date, question.strip(), withoutReferences(answer), sources,
+                    formatEntry(workspaceId, question, answer));
             return;
         }
 
@@ -121,6 +139,13 @@ public class LearningRecordService {
                                                    String question, String answer, int score, int maxScore,
                                                    boolean passed, String feedback, String weakPoint,
                                                    String reviewExplanation, String reviewSuggestion) {
+        if (recordStore != null) {
+            LocalDate date = LocalDate.now(clock);
+            return recordStore.recordTeachingCheck(user, workspaceId, date, attemptId, topic, question, answer,
+                    score, maxScore, passed, feedback, weakPoint, reviewExplanation, reviewSuggestion,
+                    formatTeachingCheck(workspaceId, attemptId, topic, question, answer, score, maxScore, passed,
+                            feedback, weakPoint, reviewExplanation, reviewSuggestion));
+        }
         Path record = recordPath(user);
         try {
             Files.createDirectories(record.getParent());
@@ -141,11 +166,48 @@ public class LearningRecordService {
         }
     }
 
+    public synchronized String recordTeachingPractice(AppUser user, String workspaceId, String checkId,
+                                                       String practiceId, String topic, String question,
+                                                       String answer, int score, int maxScore, boolean passed,
+                                                       String feedback) {
+        if (recordStore != null) {
+            LocalDate date = LocalDate.now(clock);
+            String markdown = formatTeachingPractice(workspaceId, checkId, practiceId, topic, question, answer,
+                    score, maxScore, passed, feedback);
+            return recordStore.recordTeachingPractice(user, workspaceId, date, checkId, practiceId, topic,
+                    question, answer, score, maxScore, passed, feedback, markdown);
+        }
+        return null;
+    }
+
+    public synchronized String recordTeachingExplanation(AppUser user, String workspaceId, String sessionId,
+                                                          String topic, String explanation, List<RagSource> sources) {
+        if (recordStore == null) return null;
+        LocalDate date = LocalDate.now(clock);
+        String markdown = "\n## 教学讲解\n\n"
+                + "- 主题：" + singleLine(topic) + "\n"
+                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n")
+                + "- 教学会话：" + singleLine(sessionId) + "\n\n"
+                + withoutReferences(explanation) + "\n";
+        return recordStore.recordTeachingExplanation(user, workspaceId, date, sessionId, topic,
+                withoutReferences(explanation), sources, markdown);
+    }
+
     public List<LearningRecordSummary> list(AppUser user) {
         return list(user, null);
     }
 
     public List<LearningRecordSummary> list(AppUser user, String workspaceId) {
+        if (recordStore != null) {
+            Map<LocalDate, Instant> dates = new LinkedHashMap<>();
+            recordStore.visible(user, workspaceId, isPersonalWorkspace(user, workspaceId)).forEach(entry ->
+                    dates.merge(entry.recordDate(), entry.updatedAt(), (left, right) -> left.isAfter(right) ? left : right));
+            return dates.entrySet().stream()
+                    .sorted(Map.Entry.<LocalDate, Instant>comparingByKey().reversed())
+                    .map(entry -> new LearningRecordSummary(entry.getKey().toString(),
+                            entry.getKey() + " 学习记录", entry.getValue()))
+                    .toList();
+        }
         Path directory = recordsDirectory.resolve(userDirectory(user));
         if (!Files.exists(directory)) {
             return List.of();
@@ -154,7 +216,8 @@ public class LearningRecordService {
         try (var paths = Files.list(directory)) {
             return paths.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().matches("\\d{4}-\\d{2}-\\d{2}\\.md"))
-                    .filter(path -> workspaceId == null || hasWorkspaceEntry(path, workspaceId))
+                    .filter(path -> workspaceId == null || hasWorkspaceEntry(path, workspaceId,
+                            isPersonalWorkspace(user, workspaceId)))
                     .map(this::summary)
                     .sorted(Comparator.comparing(LearningRecordSummary::date).reversed())
                     .toList();
@@ -168,6 +231,9 @@ public class LearningRecordService {
     }
 
     public List<TeachingTopicProgress> teachingProgress(AppUser user, String workspaceId) {
+        if (recordStore != null) {
+            return progressFromEntries(recordStore.visible(user, workspaceId, isPersonalWorkspace(user, workspaceId)));
+        }
         Path directory = recordsDirectory.resolve(userDirectory(user));
         if (!Files.exists(directory)) return List.of();
 
@@ -175,7 +241,8 @@ public class LearningRecordService {
             return paths.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().matches("\\d{4}-\\d{2}-\\d{2}\\.md"))
                     .flatMap(path -> teachingChecks(path).stream()
-                            .filter(check -> workspaceId == null || workspaceId.equals(check.workspaceId())))
+                            .filter(check -> workspaceId == null || workspaceId.equals(check.workspaceId())
+                                    || (isPersonalWorkspace(user, workspaceId) && check.workspaceId() == null)))
                     .collect(java.util.stream.Collectors.groupingBy(TeachingCheckSnapshot::topicKey,
                             java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()))
                     .entrySet().stream()
@@ -196,6 +263,15 @@ public class LearningRecordService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
         }
 
+        if (recordStore != null) {
+            LocalDate recordDate = LocalDate.parse(date);
+            List<LearningRecordEntry> entries = recordStore.visibleOnDate(user, workspaceId, recordDate,
+                    isPersonalWorkspace(user, workspaceId));
+            if (entries.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
+            Instant updatedAt = entries.stream().map(LearningRecordEntry::updatedAt).max(Instant::compareTo).orElse(Instant.now());
+            return new LearningRecordDetail(date, date + " 学习记录", renderEntries(date, entries), updatedAt);
+        }
+
         Path record = recordsDirectory.resolve(userDirectory(user)).resolve(date + ".md").normalize();
         if (!record.startsWith(recordsDirectory) || !Files.isRegularFile(record)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
@@ -204,7 +280,7 @@ public class LearningRecordService {
         try {
             String content = Files.readString(record, StandardCharsets.UTF_8);
             if (workspaceId != null) {
-                content = scopedContent(content, workspaceId);
+                content = scopedContent(content, workspaceId, isPersonalWorkspace(user, workspaceId));
                 if (!hasEntry(content)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
             }
             return new LearningRecordDetail(date, date + " 学习记录", content, Files.getLastModifiedTime(record).toInstant());
@@ -218,6 +294,17 @@ public class LearningRecordService {
     }
 
     public synchronized LearningRecordDetail update(AppUser user, String workspaceId, String date, String content) {
+        if (recordStore != null) {
+            validateContent(content);
+            LocalDate recordDate = LocalDate.parse(date);
+            List<LearningRecordEntry> existing = recordStore.visibleOnDate(user, workspaceId, recordDate,
+                    isPersonalWorkspace(user, workspaceId));
+            if (existing.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
+            List<LearningRecordEntry> replacement = editableEntries(user, workspaceId, recordDate, content);
+            recordStore.replaceOnDate(user, workspaceId, recordDate, replacement,
+                    isPersonalWorkspace(user, workspaceId));
+            return detail(user, workspaceId, date);
+        }
         Path record = requireRecord(user, date);
         if (content == null || content.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习记录内容不能为空");
@@ -229,7 +316,8 @@ public class LearningRecordService {
         try {
             String nextContent = content.strip() + "\n";
             if (workspaceId != null) {
-                nextContent = replaceWorkspaceContent(Files.readString(record, StandardCharsets.UTF_8), nextContent, workspaceId);
+                nextContent = replaceWorkspaceContent(Files.readString(record, StandardCharsets.UTF_8), nextContent,
+                        workspaceId, isPersonalWorkspace(user, workspaceId));
             }
             Files.writeString(record, nextContent, StandardCharsets.UTF_8);
             return detail(user, workspaceId, date);
@@ -243,13 +331,22 @@ public class LearningRecordService {
     }
 
     public synchronized void delete(AppUser user, String workspaceId, String date) {
+        if (recordStore != null) {
+            LocalDate recordDate = LocalDate.parse(date);
+            if (recordStore.visibleOnDate(user, workspaceId, recordDate, isPersonalWorkspace(user, workspaceId)).isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
+            }
+            recordStore.deleteOnDate(user, workspaceId, recordDate, isPersonalWorkspace(user, workspaceId));
+            return;
+        }
         Path record = requireRecord(user, date);
         documentIngestionService.deleteIndexedPath(workspacePath(record));
         try {
             if (workspaceId == null) {
                 Files.delete(record);
             } else {
-                Files.writeString(record, removeWorkspaceEntries(Files.readString(record, StandardCharsets.UTF_8), workspaceId), StandardCharsets.UTF_8);
+                Files.writeString(record, removeWorkspaceEntries(Files.readString(record, StandardCharsets.UTF_8), workspaceId,
+                        isPersonalWorkspace(user, workspaceId)), StandardCharsets.UTF_8);
             }
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to delete learning record", exception);
@@ -265,6 +362,26 @@ public class LearningRecordService {
     }
 
     public synchronized FormalNoteResult promote(AppUser user, String workspaceId, String date, String editedContent) {
+        if (recordStore != null) {
+            LocalDate recordDate = LocalDate.parse(date);
+            List<LearningRecordEntry> entries = recordStore.visibleOnDate(user, workspaceId, recordDate,
+                    isPersonalWorkspace(user, workspaceId));
+            if (entries.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
+            String body = editedContent == null ? renderEntries(date, entries) : validateContent(editedContent);
+            Path note = notesDirectory.resolve(userDirectory(user))
+                    .resolve(workspaceId == null ? "" : safeWorkspaceDirectory(workspaceId))
+                    .resolve(date + "-learning-note.md").normalize();
+            String noteContent = "# " + date + " 正式笔记\n\n" + withoutGeneratedTitle(date, body).strip() + "\n";
+            recordStore.saveFormalNote(user, workspaceId, recordDate, note.getFileName().toString(),
+                    workspacePath(note), noteContent);
+            if (editedContent != null) {
+                recordStore.replaceOnDate(user, workspaceId, recordDate,
+                        editableEntries(user, workspaceId, recordDate, editedContent),
+                        isPersonalWorkspace(user, workspaceId));
+            }
+            // 数据库是事实源；Markdown 和检索索引由 formal-note outbox 异步生成。
+            return new FormalNoteResult(note.getFileName().toString(), workspacePath(note));
+        }
         Path record = requireRecord(user, date);
         Path note = notesDirectory.resolve(userDirectory(user))
                 .resolve(workspaceId == null ? "" : safeWorkspaceDirectory(workspaceId))
@@ -276,7 +393,7 @@ public class LearningRecordService {
         try {
             String recordContent = editedContent == null ? Files.readString(record, StandardCharsets.UTF_8) : validateContent(editedContent);
             if (workspaceId != null) {
-                recordContent = scopedContent(recordContent, workspaceId);
+                recordContent = scopedContent(recordContent, workspaceId, isPersonalWorkspace(user, workspaceId));
                 if (!hasEntry(recordContent)) {
                     throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
                 }
@@ -293,7 +410,8 @@ public class LearningRecordService {
             if (workspaceId == null) {
                 Files.writeString(record, learningRecordContent, StandardCharsets.UTF_8);
             } else {
-                Files.writeString(record, replaceWorkspaceContent(Files.readString(record, StandardCharsets.UTF_8), learningRecordContent, workspaceId), StandardCharsets.UTF_8);
+                Files.writeString(record, replaceWorkspaceContent(Files.readString(record, StandardCharsets.UTF_8),
+                        learningRecordContent, workspaceId, isPersonalWorkspace(user, workspaceId)), StandardCharsets.UTF_8);
             }
             documentIngestionService.deleteIndexedPath(workspacePath(record));
             return new FormalNoteResult(note.getFileName().toString(), workspacePath(note));
@@ -409,9 +527,83 @@ public class LearningRecordService {
                 + "\n";
     }
 
-    private boolean hasWorkspaceEntry(Path path, String workspaceId) {
+    private String formatTeachingPractice(String workspaceId, String checkId, String practiceId, String topic,
+                                          String question, String answer, int score, int maxScore,
+                                          boolean passed, String feedback) {
+        return "\n## 教学实践\n\n"
+                + "- 主题：" + singleLine(topic) + "\n"
+                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n")
+                + "- 检查标识：" + singleLine(checkId) + "\n"
+                + "- 实践标识：" + singleLine(practiceId) + "\n"
+                + "- 实践问题：" + singleLine(question) + "\n"
+                + "- 我的回答：" + singleLine(answer) + "\n"
+                + "- 得分：" + score + "/" + maxScore + "\n"
+                + "- 结果：" + (passed ? "通过" : "需要复习") + "\n"
+                + "- 反馈：" + singleLine(feedback) + "\n";
+    }
+
+    private List<TeachingTopicProgress> progressFromEntries(List<LearningRecordEntry> entries) {
+        return entries.stream()
+                .filter(entry -> entry.type() == LearningRecordType.TEACHING_CHECK)
+                .map(entry -> new TeachingCheckSnapshot(entry.topic(), TeachingTopicNormalizer.key(entry.topic()),
+                        entry.workspaceId(), entry.score() == null ? 0 : entry.score(),
+                        entry.maxScore() == null ? 5 : entry.maxScore(), Boolean.TRUE.equals(entry.passed()),
+                        entry.recordDate().toString()))
+                .collect(java.util.stream.Collectors.groupingBy(TeachingCheckSnapshot::topicKey,
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()))
+                .entrySet().stream()
+                .map(entry -> progress(entry.getValue()))
+                .sorted(Comparator.comparing(TeachingTopicProgress::latestDate).reversed())
+                .toList();
+    }
+
+    private String renderEntries(String date, List<LearningRecordEntry> entries) {
+        StringBuilder result = new StringBuilder("# ").append(date).append(" 学习记录\n");
+        entries.forEach(entry -> result.append("\n").append(entry.markdown().strip()).append("\n"));
+        return result.toString();
+    }
+
+    private List<LearningRecordEntry> editableEntries(AppUser user, String workspaceId, LocalDate date, String content) {
+        String normalized = content.strip();
+        Matcher entries = RECORD_ENTRY.matcher(normalized);
+        List<LearningRecordEntry> result = new java.util.ArrayList<>();
+        while (entries.find()) {
+            String markdown = entries.group().strip();
+            String sourceKey = "edit:" + user.getId() + ":" + workspaceId + ":" + date + ":" + result.size()
+                    + ":" + Integer.toHexString(markdown.hashCode());
+            Matcher marker = WORKSPACE_MARKER.matcher(markdown);
+            // 客户端提交的 workspace 标记不可信；编辑请求只能写回当前已授权空间。
+            String entryWorkspace = workspaceId == null && marker.find() ? marker.group(1).strip() : workspaceId;
+            String question = questionFrom(markdown);
+            String answer = answerFrom(markdown);
+            LearningRecordType type = markdown.startsWith("## 教学检查") ? LearningRecordType.TEACHING_CHECK
+                    : markdown.startsWith("## 教学实践") ? LearningRecordType.TEACHING_PRACTICE : LearningRecordType.CHAT;
+            result.add(new LearningRecordEntry(UUID.randomUUID().toString(), user.getId(), entryWorkspace, date, type,
+                    question, answer, null, null, null, null, null, null, null, null, null, null, "[]", markdown,
+                    sourceKey, false, Instant.now(), Instant.now()));
+        }
+        if (result.isEmpty()) {
+            result.add(new LearningRecordEntry(UUID.randomUUID().toString(), user.getId(), workspaceId, date,
+                    LearningRecordType.LEGACY, null, null, null, null, null, null, null, null, null, null, null, null,
+                    "[]", withoutGeneratedTitle(date.toString(), normalized), "edit:" + user.getId() + ":" + workspaceId + ":" + date,
+                    false, Instant.now(), Instant.now()));
+        }
+        return result;
+    }
+
+    private String questionFrom(String markdown) {
+        Matcher matcher = Pattern.compile("(?ms)^## 问题\\s*\\R+(.*?)(?=^## 回答|\\z)").matcher(markdown);
+        return matcher.find() ? WORKSPACE_MARKER.matcher(matcher.group(1)).replaceAll("").strip() : null;
+    }
+
+    private String answerFrom(String markdown) {
+        Matcher matcher = Pattern.compile("(?ms)^## 回答\\s*\\R+(.*)$").matcher(markdown);
+        return matcher.find() ? matcher.group(1).strip() : null;
+    }
+
+    private boolean hasWorkspaceEntry(Path path, String workspaceId, boolean includeLegacyEntries) {
         try {
-            return hasEntry(scopedContent(Files.readString(path, StandardCharsets.UTF_8), workspaceId));
+            return hasEntry(scopedContent(Files.readString(path, StandardCharsets.UTF_8), workspaceId, includeLegacyEntries));
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to filter learning record", exception);
         }
@@ -421,31 +613,40 @@ public class LearningRecordService {
         return RECORD_ENTRY.matcher(content).find();
     }
 
-    private String scopedContent(String content, String workspaceId) {
+    private String scopedContent(String content, String workspaceId, boolean includeLegacyEntries) {
         StringBuilder result = new StringBuilder(content.substring(0, firstEntryStart(content)));
         Matcher entries = RECORD_ENTRY.matcher(content);
         while (entries.find()) {
             Matcher marker = WORKSPACE_MARKER.matcher(entries.group());
-            if (marker.find() && workspaceId.equals(marker.group(1).strip())) result.append(entries.group());
+            boolean hasMarker = marker.find();
+            if ((hasMarker && workspaceId.equals(marker.group(1).strip()))
+                    || (includeLegacyEntries && !hasMarker)) result.append(entries.group());
         }
         return result.toString();
     }
 
-    private String removeWorkspaceEntries(String content, String workspaceId) {
+    private String removeWorkspaceEntries(String content, String workspaceId, boolean includeLegacyEntries) {
         StringBuilder result = new StringBuilder(content.substring(0, firstEntryStart(content)));
         Matcher entries = RECORD_ENTRY.matcher(content);
         while (entries.find()) {
             Matcher marker = WORKSPACE_MARKER.matcher(entries.group());
-            if (!marker.find() || !workspaceId.equals(marker.group(1).strip())) result.append(entries.group());
+            boolean hasMarker = marker.find();
+            if ((hasMarker && !workspaceId.equals(marker.group(1).strip()))
+                    || (!hasMarker && !includeLegacyEntries)) result.append(entries.group());
         }
         return result.toString();
     }
 
-    private String replaceWorkspaceContent(String existing, String replacement, String workspaceId) {
-        StringBuilder result = new StringBuilder(removeWorkspaceEntries(existing, workspaceId).stripTrailing());
+    private String replaceWorkspaceContent(String existing, String replacement, String workspaceId,
+                                           boolean includeLegacyEntries) {
+        StringBuilder result = new StringBuilder(removeWorkspaceEntries(existing, workspaceId, includeLegacyEntries).stripTrailing());
         Matcher entries = RECORD_ENTRY.matcher(replacement);
         while (entries.find()) result.append("\n").append(withWorkspaceMarker(entries.group(), workspaceId)).append("\n");
         return result.append('\n').toString();
+    }
+
+    private boolean isPersonalWorkspace(AppUser user, String workspaceId) {
+        return ("personal-" + user.getId()).equals(workspaceId);
     }
 
     private String withWorkspaceMarker(String entry, String workspaceId) {

@@ -152,6 +152,23 @@ class LearningRecordServiceTest {
     }
 
     @Test
+    void showsLegacyUnscopedRecordsOnlyInTheOwnersPersonalWorkspace() throws Exception {
+        DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
+        Path records = tempDir.resolve("docs/learning-records/user-alice");
+        Files.createDirectories(records);
+        Files.writeString(records.resolve("2026-07-26.md"), "# 2026-07-26 学习记录\n\n"
+                + "## 问题\n\n旧问题\n\n## 回答\n\n旧回答\n");
+        LearningRecordService service = new LearningRecordService(ingestionService,
+                Clock.systemUTC(), tempDir.resolve("docs/learning-records"));
+        AppUser user = new AppUser("alice", "Alice", "hash");
+
+        assertThat(service.list(user, "personal-" + user.getId())).hasSize(1);
+        assertThat(service.detail(user, "personal-" + user.getId(), "2026-07-26").content())
+                .contains("旧问题", "旧回答");
+        assertThat(service.list(user, "team-1")).isEmpty();
+    }
+
+    @Test
     void deletesOnlyTheSelectedWorkspaceLearningEntries() throws Exception {
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-07-26T09:00:00Z"), ZoneId.of("UTC"));

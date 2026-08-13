@@ -16,9 +16,9 @@ sequenceDiagram
     participant Vector as VectorStore / Chroma
     participant Model as LLM
     participant Learning as LearningRecordService
-    participant Docs as docs/learning-records
-    participant Ingest as DocumentIngestionService
-    participant Index as 文档索引与向量库
+    participant LearningOutbox as learning_record_outbox
+    participant Scheduler as DatabaseScheduledJobRunner
+    participant Docs as Markdown 投影
 
     User->>Browser: 输入问题并发送
     Browser->>API: POST /api/workbench/chat<br/>Bearer Token + conversationId + message
@@ -63,11 +63,13 @@ sequenceDiagram
         Conversation->>DB: 插入 assistant chat_messages<br/>保存回答、来源和工具元数据
 
         Chat->>Learning: record(用户, workspaceId, 问题, 回答, 来源)
-        Learning->>Docs: 追加至 docs/learning-records/<br/>user-<id>/YYYY-MM-DD.md
-        Learning->>Learning: 基于问题和回答哈希去重
-        Learning->>Ingest: ingestDocument(当天文件, force=true)
-        Ingest->>Index: 删除该文件旧分块并写入最新分块
-        Index-->>Ingest: 更新文档索引与向量数据
+        Learning->>DB: UPSERT learning_records
+        Learning->>LearningOutbox: 同一事务写入投影事件
+        Learning-->>Chat: 事实提交成功
+        Scheduler->>LearningOutbox: claim<br/>FOR UPDATE SKIP LOCKED
+        LearningOutbox-->>Scheduler: 用户、workspace、日期和租约
+        Scheduler->>Docs: 生成 Markdown 可读投影
+        Docs-->>LearningOutbox: 完成或记录重试状态
 
         Chat-->>API: WorkbenchChatResponse
         API-->>Browser: answer + sources + messageId
@@ -81,9 +83,10 @@ sequenceDiagram
 2. RAG 回答优先使用本地知识库；无本地来源或资料不足时，才使用通用模型回退，并明确标记来源边界。
 3. `ConversationExecutionRegistry` 防止停止或删除会话后，模型迟到结果重新写入 PostgreSQL。
 4. 学习记录只在助手消息成功持久化后创建，因此被取消或删除的对话不会沉淀为知识。
-5. 每日学习记录按用户、日期聚合为单个 Markdown 文件；每个问答条目带有 `workspaceId`，列表、详情、编辑、删除和正式笔记提升都按 workspace 过滤。写入后仅重新索引该文件，而不是重建整个知识库。
-6. 正式笔记按 `docs/manual-notes/user-<id>/workspace-<encoded-workspace-id>/YYYY-MM-DD-learning-note.md` 分目录保存，并以当前 workspace 的文档路径重新索引。
-7. 旧学习记录没有 workspace 标记时不会被自动归属到指定空间；向量检索的用户和 workspace 过滤仍需以索引元数据和查询条件为准，不能仅将目录结构视为完整的数据访问隔离。
+5. `learning_records` 是学习记录事实源；普通问答成功写入后只保存结构化记录和 Outbox，不在请求线程中写文件或同步重建索引。
+6. 学习记录投影 worker 按用户、workspace、日期生成 Markdown。文件是可读导出物，可以在事实表存在时删除后重建，不是权限或业务状态来源。
+7. 正式笔记提升先写入 `formal_notes` 和 `formal_note_outbox`。正式笔记 worker 再生成 Markdown，并通过显式 owner/workspace 元数据更新文档索引、分块和向量库；投影失败不会撤销已提交的正式笔记。
+8. 旧学习记录导入为 `LEGACY`，保留空 workspace。向量检索的用户和 workspace 过滤必须使用索引元数据和查询条件，不能仅将目录结构视为完整的数据访问隔离。
 
 ## 关键数据落点
 
@@ -93,7 +96,11 @@ sequenceDiagram
 | 聊天消息 | PostgreSQL `chat_messages` | 恢复历史消息、来源和工具事件 |
 | 短期对话上下文 | `ConversationMemory` | 为当前 RAG 请求补充最近上下文 |
 | 原始知识文档 | `docs/` | 可重新索引的知识源 |
-| 每日学习记录 | `docs/learning-records/user-<id>/YYYY-MM-DD.md` | 按条目保存 workspace 标记的自动问答记录 |
-| 正式笔记 | `docs/manual-notes/user-<id>/workspace-<encoded-workspace-id>/YYYY-MM-DD-learning-note.md` | 当前 workspace 的整理笔记 |
+| 学习记录事实 | PostgreSQL `learning_records` | 普通问答、Teaching 讲解、CHECK、PRACTICE 和历史导入记录 |
+| 学习记录事件 | PostgreSQL `learning_record_outbox` | Markdown 投影的租约、重试和完成状态 |
+| 每日学习记录投影 | `docs/learning-records/user-<id>/<workspace>/YYYY-MM-DD.md` | 可读导出物，不是事实源 |
+| 正式笔记事实 | PostgreSQL `formal_notes` | 用户或 workspace 的整理笔记正文、哈希和索引状态 |
+| 正式笔记事件 | PostgreSQL `formal_note_outbox` | Markdown、文档索引、分块和向量投影事件 |
+| 正式笔记投影 | `docs/manual-notes/user-<id>/<workspace>/YYYY-MM-DD-learning-note.md` | 可重建文件投影 |
 | 文档索引 | `DocumentIndexStore` | 文件路径、内容哈希、分块数等索引元数据 |
 | 文档向量 | Chroma / `VectorStore` | 相似度召回 |
