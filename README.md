@@ -145,6 +145,24 @@ yarn build
 yarn preview
 ```
 
+## 发版与启动脚本
+
+项目只保留一个发版入口：
+
+```bash
+./deploy/deploy-zhihai
+```
+
+它会在本地完成后端测试打包、前端构建、上传发布包，然后在服务器上停止并启动 `zhihai` 服务，执行服务器本地和公网健康检查。服务器部署端使用同一个脚本的内部子命令，不再维护第二份启动逻辑。
+
+首次配置服务器时，将脚本安装为：
+
+```bash
+sudo install -m 750 deploy/deploy-zhihai /usr/local/sbin/deploy-zhihai
+```
+
+只有服务器本地健康检查和公网健康检查都成功后，脚本才会删除旧的 release 和备份；任一检查失败时，旧版本仍会保留用于回滚。
+
 ## 登录和空间使用
 
 API 使用 Cookie 会话。调试时保存 Cookie：

@@ -51,15 +51,15 @@ public class TeachingAgentTools {
 
     private synchronized <T> T invoke(String toolName, Supplier<T> operation) {
         if (++callCount > MAX_TOOL_CALLS) {
-            invocations.add(new Invocation(toolName, "REJECTED"));
+            invocations.add(new Invocation(toolName, "REJECTED", "已达到只读工具调用上限"));
             throw new IllegalStateException("教学 Agent 已达到只读工具调用上限");
         }
         try {
             T result = operation.get();
-            invocations.add(new Invocation(toolName, "SUCCEEDED"));
+            invocations.add(new Invocation(toolName, "SUCCEEDED", null));
             return result;
         } catch (RuntimeException exception) {
-            invocations.add(new Invocation(toolName, "FAILED"));
+            invocations.add(new Invocation(toolName, "FAILED", "工具暂时不可用，请稍后重试"));
             throw exception;
         }
     }
@@ -68,6 +68,9 @@ public class TeachingAgentTools {
         return source.file() + "#" + (source.pageNumber() == null ? "chunk-" + source.chunkIndex() : "page-" + source.pageNumber());
     }
 
-    public record Invocation(String toolName, String status) {
+    public record Invocation(String toolName, String status, String detail) {
+        public Invocation(String toolName, String status) {
+            this(toolName, status, null);
+        }
     }
 }

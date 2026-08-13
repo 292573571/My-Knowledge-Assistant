@@ -51,6 +51,18 @@ class TeachingAgentToolsTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("工具调用上限");
         assertThat(tools.invocations()).last().isEqualTo(
-                new TeachingAgentTools.Invocation("getRecentLearningRecords", "REJECTED"));
+                new TeachingAgentTools.Invocation("getRecentLearningRecords", "REJECTED", "已达到只读工具调用上限"));
+    }
+
+    @Test
+    void recordsSafeFailureDetailWithoutExposingExceptionMessage() {
+        when(readOnlyService.search(context, "Agent", 5))
+                .thenThrow(new IllegalStateException("database password leaked"));
+        TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
+
+        assertThatThrownBy(() -> tools.searchKnowledge("Agent", 5))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(tools.invocations()).containsExactly(
+                new TeachingAgentTools.Invocation("searchKnowledge", "FAILED", "工具暂时不可用，请稍后重试"));
     }
 }

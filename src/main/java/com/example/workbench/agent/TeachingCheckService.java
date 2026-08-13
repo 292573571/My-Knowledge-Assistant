@@ -36,6 +36,12 @@ public class TeachingCheckService {
 
     public TeachingCheckPrompt createPending(AppUser user, WorkspaceAccessContext access,
                                              String sessionId, String topic, String answer) {
+        return createPending(user, access, sessionId, topic, answer, null);
+    }
+
+    public TeachingCheckPrompt createPending(AppUser user, WorkspaceAccessContext access,
+                                             String sessionId, String topic, String answer,
+                                             String checkQuestion) {
         cleanupExpired();
         String ownerKey = ownerKey(user);
         long activeCount = attempts.values().stream()
@@ -46,7 +52,8 @@ public class TeachingCheckService {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "教学检查次数过多，请先完成已有课程。");
         }
 
-        String question = extractQuestion(answer, topic);
+        String question = checkQuestion == null || checkQuestion.isBlank()
+                ? extractQuestion(answer, topic) : checkQuestion.strip();
         String checkId = UUID.randomUUID().toString();
         attempts.put(checkId, new PendingAttempt(checkId, ownerKey, access.workspaceId(), sessionId,
                 topic, question, Instant.now().plus(ATTEMPT_TTL)));
@@ -195,9 +202,8 @@ public class TeachingCheckService {
     private TeachingPracticePrompt createPractice(PendingAttempt attempt) {
         if (attempt.practiceId == null) {
             attempt.practiceId = UUID.randomUUID().toString();
-            attempt.practiceQuestion = "请针对“" + attempt.topic
-                    + "”设计一个真实任务：说明任务目标、会采取的行动、如何使用工具或知识库结果，"
-                    + "以及结果如何影响下一步决策。";
+            attempt.practiceQuestion = "请举一个 Agent 可以帮助你完成的真实任务。"
+                    + "说清楚它要调用什么工具，以及工具结果有什么用。";
         }
         return new TeachingPracticePrompt(attempt.practiceId, attempt.practiceQuestion,
                 attempt.expiresAt, TeachingPracticeStatus.PENDING);

@@ -14,7 +14,9 @@ const topic = ref('')
 const userLevel = ref('BEGINNER')
 const message = ref('')
 const checkAnswer = ref('')
-const practiceAnswer = ref('')
+const practiceScene = ref('')
+const practiceTool = ref('')
+const practiceResult = ref('')
 const sessionId = ref('')
 const result = ref(null)
 const error = ref('')
@@ -46,11 +48,21 @@ const actionLabels = {
   RECHECK: '复习后重新检查',
   COMPLETE: '本课完成'
 }
+const traceStatusLabels = {
+  SUCCEEDED: '成功',
+  FAILED: '失败',
+  REJECTED: '已拒绝'
+}
 const summaryStatusLabels = {
   IN_PROGRESS: '进行中',
   NEEDS_REVIEW: '需要复习',
   MASTERED: '已掌握'
 }
+const practiceAnswer = computed(() => [
+  `任务场景：${practiceScene.value.trim()}`,
+  `使用的工具：${practiceTool.value.trim()}`,
+  `工具结果的作用：${practiceResult.value.trim()}`
+].join('\n'))
 const suggestions = [
   { topic: 'Agent', message: '请解释什么是 Agent，并说明它和普通 RAG 问答有什么区别。' },
   { topic: 'RAG', message: '请用一个简单例子解释 RAG 的工作流程。' },
@@ -74,7 +86,9 @@ async function ask(suggestion = null) {
   error.value = ''
   result.value = null
   checkAnswer.value = ''
-  practiceAnswer.value = ''
+  practiceScene.value = ''
+  practiceTool.value = ''
+  practiceResult.value = ''
   showTrace.value = false
   loading.value = true
 
@@ -98,7 +112,8 @@ async function ask(suggestion = null) {
 }
 
 async function submitPractice() {
-  if (practicing.value || !result.value?.practice?.practiceId || !practiceAnswer.value.trim() || !props.workspace?.id) return
+  if (practicing.value || !result.value?.practice?.practiceId || !practiceScene.value.trim()
+    || !practiceTool.value.trim() || !practiceResult.value.trim() || !props.workspace?.id) return
   practicing.value = true
   error.value = ''
   try {
@@ -106,7 +121,7 @@ async function submitPractice() {
       workspaceId: props.workspace.id,
       sessionId: sessionId.value,
       practiceId: result.value.practice.practiceId,
-      answer: practiceAnswer.value.trim()
+      answer: practiceAnswer.value
     })
     result.value = {
       ...result.value,
@@ -147,7 +162,9 @@ function startNewLesson() {
   sessionId.value = ''
   result.value = null
   checkAnswer.value = ''
-  practiceAnswer.value = ''
+  practiceScene.value = ''
+  practiceTool.value = ''
+  practiceResult.value = ''
   error.value = ''
   showTrace.value = false
 }
@@ -164,7 +181,7 @@ function startNewLesson() {
       <div class="teaching-lesson-note">
         <span class="teaching-note-dot"></span>
         <strong>本课范围</strong>
-        <span>EXPLAIN → CHECK → REVIEW</span>
+        <span>EXPLAIN → CHECK → PRACTICE</span>
       </div>
     </section>
 
@@ -292,9 +309,15 @@ function startNewLesson() {
               <div><small>PRACTICE</small><h3>{{ result.practice.status === 'COMPLETED' ? '实践结果' : '把概念带到真实任务' }}</h3></div>
             </header>
             <p class="teaching-practice-question">{{ result.practice.question }}</p>
+            <p class="teaching-practice-instruction">请完成下面三步，不需要写成长文章。</p>
             <template v-if="result.practice.status === 'PENDING'">
-              <textarea v-model="practiceAnswer" maxlength="4000" rows="5" :disabled="practicing" placeholder="描述目标、行动、工具或知识库结果，以及结果如何影响下一步。" aria-label="实践答案"></textarea>
-              <button type="button" :disabled="practicing || !practiceAnswer.trim()" @click="submitPractice">{{ practicing ? '正在评估...' : '提交实践答案' }}</button>
+              <div class="teaching-practice-fields">
+                <label><span>1. 你想让 Agent 完成什么任务？</span><textarea v-model="practiceScene" maxlength="1200" rows="2" :disabled="practicing" placeholder="例如：查找公司的报销规定并回答同事的问题。"></textarea></label>
+                <label><span>2. 它需要调用什么工具？</span><textarea v-model="practiceTool" maxlength="800" rows="2" :disabled="practicing" placeholder="例如：搜索知识库。"></textarea></label>
+                <label><span>3. 工具结果有什么用？</span><textarea v-model="practiceResult" maxlength="1200" rows="2" :disabled="practicing" placeholder="例如：找到相关制度后，帮助 Agent 判断如何组织回答。"></textarea></label>
+              </div>
+              <small class="teaching-practice-hint">请先写下任务场景和工具使用方式</small>
+              <button type="button" :disabled="practicing || !practiceScene.trim() || !practiceTool.trim() || !practiceResult.trim()" @click="submitPractice">{{ practicing ? '正在评估...' : '提交答案' }}</button>
             </template>
             <div v-else class="teaching-practice-complete" :class="{ passed: result.practice.passed }">
               <strong>{{ result.practice.passed ? '实践完成' : '实践需要补充' }} · {{ result.practice.score }}/{{ result.practice.maxScore }}</strong>
@@ -302,12 +325,15 @@ function startNewLesson() {
             </div>
           </section>
 
-          <div v-if="result.traces?.length" class="teaching-trace">
+           <div v-if="result.traces?.length" class="teaching-trace">
             <button type="button" @click="showTrace = !showTrace">{{ showTrace ? '收起工具链路' : '查看工具链路' }}</button>
             <ul v-if="showTrace">
               <li v-for="trace in result.traces" :key="`${trace.step}-${trace.toolName}`">
-                <span><b>#{{ trace.step }}</b> {{ trace.toolName }}</span>
-                <span :class="trace.status.toLowerCase()">{{ trace.status }}</span>
+               <span><b>#{{ trace.step }}</b> {{ trace.toolName }}</span>
+                <span :class="trace.status.toLowerCase()">
+                  {{ traceStatusLabels[trace.status] || trace.status }}
+                  <small v-if="trace.detail"> · {{ trace.detail }}</small>
+                </span>
               </li>
             </ul>
           </div>
