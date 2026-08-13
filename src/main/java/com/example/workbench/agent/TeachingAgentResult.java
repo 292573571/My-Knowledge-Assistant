@@ -14,6 +14,14 @@ public record TeachingAgentResult(
         List<RagSource> sources,
         List<TeachingAgentTrace> traces,
         int steps,
-        boolean readOnly
+        boolean readOnly,
+        TeachingQualityAssessment quality
 ) {
+    public TeachingAgentResult(String answer, String sessionId, String topic, TeachingStage stage,
+                               TeachingNextAction nextAction, TeachingCheckPrompt check,
+                               TeachingSessionSummary sessionSummary, List<RagSource> sources,
+                               List<TeachingAgentTrace> traces, int steps, boolean readOnly) {
+        this(answer, sessionId, topic, stage, nextAction, check, sessionSummary, sources, traces,
+                steps, readOnly, null);
+    }
 }

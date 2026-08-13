@@ -2813,6 +2813,13 @@ textarea:focus-visible,
 .teaching-readonly-badge { border: 1px solid #b9dcca; border-radius: 999px; padding: 6px 9px; color: #287452; background: #edf9f2; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .teaching-answer-meta { display: flex; flex-wrap: wrap; gap: 7px; margin: 17px 0 15px 39px; }
 .teaching-answer-meta span { border-radius: 999px; padding: 5px 8px; color: #5c709e; background: #edf2ff; font-size: 10px; }
+.teaching-quality-card { margin: 0 0 17px 39px; border: 1px solid #b9dfca; border-radius: 11px; padding: 11px 12px; color: #287452; background: #effaf3; }
+.teaching-quality-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; }
+.teaching-quality-card header strong { font-size: 17px; }
+.teaching-quality-card.needs_review { border-color: #ead9ad; color: #896b32; background: #fffaf0; }
+.teaching-quality-card ul { display: grid; gap: 3px; margin: 7px 0 0; padding-left: 17px; font-size: 10px; line-height: 1.5; }
+.teaching-quality-card button { margin-top: 9px; border: 0; border-radius: 7px; padding: 7px 10px; color: #fff; background: #b48632; font-size: 10px; font-weight: 800; }
+.teaching-quality-limit { display: block; margin-top: 9px; color: #a18859; font-size: 10px; }
 .teaching-summary-card { margin: 0 0 17px 39px; border: 1px solid #d5e0f2; border-radius: 12px; padding: 13px; color: #53698b; background: #f8faff; }
 .teaching-summary-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .teaching-summary-card header small { display: block; color: #8196bd; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
@@ -2889,6 +2896,9 @@ textarea:focus-visible,
 .teaching-trace li small { color: inherit; font-size: 9px; font-weight: 600; }
 .teaching-side-card { padding: 19px; }
 .teaching-side-card h2 { margin: 9px 0 18px; color: #263552; font-family: Georgia, "Songti SC", serif; font-size: 21px; line-height: 1.35; letter-spacing: -.03em; }
+.teaching-safety-card { border-color: #ead9ad; background: linear-gradient(145deg,#fffdf7,#fff9ed); }
+.teaching-safety-card h2 { margin-bottom: 8px; color: #765d2d; font-size: 18px; }
+.teaching-safety-card p { margin: 0; color: #806f4e; font-size: 11px; line-height: 1.65; }
 .teaching-steps { display: grid; gap: 13px; }
 .teaching-steps > div { display: flex; align-items: flex-start; gap: 10px; color: #a1adbf; }
 .teaching-steps > div > span { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; border: 1px solid #dce3ef; border-radius: 50%; font-size: 10px; font-weight: 800; }

@@ -24,6 +24,8 @@ const loading = ref(false)
 const checking = ref(false)
 const practicing = ref(false)
 const showTrace = ref(false)
+const qualityRetryCount = ref(0)
+const maxQualityRetries = 2
 
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
 const answerHtml = computed(() => renderMarkdown(result.value?.answer || ''))
@@ -58,6 +60,10 @@ const summaryStatusLabels = {
   NEEDS_REVIEW: '需要复习',
   MASTERED: '已掌握'
 }
+const qualityStatusLabels = {
+  PASS: '质量通过',
+  NEEDS_REVIEW: '建议改进'
+}
 const practiceAnswer = computed(() => [
   `任务场景：${practiceScene.value.trim()}`,
   `使用的工具：${practiceTool.value.trim()}`,
@@ -74,6 +80,7 @@ async function ask(suggestion = null) {
   if (suggestion) {
     topic.value = suggestion.topic
     message.value = suggestion.message
+    qualityRetryCount.value = 0
   }
 
   const normalizedTopic = topic.value.trim()
@@ -92,7 +99,10 @@ async function ask(suggestion = null) {
   showTrace.value = false
   loading.value = true
 
-  if (previousTopic && previousTopic !== normalizedTopic) sessionId.value = ''
+  if (previousTopic && previousTopic !== normalizedTopic) {
+    sessionId.value = ''
+    qualityRetryCount.value = 0
+  }
   if (!sessionId.value) sessionId.value = createUuid()
 
   try {
@@ -109,6 +119,16 @@ async function ask(suggestion = null) {
   } finally {
     loading.value = false
   }
+}
+
+async function improveExplanation() {
+  if (loading.value || !result.value?.quality || result.value.quality.status === 'PASS'
+    || qualityRetryCount.value >= maxQualityRetries) return
+  const issues = result.value.quality.issues || []
+  if (!issues.length) return
+  message.value = `${message.value.trim()}\n\n请重新讲解，并重点补充：${issues.join('；')}。`
+  qualityRetryCount.value += 1
+  await ask()
 }
 
 async function submitPractice() {
@@ -167,6 +187,7 @@ function startNewLesson() {
   practiceResult.value = ''
   error.value = ''
   showTrace.value = false
+  qualityRetryCount.value = 0
 }
 </script>
 
@@ -253,11 +274,25 @@ function startNewLesson() {
             </div>
             <span class="teaching-readonly-badge">{{ result.readOnly ? '只读教学' : '已记录检查' }}</span>
           </header>
-          <div class="teaching-answer-meta">
+           <div class="teaching-answer-meta">
             <span>当前阶段：{{ stageLabels[result.stage] || result.stage }}</span>
             <span>下一步：{{ actionLabels[result.nextAction] || result.nextAction }}</span>
             <span>{{ result.steps }} 步执行</span>
-          </div>
+           </div>
+           <section v-if="result.quality" class="teaching-quality-card" :class="result.quality.status.toLowerCase()">
+             <header>
+               <span><b>讲解质量</b> · {{ qualityStatusLabels[result.quality.status] || result.quality.status }}</span>
+               <strong>{{ result.quality.score }}%</strong>
+             </header>
+             <ul v-if="result.quality.issues?.length">
+               <li v-for="issue in result.quality.issues" :key="issue">{{ issue }}</li>
+             </ul>
+             <button v-if="result.quality.status !== 'PASS' && qualityRetryCount < maxQualityRetries"
+               type="button" :disabled="loading" @click="improveExplanation">
+               {{ loading ? '正在重新组织...' : `按问题重新讲解（还可尝试 ${maxQualityRetries - qualityRetryCount} 次）` }}
+             </button>
+             <small v-else-if="result.quality.status !== 'PASS'" class="teaching-quality-limit">已达到自动改进次数，请修改问题或开始新主题。</small>
+           </section>
           <section v-if="result.sessionSummary" class="teaching-summary-card" :class="result.sessionSummary.status.toLowerCase()">
             <header>
               <div><small>SESSION MASTERY</small><h3>本节掌握度</h3></div>
@@ -354,6 +389,11 @@ function startNewLesson() {
         <section class="teaching-side-card teaching-source-card">
           <header><span class="teaching-side-label">知识依据</span><span v-if="result?.sources?.length">{{ result.sources.length }} 条</span></header>
           <SourcePanel :sources="result?.sources || []" :empty-message="sourceEmptyMessage" />
+        </section>
+        <section class="teaching-side-card teaching-safety-card">
+          <span class="teaching-side-label">安全边界</span>
+          <h2>资料是依据，不是指令。</h2>
+          <p>教学 Agent 只读当前空间，工具参数有边界，知识库内容不会改变它的权限或执行规则。</p>
         </section>
       </aside>
     </section>

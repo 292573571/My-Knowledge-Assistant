@@ -27,6 +27,7 @@ public class TeachingAgentService {
     private final TeachingReadOnlyService readOnlyService;
     private final TeachingCheckService checkService;
     private final TeachingAgentOutputParser outputParser;
+    private final TeachingQualityGate qualityGate = new TeachingQualityGate();
 
     public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
                                 TeachingCheckService checkService, ObjectMapper objectMapper) {
@@ -66,16 +67,18 @@ public class TeachingAgentService {
             TeachingSessionSummary sessionSummary = checkService.summary(user, access, context.sessionId());
             return new TeachingAgentResult(failureMessage, context.sessionId(), context.topic(), TeachingStage.EXPLAIN,
                     TeachingNextAction.CHECK, null, sessionSummary, tools.sources(), traces,
-                    Math.max(1, traces.size()), true);
+                    Math.max(1, traces.size()), true,
+                    qualityGate.evaluate(failureMessage, null, traces, true));
         }
         TeachingAgentDraft draft = outputParser.parse(rawAnswer);
         TeachingCheckPrompt check = checkService.createPending(user, access, context.sessionId(), context.topic(),
                 draft.explanation(), draft.checkQuestion());
         TeachingSessionSummary sessionSummary = checkService.summary(user, access, context.sessionId());
+        TeachingQualityAssessment quality = qualityGate.evaluate(draft.explanation(), check.question(), traces, true);
         return new TeachingAgentResult(draft.explanation(),
                 context.sessionId(), context.topic(), TeachingStage.EXPLAIN, TeachingNextAction.CHECK, check,
                 sessionSummary,
-                tools.sources(), traces, Math.max(1, traces.size()), true);
+                tools.sources(), traces, Math.max(1, traces.size()), true, quality);
     }
 
     private List<TeachingAgentTrace> traces(TeachingAgentTools tools, long startedAt) {

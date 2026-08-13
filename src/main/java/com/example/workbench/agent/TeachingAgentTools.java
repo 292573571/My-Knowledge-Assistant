@@ -13,6 +13,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
 public class TeachingAgentTools {
 
     public static final int MAX_TOOL_CALLS = 5;
+    private static final int MAX_QUERY_LENGTH = 1000;
 
     private final TeachingReadOnlyService readOnlyService;
     private final TeachingAgentContext context;
@@ -29,8 +30,10 @@ public class TeachingAgentTools {
     public TeachingReadOnlyService.KnowledgeSearchResult searchKnowledge(
             @ToolParam(description = "学习主题或具体问题") String query,
             @ToolParam(description = "返回资料数量，范围为 1 到 10") int limit) {
+        String safeQuery = validateQuery(query);
+        int safeLimit = boundedLimit(limit, 10);
         TeachingReadOnlyService.KnowledgeSearchResult result = invoke("searchKnowledge",
-                () -> readOnlyService.search(context, query, limit));
+                () -> readOnlyService.search(context, safeQuery, safeLimit));
         result.sources().forEach(source -> sources.putIfAbsent(sourceKey(source), source));
         return result;
     }
@@ -38,7 +41,8 @@ public class TeachingAgentTools {
     @Tool(description = "查询当前登录用户最近的学习记录摘要，用于避免重复教学；limit 范围为 1 到 20")
     public TeachingReadOnlyService.LearningHistorySummary getRecentLearningRecords(
             @ToolParam(description = "返回记录数量，范围为 1 到 20") int limit) {
-        return invoke("getRecentLearningRecords", () -> readOnlyService.recentLearningRecords(context, limit));
+        int safeLimit = boundedLimit(limit, 20);
+        return invoke("getRecentLearningRecords", () -> readOnlyService.recentLearningRecords(context, safeLimit));
     }
 
     public synchronized List<Invocation> invocations() {
@@ -66,6 +70,25 @@ public class TeachingAgentTools {
 
     private String sourceKey(RagSource source) {
         return source.file() + "#" + (source.pageNumber() == null ? "chunk-" + source.chunkIndex() : "page-" + source.pageNumber());
+    }
+
+    private String validateQuery(String query) {
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("检索问题不能为空");
+        }
+        String normalized = query.strip();
+        if (normalized.length() > MAX_QUERY_LENGTH) {
+            throw new IllegalArgumentException("检索问题不能超过 " + MAX_QUERY_LENGTH + " 个字符");
+        }
+        if (normalized.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
+                && codePoint != '\n' && codePoint != '\r' && codePoint != '\t')) {
+            throw new IllegalArgumentException("检索问题包含不支持的控制字符");
+        }
+        return normalized;
+    }
+
+    private int boundedLimit(int limit, int max) {
+        return Math.max(1, Math.min(max, limit));
     }
 
     public record Invocation(String toolName, String status, String detail) {

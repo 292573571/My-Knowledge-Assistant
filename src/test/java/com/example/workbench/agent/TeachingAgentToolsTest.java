@@ -65,4 +65,36 @@ class TeachingAgentToolsTest {
         assertThat(tools.invocations()).containsExactly(
                 new TeachingAgentTools.Invocation("searchKnowledge", "FAILED", "工具暂时不可用，请稍后重试"));
     }
+
+    @Test
+    void rejectsBlankSearchWithoutCallingKnowledgeService() {
+        TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
+
+        assertThatThrownBy(() -> tools.searchKnowledge("  ", 5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("检索问题不能为空");
+        verify(readOnlyService, org.mockito.Mockito.never()).search(context, "  ", 5);
+        assertThat(tools.invocations()).isEmpty();
+    }
+
+    @Test
+    void clampsToolLimitBeforeCallingKnowledgeService() {
+        TeachingReadOnlyService.KnowledgeSearchResult expected =
+                new TeachingReadOnlyService.KnowledgeSearchResult("Agent", List.of());
+        when(readOnlyService.search(context, "Agent", 10)).thenReturn(expected);
+        TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
+
+        assertThat(tools.searchKnowledge(" Agent ", 99)).isEqualTo(expected);
+        verify(readOnlyService).search(context, "Agent", 10);
+    }
+
+    @Test
+    void rejectsOverlongSearchBeforeCallingKnowledgeService() {
+        TeachingAgentTools tools = new TeachingAgentTools(readOnlyService, context);
+
+        assertThatThrownBy(() -> tools.searchKnowledge("a".repeat(1001), 5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不能超过 1000");
+        verify(readOnlyService, org.mockito.Mockito.never()).search(org.mockito.Mockito.any(), org.mockito.Mockito.anyString(), org.mockito.Mockito.anyInt());
+    }
 }
