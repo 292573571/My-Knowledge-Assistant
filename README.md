@@ -169,6 +169,13 @@ ssh -tt -i "$DEPLOY_KEY" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
 deploy ALL=(root) NOPASSWD: /usr/local/sbin/deploy-zhihai *
 ```
 
+服务器预检会分别检查 `rsync` 和 sudo 权限；如果失败，会明确提示是缺少 `rsync`，还是 sudoers 不允许执行部署脚本。服务器上可以分别验证：
+
+```bash
+command -v rsync
+su - deploy -c 'sudo -n /usr/local/sbin/deploy-zhihai --help'
+```
+
 发版脚本不会要求 `sudo -n true`，也不会要求 `deploy` 用户免密执行任意 root 命令。后续发版只上传发布包并调用这个固定部署脚本；修改部署脚本本身时，需要重新手工安装一次。脚本会在发版前检查服务器脚本是否支持 `remote` 和 `cleanup` 子命令。
 
 只有服务器本地健康检查和公网健康检查都成功后，脚本才会删除旧的 release 和备份；任一检查失败时，旧版本仍会保留用于回滚。

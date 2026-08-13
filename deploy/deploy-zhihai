@@ -240,10 +240,20 @@ EOF
   fi
 
   echo "正在检查服务器发布环境..."
+  local remote_rsync
+  remote_rsync=$(ssh "${ssh_options[@]}" "$remote" "command -v rsync" 2>&1) || {
+    echo "服务器预检失败：服务器没有找到 rsync。请在服务器执行：" >&2
+    echo "  dnf install -y rsync" >&2
+    echo "$remote_rsync" >&2
+    exit 1
+  }
+
   local remote_help
   remote_help=$(ssh "${ssh_options[@]}" "$remote" \
-    "command -v rsync >/dev/null && test -x '$remote_deploy_script' && sudo -n '$remote_deploy_script' --help" 2>&1) || {
-    echo "服务器预检失败，请确认 rsync 已安装，且 deploy 用户可免密执行 $remote_deploy_script --help" >&2
+    "test -x '$remote_deploy_script' && sudo -n '$remote_deploy_script' --help" 2>&1) || {
+    echo "服务器预检失败：deploy 用户不能免密执行 $remote_deploy_script --help。" >&2
+    echo "请确认 sudoers 中包含：" >&2
+    echo "  deploy ALL=(root) NOPASSWD: $remote_deploy_script *" >&2
     echo "$remote_help" >&2
     exit 1
   }
