@@ -10,9 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.ai.chat.client.ChatClient;
@@ -43,16 +41,26 @@ public class MaintenanceAgentService {
     private final DocumentTaskService taskService;
     private final DocumentIngestionService ingestionService;
     private final AdminAuthorizationService adminAuthorizationService;
-    private final Map<String, PendingEntry> pendingActions = new ConcurrentHashMap<>();
+    private final MaintenancePendingActionStore pendingActionStore;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MaintenanceAgentService(ChatClient chatClient, MaintenanceReadOnlyService readOnlyService,
                                    DocumentTaskService taskService, DocumentIngestionService ingestionService,
-                                   AdminAuthorizationService adminAuthorizationService) {
+                                   AdminAuthorizationService adminAuthorizationService,
+                                   MaintenancePendingActionStore pendingActionStore) {
         this.chatClient = chatClient;
         this.readOnlyService = readOnlyService;
         this.taskService = taskService;
         this.ingestionService = ingestionService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.pendingActionStore = pendingActionStore;
+    }
+
+    public MaintenanceAgentService(ChatClient chatClient, MaintenanceReadOnlyService readOnlyService,
+                                   DocumentTaskService taskService, DocumentIngestionService ingestionService,
+                                   AdminAuthorizationService adminAuthorizationService) {
+        this(chatClient, readOnlyService, taskService, ingestionService, adminAuthorizationService,
+                new InMemoryMaintenancePendingActionStore());
     }
 
     /**
@@ -95,32 +103,33 @@ public class MaintenanceAgentService {
 
     public MaintenanceWriteResult confirm(AppUser user, com.example.workbench.workspace.WorkspaceAccessContext context,
                                            String token) {
-        PendingEntry pending = pendingActions.remove(token);
-        if (pending == null || pending.expiresAt().isBefore(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.GONE, "确认已过期或不存在，请重新发起操作");
-        }
-        if (!pending.userId().equals(context.userId()) || !pending.workspaceId().equals(context.workspaceId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "确认不属于当前用户或工作空间");
-        }
-        boolean admin = adminAuthorizationService.isAdmin(user);
-        return switch (pending.action()) {
-            case RETRY_TASK -> {
-                DocumentTaskResponse task = taskService.retry(pending.targetId(), context, admin);
-                yield new MaintenanceWriteResult("任务已重新进入处理队列。", pending.action(), task.taskId(), false);
+        return pendingActionStore.consume(token, pending -> {
+            if (pending == null || pending.expiresAt.isBefore(Instant.now())) {
+                throw new ResponseStatusException(HttpStatus.GONE, "确认已过期或不存在，请重新发起操作");
             }
-            case SYNC_WORKSPACE -> {
-                DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.SYNC, null);
-                yield new MaintenanceWriteResult("增量同步任务已提交。", pending.action(), task.taskId(), false);
+            if (!pending.userId.equals(context.userId()) || !pending.workspaceId.equals(context.workspaceId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "确认不属于当前用户或工作空间");
             }
-            case REBUILD_INDEX -> {
-                DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.REBUILD, null);
-                yield new MaintenanceWriteResult("索引重建任务已提交。", pending.action(), task.taskId(), false);
-            }
-            case DELETE_DOCUMENT -> {
-                ingestionService.deleteDocument(pending.targetId(), context, admin);
-                yield new MaintenanceWriteResult("文档已删除。", pending.action(), pending.targetId(), false);
-            }
-        };
+            boolean admin = adminAuthorizationService.isAdmin(user);
+            return switch (pending.action) {
+                case RETRY_TASK -> {
+                    DocumentTaskResponse task = taskService.retry(pending.targetId, context, admin);
+                    yield new MaintenanceWriteResult("任务已重新进入处理队列。", pending.action, task.taskId(), false);
+                }
+                case SYNC_WORKSPACE -> {
+                    DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.SYNC, null);
+                    yield new MaintenanceWriteResult("增量同步任务已提交。", pending.action, task.taskId(), false);
+                }
+                case REBUILD_INDEX -> {
+                    DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.REBUILD, null);
+                    yield new MaintenanceWriteResult("索引重建任务已提交。", pending.action, task.taskId(), false);
+                }
+                case DELETE_DOCUMENT -> {
+                    ingestionService.deleteDocument(pending.targetId, context, admin);
+                    yield new MaintenanceWriteResult("文档已删除。", pending.action, pending.targetId, false);
+                }
+            };
+        });
     }
 
     private MaintenancePendingAction proposeWrite(AppUser user,
@@ -156,7 +165,7 @@ public class MaintenanceAgentService {
         String token = UUID.randomUUID().toString();
         Instant expiresAt = Instant.now().plus(CONFIRMATION_TTL);
         MaintenancePendingAction result = new MaintenancePendingAction(token, action, targetId, description, expiresAt);
-        pendingActions.put(token, new PendingEntry(context.userId(),
+        pendingActionStore.save(new MaintenancePendingActionState(token, context.userId(),
                 context.workspaceId(), action, targetId, description, expiresAt));
         return result;
     }
@@ -164,10 +173,6 @@ public class MaintenanceAgentService {
     private String extractId(String text) {
         Matcher matcher = ID_PATTERN.matcher(text);
         return matcher.find() ? matcher.group() : "";
-    }
-
-    private record PendingEntry(String userId, String workspaceId, MaintenanceAction action, String targetId,
-                                String description, Instant expiresAt) {
     }
 
     private List<MaintenanceAgentTrace> traces(MaintenanceAgentTools tools, long startedAt) {

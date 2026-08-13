@@ -10,6 +10,10 @@ import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 class TeachingCheckServiceTest {
 
@@ -57,6 +61,61 @@ class TeachingCheckServiceTest {
                 new SubmitTeachingCheckRequest("workspace-b", "lesson-1", prompt.checkId(), request.answer())))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("教学检查不存在或不可访问");
+    }
+
+    @Test
+    void restoresAnAttemptWhenASecondServiceInstanceUsesTheSameStore() {
+        InMemoryTeachingAttemptStore sharedStore = new InMemoryTeachingAttemptStore();
+        TeachingCheckService firstInstance = new TeachingCheckService(learningRecordService, sharedStore);
+        TeachingCheckService restartedInstance = new TeachingCheckService(learningRecordService, sharedStore);
+
+        TeachingCheckPrompt prompt = firstInstance.createPending(user, access, "lesson-restart", "Agent",
+                "检查问题：Agent 为什么需要调用工具？");
+
+        TeachingCheckResponse response = restartedInstance.submit(user, access,
+                new SubmitTeachingCheckRequest("workspace-a", "lesson-restart", prompt.checkId(),
+                        "Agent 根据目标调用工具，检索知识库，结果回到上下文。例如搜索资料。"));
+
+        assertThat(response.passed()).isTrue();
+        assertThat(restartedInstance.summary(user, access, "lesson-restart").checkCompleted()).isTrue();
+        assertThat(restartedInstance.summary(user, access, "lesson-restart").sessionId())
+                .isEqualTo("lesson-restart");
+    }
+
+    @Test
+    void serializesConcurrentCheckSubmissionsForTheSameAttempt() throws Exception {
+        InMemoryTeachingAttemptStore sharedStore = new InMemoryTeachingAttemptStore();
+        TeachingCheckService firstInstance = new TeachingCheckService(learningRecordService, sharedStore);
+        TeachingCheckService secondInstance = new TeachingCheckService(learningRecordService, sharedStore);
+        TeachingCheckPrompt prompt = firstInstance.createPending(user, access, "lesson-concurrent", "Agent",
+                "检查问题：Agent 为什么需要调用工具？");
+        Callable<TeachingCheckResponse> submit = () -> firstInstance.submit(user, access,
+                new SubmitTeachingCheckRequest("workspace-a", "lesson-concurrent", prompt.checkId(),
+                        "Agent 根据目标调用工具，检索知识库，结果回到上下文。例如搜索资料。"));
+        Callable<TeachingCheckResponse> submitFromSecondInstance = () -> secondInstance.submit(user, access,
+                new SubmitTeachingCheckRequest("workspace-a", "lesson-concurrent", prompt.checkId(),
+                        "Agent 根据目标调用工具，检索知识库，结果回到上下文。例如搜索资料。"));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<TeachingCheckResponse> first = executor.submit(submit);
+            Future<TeachingCheckResponse> second = executor.submit(submitFromSecondInstance);
+
+            TeachingCheckResponse firstResponse = first.get();
+            TeachingCheckResponse secondResponse = second.get();
+            assertThat(firstResponse.passed()).isTrue();
+            assertThat(secondResponse).isEqualTo(firstResponse);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        org.mockito.Mockito.verify(learningRecordService).recordTeachingCheck(
+                org.mockito.Mockito.eq(user), org.mockito.Mockito.eq("workspace-a"),
+                org.mockito.Mockito.eq(prompt.checkId()), org.mockito.Mockito.eq("Agent"),
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+                org.mockito.Mockito.eq(5), org.mockito.Mockito.eq(5), org.mockito.Mockito.eq(true),
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.isNull(), org.mockito.Mockito.isNull(),
+                org.mockito.Mockito.isNull());
     }
 
     @Test

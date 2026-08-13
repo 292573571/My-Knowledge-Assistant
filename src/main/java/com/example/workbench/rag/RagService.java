@@ -2,6 +2,8 @@ package com.example.workbench.rag;
 
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.auth.AppUser;
+import com.example.workbench.conversation.ConversationContextStore;
 import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
@@ -62,6 +64,7 @@ public class RagService {
     private final VectorStore vectorStore;
     private final LocalChatClient chatClient;
     private final ConversationMemory conversationMemory;
+    private final ConversationContextStore conversationContextStore;
     private final WebSearchService webSearchService;
     private final RagQualityGate qualityGate;
     private final boolean retrievalDebugEnabled;
@@ -118,13 +121,15 @@ public class RagService {
             @Value("${workbench.rag.context.max-tokens:4500}") int contextMaxTokens,
             @Value("${workbench.rag.context.max-chunks-per-document:5}") int maxChunksPerDocument,
             @Value("${workbench.rag.context.adjacent-enabled:true}") boolean adjacentEnabled,
-            DocumentTaskRepository documentTaskRepository,
-            DocumentDisplayNameResolver displayNameResolver
+             DocumentTaskRepository documentTaskRepository,
+             DocumentDisplayNameResolver displayNameResolver,
+             ConversationContextStore conversationContextStore
     ) {
         this.documentIngestionService = documentIngestionService;
         this.vectorStore = vectorStore;
         this.chatClient = chatClient;
         this.conversationMemory = conversationMemory;
+        this.conversationContextStore = conversationContextStore;
         this.webSearchService = webSearchService;
         this.qualityGate = qualityGate;
         this.retrievalDebugEnabled = retrievalDebugEnabled;
@@ -157,7 +162,8 @@ public class RagService {
                 retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
                 multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory().getBeanProvider(SparseRetriever.class),
-                false, 60, 3000, 2, false, null, null);
+                false, 60, 3000, 2, false, null, null,
+                new com.example.workbench.conversation.InMemoryConversationContextStore(conversationMemory));
     }
 
     /** 保留混合检索测试和轻量调用方使用的完整旧构造器。 */
@@ -173,15 +179,24 @@ public class RagService {
                 retrievalDebugEnabled, topK, similarityThreshold, scoreDirection, queryRewriteEnabled,
                 multiQueryEnabled, multiQueryMaxQueries, modelFallbackEnabled, webSearchEnabled,
                 sparseRetrieverProvider, hybridEnabled, rrfK, contextMaxTokens, maxChunksPerDocument,
-                adjacentEnabled, null, null);
+                adjacentEnabled, null, null,
+                new com.example.workbench.conversation.InMemoryConversationContextStore(conversationMemory));
     }
 
     public RagChatResponse chat(RagChatRequest request) {
-        return chat(request, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return chat(null, request, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
     }
 
     public RagChatResponse chat(RagChatRequest request, RagChatOptions options) {
-        return chatInternal(request, options, false);
+        return chat(null, request, options);
+    }
+
+    public RagChatResponse chat(AppUser user, RagChatRequest request) {
+        return chat(user, request, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+    }
+
+    public RagChatResponse chat(AppUser user, RagChatRequest request, RagChatOptions options) {
+        return chatInternal(user, request, options, false);
     }
 
     /**
@@ -192,7 +207,7 @@ public class RagService {
      * @return 带同轮检索快照的回答
      */
     public RagChatResponse chatForEvaluation(RagChatRequest request, RagChatOptions options) {
-        return chatInternal(request, options, true);
+        return chatInternal(null, request, options, true);
     }
 
     /**
@@ -217,12 +232,12 @@ public class RagService {
         return new ContextEvaluationResult(context.relation(), context.standaloneQuestion(), queries, context.history());
     }
 
-    private RagChatResponse chatInternal(RagChatRequest request, RagChatOptions options, boolean includeDebug) {
+    private RagChatResponse chatInternal(AppUser user, RagChatRequest request, RagChatOptions options, boolean includeDebug) {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
         String question = request.message();
         // 历史仅用于补足当前问题语境；最终事实依据仍应来自本次检索到的文档。
-        List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
+        List<ChatMessage> history = recentHistory(user, request, conversationId);
         // 相同问题重复提交时，上一轮答案不能参与上下文判断，否则同问会被改写成不同意图。
         if (hasSameRecentUserQuestion(history, question)) {
             history = List.of();
@@ -239,8 +254,7 @@ public class RagService {
 
         if (isLearningAssistantIntroductionQuestion(question)) {
             // 身份和能力介绍是确定性产品信息，直接返回固定文案，避免模型偶发生成异常内容。
-            conversationMemory.addUserMessage(conversationId, question);
-            conversationMemory.addAssistantMessage(conversationId, LEARNING_ASSISTANT_INTRODUCTION);
+            rememberForLegacyTests(user, conversationId, question, LEARNING_ASSISTANT_INTRODUCTION);
             log.info("RAG chat completed route=LEARNING_ASSISTANT_INTRODUCTION conversationId={} durationMs={}", conversationId, System.currentTimeMillis() - startedAt);
             return new RagChatResponse(LEARNING_ASSISTANT_INTRODUCTION, List.of(), retrievalDebug(includeDebug, question, List.of(), List.of()));
         }
@@ -248,8 +262,7 @@ public class RagService {
         if (shouldAnswerNoKnowledge(question)) {
             // 对密码、余额等敏感或当前知识库不应回答的问题直接拒答，不进入模型调用。
             String answer = NO_CONTEXT_ANSWER;
-            conversationMemory.addUserMessage(conversationId, question);
-            conversationMemory.addAssistantMessage(conversationId, answer);
+            rememberForLegacyTests(user, conversationId, question, answer);
             log.info(
                     "RAG chat completed route=RULE_BASED_NO_KNOWLEDGE conversationId={} sources=0 durationMs={}",
                     conversationId,
@@ -278,8 +291,7 @@ public class RagService {
         if (sources.isEmpty()) {
             // 无可靠本地证据时可选模型补充，返回结果不带本地来源以避免伪造引用。
             RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
-            conversationMemory.addUserMessage(conversationId, question);
-            conversationMemory.addAssistantMessage(conversationId, response.answer());
+            rememberForLegacyTests(user, conversationId, question, response.answer());
             log.info(
                     "RAG chat completed route={} conversationId={} retrieved={} sources=0 durationMs={}",
                     modelFallbackEnabled ? "MODEL_FALLBACK_NO_LOCAL_MATCH" : "LOCAL_KNOWLEDGE_NO_MATCH",
@@ -301,8 +313,7 @@ public class RagService {
             RagChatResponse response = webSearchEnabled
                     ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
                     : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
-            conversationMemory.addUserMessage(conversationId, question);
-            conversationMemory.addAssistantMessage(conversationId, response.answer());
+            rememberForLegacyTests(user, conversationId, question, response.answer());
             log.info(
                     "RAG chat completed route={} conversationId={} sources={} durationMs={}",
                     webSearchEnabled ? "WEB_FALLBACK" : "MODEL_FALLBACK_LOCAL_CONTEXT_INSUFFICIENT",
@@ -335,8 +346,7 @@ public class RagService {
                     sources.size()
             );
             RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, List.of());
-            conversationMemory.addUserMessage(conversationId, question);
-            conversationMemory.addAssistantMessage(conversationId, response.answer());
+            rememberForLegacyTests(user, conversationId, question, response.answer());
             return withDebug(response, includeDebug, question, retrievedSources, List.of());
         } else {
             log.info("RAG answer grounding passed conversationId={}", conversationId);
@@ -346,8 +356,7 @@ public class RagService {
 
         List<RagSource> ragSources = toRagSources(sources);
 
-        conversationMemory.addUserMessage(conversationId, question);
-        conversationMemory.addAssistantMessage(conversationId, answer);
+        rememberForLegacyTests(user, conversationId, question, answer);
 
         log.info(
                 "RAG chat completed route=LOCAL_KNOWLEDGE_MODEL_ANSWER conversationId={} sources={} durationMs={}",
@@ -420,9 +429,13 @@ public class RagService {
     }
 
     public RagStreamResponse stream(RagChatRequest request) {
+        return stream(null, request);
+    }
+
+    public RagStreamResponse stream(AppUser user, RagChatRequest request) {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
-        List<ChatMessage> history = conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
+        List<ChatMessage> history = recentHistory(user, request, conversationId);
         if (hasSameRecentUserQuestion(history, question)) {
             history = List.of();
         }
@@ -456,9 +469,29 @@ public class RagService {
         );
     }
 
-    public void rememberStreamedAnswer(String conversationId, String question, String answer) {
-        conversationMemory.addUserMessage(conversationId, question);
-        conversationMemory.addAssistantMessage(conversationId, answer);
+    private List<ChatMessage> recentHistory(AppUser user, RagChatRequest request, String conversationId) {
+        if (user != null && conversationContextStore != null) {
+            List<ChatMessage> history = conversationContextStore.recent(user, request.workspaceId(),
+                    request.normalizedClientConversationId(), RECENT_CONVERSATION_ROUNDS);
+            return withoutCurrentQuestion(history, request.message());
+        }
+        return conversationMemory.recent(conversationId, RECENT_CONVERSATION_ROUNDS);
+    }
+
+    private List<ChatMessage> withoutCurrentQuestion(List<ChatMessage> history, String question) {
+        if (history == null || history.isEmpty() || question == null) return history == null ? List.of() : history;
+        ChatMessage latest = history.get(history.size() - 1);
+        if ("user".equalsIgnoreCase(latest.role()) && question.strip().equals(latest.content().strip())) {
+            return List.copyOf(history.subList(0, history.size() - 1));
+        }
+        return history;
+    }
+
+    private void rememberForLegacyTests(AppUser user, String conversationId, String question, String answer) {
+        if (user == null) {
+            conversationMemory.addUserMessage(conversationId, question);
+            conversationMemory.addAssistantMessage(conversationId, answer);
+        }
     }
 
     String buildPrompt(String context, String question) {

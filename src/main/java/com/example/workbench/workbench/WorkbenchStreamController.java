@@ -121,7 +121,8 @@ public class WorkbenchStreamController {
                 ));
 
                 workspaceService.access(user, workspace.workspaceId());
-                RagStreamResponse answer = ragService.stream(new RagChatRequest(scopedConversationId, workspace.workspaceId(), message));
+                RagStreamResponse answer = ragService.stream(user,
+                        new RagChatRequest(scopedConversationId, workspace.workspaceId(), normalizedConversationId, message));
                 if (execution.isCancelled()) {
                     // 在检索或模型生成期间取消时，直接结束 SSE，且不发送/保存迟到结果。
                     emitter.complete();
@@ -162,7 +163,6 @@ public class WorkbenchStreamController {
                 if (!execution.isCancelled()) {
                     workspaceService.access(user, workspace.workspaceId());
                     String answerContent = ragService.sanitizePresentedAnswer(content.toString(), message);
-                    ragService.rememberStreamedAnswer(scopedConversationId, message, answerContent);
                     boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
                             normalizedMode, answerContent, answer.sources(), List.of());
                         if (recorded) {

@@ -7,9 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,10 +26,16 @@ public class TeachingCheckService {
             "目标", "工具", "检索", "上下文", "知识库", "模型", "步骤", "结果", "决策", "调用");
 
     private final LearningRecordService learningRecordService;
-    private final Map<String, PendingAttempt> attempts = new ConcurrentHashMap<>();
+    private final TeachingAttemptStore attemptStore;
 
     public TeachingCheckService(LearningRecordService learningRecordService) {
+        this(learningRecordService, new InMemoryTeachingAttemptStore());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TeachingCheckService(LearningRecordService learningRecordService, TeachingAttemptStore attemptStore) {
         this.learningRecordService = learningRecordService;
+        this.attemptStore = attemptStore;
     }
 
     public TeachingCheckPrompt createPending(AppUser user, WorkspaceAccessContext access,
@@ -44,10 +48,7 @@ public class TeachingCheckService {
                                              String checkQuestion) {
         cleanupExpired();
         String ownerKey = ownerKey(user);
-        long activeCount = attempts.values().stream()
-                .filter(attempt -> attempt.ownerKey.equals(ownerKey)
-                        && (!attempt.checkCompleted || (attempt.practiceId != null && !attempt.practiceCompleted)))
-                .count();
+        long activeCount = attemptStore.countActive(ownerKey, Instant.now());
         if (activeCount >= MAX_ACTIVE_ATTEMPTS) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "教学检查次数过多，请先完成已有课程。");
         }
@@ -55,22 +56,20 @@ public class TeachingCheckService {
         String question = checkQuestion == null || checkQuestion.isBlank()
                 ? extractQuestion(answer, topic) : checkQuestion.strip();
         String checkId = UUID.randomUUID().toString();
-        attempts.put(checkId, new PendingAttempt(checkId, ownerKey, access.workspaceId(), sessionId,
-                topic, question, Instant.now().plus(ATTEMPT_TTL)));
+        attemptStore.save(new TeachingAttemptState(checkId, ownerKey, access.workspaceId(), sessionId,
+                topic, question, Instant.now().plus(ATTEMPT_TTL), Instant.now()));
         return new TeachingCheckPrompt(checkId, question);
     }
 
     public TeachingCheckResponse submit(AppUser user, WorkspaceAccessContext access,
-                                        SubmitTeachingCheckRequest request) {
+                                         SubmitTeachingCheckRequest request) {
         cleanupExpired();
-        PendingAttempt attempt = attempts.get(request.checkId().strip());
-        if (attempt == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学检查不存在或已过期");
-        }
-
-        synchronized (attempt) {
+        return attemptStore.withCheckLock(request.checkId().strip(), attempt -> {
+            if (attempt == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学检查不存在或已过期");
+            }
             if (attempt.expiresAt.isBefore(Instant.now())) {
-                attempts.remove(attempt.checkId, attempt);
+                attemptStore.delete(attempt.checkId);
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学检查不存在或已过期");
             }
             requireOwnerAndContext(user, access, request, attempt);
@@ -107,26 +106,27 @@ public class TeachingCheckService {
                     score, MAX_SCORE, passed, feedback, review, practice,
                     null,
                     saved, recordDate, false);
+            attemptStore.save(attempt);
             TeachingSessionSummary sessionSummary = buildSummary(attempt);
             attempt.response = new TeachingCheckResponse(attempt.response.attemptId(), attempt.response.sessionId(),
                     attempt.response.topic(), attempt.response.stage(), attempt.response.nextAction(),
                     attempt.response.score(), attempt.response.maxScore(), attempt.response.passed(),
                     attempt.response.feedback(), attempt.response.review(), attempt.response.practice(),
                     sessionSummary, attempt.response.saved(), attempt.response.recordDate(), attempt.response.readOnly());
+            attemptStore.save(attempt);
             return attempt.response;
-        }
+        });
     }
 
     public TeachingPracticeResponse submitPractice(AppUser user, WorkspaceAccessContext access,
                                                    SubmitTeachingPracticeRequest request) {
         cleanupExpired();
-        PendingAttempt attempt = attempts.values().stream()
-                .filter(item -> request.practiceId().strip().equals(item.practiceId))
-                .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "教学实践不存在或已过期"));
-        synchronized (attempt) {
+        return attemptStore.withPracticeLock(request.practiceId().strip(), attempt -> {
+            if (attempt == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学实践不存在或已过期");
+            }
             if (attempt.expiresAt.isBefore(Instant.now())) {
-                attempts.remove(attempt.checkId, attempt);
+                attemptStore.delete(attempt.checkId);
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学实践不存在或已过期");
             }
             requirePracticeOwnerAndContext(user, access, request, attempt);
@@ -155,8 +155,9 @@ public class TeachingCheckService {
                     passed ? TeachingStage.PRACTICE : TeachingStage.REVIEW,
                     passed ? TeachingNextAction.COMPLETE : TeachingNextAction.RECHECK,
                     score, MAX_SCORE, passed, feedback, passed ? null : buildPracticeReview(attempt),
-                    null,
-                    false, null, true);
+                     null,
+                     false, null, true);
+            attemptStore.save(attempt);
             TeachingSessionSummary sessionSummary = buildSummary(attempt);
             attempt.practiceResponse = new TeachingPracticeResponse(attempt.practiceResponse.practiceId(),
                     attempt.practiceResponse.sessionId(), attempt.practiceResponse.topic(),
@@ -166,21 +167,18 @@ public class TeachingCheckService {
                     attempt.practiceResponse.passed(), attempt.practiceResponse.feedback(),
                     attempt.practiceResponse.review(), sessionSummary, attempt.practiceResponse.saved(),
                     attempt.practiceResponse.recordDate(), attempt.practiceResponse.readOnly());
+            attemptStore.save(attempt);
             return attempt.practiceResponse;
-        }
+        });
     }
 
     public TeachingSessionSummary summary(AppUser user, WorkspaceAccessContext access, String sessionId) {
         cleanupExpired();
-        PendingAttempt latest = attempts.values().stream()
-                .filter(attempt -> attempt.ownerKey.equals(ownerKey(user))
-                        && attempt.workspaceId.equals(access.workspaceId())
-                        && attempt.sessionId.equals(sessionId.strip()))
-                .max(java.util.Comparator.comparing(attempt -> attempt.createdAt))
+        TeachingAttemptState latest = attemptStore.findLatest(ownerKey(user), access.workspaceId(), sessionId.strip())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "教学会话不存在或已过期"));
         synchronized (latest) {
             if (latest.expiresAt.isBefore(Instant.now())) {
-                attempts.remove(latest.checkId, latest);
+                attemptStore.delete(latest.checkId);
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "教学会话不存在或已过期");
             }
             return buildSummary(latest);
@@ -188,7 +186,7 @@ public class TeachingCheckService {
     }
 
     private void requireOwnerAndContext(AppUser user, WorkspaceAccessContext access,
-                                        SubmitTeachingCheckRequest request, PendingAttempt attempt) {
+                                        SubmitTeachingCheckRequest request, TeachingAttemptState attempt) {
         if (!attempt.ownerKey.equals(ownerKey(user))
                 || !attempt.workspaceId.equals(access.workspaceId())
                 || !attempt.sessionId.equals(request.sessionId().strip())) {
@@ -197,7 +195,7 @@ public class TeachingCheckService {
     }
 
     private void requirePracticeOwnerAndContext(AppUser user, WorkspaceAccessContext access,
-                                                SubmitTeachingPracticeRequest request, PendingAttempt attempt) {
+                                                SubmitTeachingPracticeRequest request, TeachingAttemptState attempt) {
         if (!attempt.ownerKey.equals(ownerKey(user))
                 || !attempt.workspaceId.equals(access.workspaceId())
                 || !attempt.sessionId.equals(request.sessionId().strip())) {
@@ -205,7 +203,7 @@ public class TeachingCheckService {
         }
     }
 
-    private TeachingPracticePrompt createPractice(PendingAttempt attempt) {
+    private TeachingPracticePrompt createPractice(TeachingAttemptState attempt) {
         if (attempt.practiceId == null) {
             attempt.practiceId = UUID.randomUUID().toString();
             attempt.practiceQuestion = "请举一个 Agent 可以帮助你完成的真实任务。"
@@ -215,12 +213,8 @@ public class TeachingCheckService {
                 attempt.expiresAt, TeachingPracticeStatus.PENDING);
     }
 
-    private TeachingSessionSummary buildSummary(PendingAttempt current) {
-        PendingAttempt latest = attempts.values().stream()
-                .filter(attempt -> attempt.ownerKey.equals(current.ownerKey)
-                        && attempt.workspaceId.equals(current.workspaceId)
-                        && attempt.sessionId.equals(current.sessionId))
-                .max(java.util.Comparator.comparing(attempt -> attempt.createdAt))
+    private TeachingSessionSummary buildSummary(TeachingAttemptState current) {
+        TeachingAttemptState latest = attemptStore.findLatest(current.ownerKey, current.workspaceId, current.sessionId)
                 .orElse(current);
         TeachingCheckResponse check = latest.checkCompleted ? latest.response : null;
         TeachingPracticeResponse practice = latest.practiceCompleted ? latest.practiceResponse : null;
@@ -256,7 +250,7 @@ public class TeachingCheckService {
                 List.copyOf(weakPoints));
     }
 
-    private int score(PendingAttempt attempt, String answer) {
+    private int score(TeachingAttemptState attempt, String answer) {
         String normalized = answer.toLowerCase();
         int points = normalized.length() >= 20 ? 1 : 0;
         if (normalized.contains(attempt.topic.toLowerCase())) points++;
@@ -268,7 +262,7 @@ public class TeachingCheckService {
         return Math.min(MAX_SCORE, points);
     }
 
-    private int practiceScore(PendingAttempt attempt, String answer) {
+    private int practiceScore(TeachingAttemptState attempt, String answer) {
         String normalized = answer.toLowerCase();
         int points = normalized.length() >= 30 ? 1 : 0;
         if (normalized.contains(attempt.topic.toLowerCase())) points++;
@@ -283,7 +277,7 @@ public class TeachingCheckService {
         return "实践方案还缺少完整链路。请补充任务目标、行动方式，以及工具结果如何影响下一步。";
     }
 
-    private TeachingReview buildPracticeReview(PendingAttempt attempt) {
+    private TeachingReview buildPracticeReview(TeachingAttemptState attempt) {
         return new TeachingReview("实践链路不完整",
                 "一个可执行的 Agent 方案至少需要说明目标、行动、工具或知识库结果，以及下一步决策。",
                 "请围绕“" + attempt.topic + "”重新写一个包含目标、工具调用和结果处理的任务方案。");
@@ -295,7 +289,7 @@ public class TeachingCheckService {
         return "回答还缺少关键概念或具体说明。请回到讲解内容，重点想想它的目标、工具和执行结果之间有什么关系。";
     }
 
-    private TeachingReview buildReview(PendingAttempt attempt, String answer) {
+    private TeachingReview buildReview(TeachingAttemptState attempt, String answer) {
         String normalized = answer.toLowerCase();
         String normalizedTopic = attempt.topic.toLowerCase();
         String weakPoint;
@@ -333,42 +327,11 @@ public class TeachingCheckService {
     }
 
     private void cleanupExpired() {
-        Instant now = Instant.now();
-        attempts.entrySet().removeIf(entry -> entry.getValue().expiresAt.isBefore(now));
+        attemptStore.deleteExpired(Instant.now());
     }
 
     private String ownerKey(AppUser user) {
         return user.getId() == null ? "account:" + user.getAccount() : "id:" + user.getId();
     }
 
-    private static final class PendingAttempt {
-        private final String checkId;
-        private final String ownerKey;
-        private final String workspaceId;
-        private final String sessionId;
-        private final String topic;
-        private final String question;
-        private final Instant expiresAt;
-        private final Instant createdAt;
-        private String answer = "";
-        private boolean checkCompleted;
-        private TeachingCheckResponse response;
-        private String practiceId;
-        private String practiceQuestion;
-        private String practiceAnswer = "";
-        private boolean practiceCompleted;
-        private TeachingPracticeResponse practiceResponse;
-
-        private PendingAttempt(String checkId, String ownerKey, String workspaceId, String sessionId,
-                               String topic, String question, Instant expiresAt) {
-            this.checkId = checkId;
-            this.ownerKey = ownerKey;
-            this.workspaceId = workspaceId;
-            this.sessionId = sessionId;
-            this.topic = topic;
-            this.question = question;
-            this.expiresAt = expiresAt;
-            this.createdAt = Instant.now();
-        }
-    }
 }

@@ -258,6 +258,10 @@ curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
 
 ## 会话和学习记录
 
+Teaching Agent 的当前教学检查和实践状态保存在 PostgreSQL 的 `teaching_attempts` 表中，状态默认保留 30 分钟。服务重启或多实例切换后，仍可以使用原来的 `sessionId`、`checkId` 和 `practiceId` 继续当前教学流程；访问教学接口时会即时清理过期状态。后台清理任务的启用状态、下一次执行时间、执行间隔、租约、最近执行结果都保存在 PostgreSQL 的 `scheduled_jobs` 表中，应用内的 `@Scheduled` 只负责高频唤醒和抢占数据库任务，不决定业务执行周期。同一个检查或实践在提交时使用数据库行锁，多实例同时提交相同答案只会完成一次评分和学习记录写入；提交不同答案仍返回冲突。
+
+聊天历史以 PostgreSQL 的 `chat_conversations` 和 `chat_messages` 为事实来源。RAG 上下文按用户、workspace 和客户端会话标识查询最近消息，JVM 内的 `ConversationMemory` 只保留给旧版测试构造器使用，不作为生产业务状态来源。维护 Agent 的确认动作保存在 `maintenance_pending_actions` 表中，重启后仍可在有效期内确认，且同一确认令牌只能消费一次。
+
 会话接口：
 
 ```text

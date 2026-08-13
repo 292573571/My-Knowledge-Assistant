@@ -6,6 +6,7 @@ import com.example.workbench.auth.AuthFilter;
 import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
+import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.audit.AuditAction;
 import com.example.workbench.audit.AuditOutcome;
 import com.example.workbench.audit.AuditService;
@@ -48,6 +49,7 @@ public class RagController {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final DocumentTaskService documentTaskService;
+    private final ConversationService conversationService;
 
     public RagController(
             DocumentIngestionService documentIngestionService,
@@ -58,7 +60,8 @@ public class RagController {
             AdminAuthorizationService adminAuthorizationService,
             WorkspaceService workspaceService,
             AuditService auditService,
-            DocumentTaskService documentTaskService
+            DocumentTaskService documentTaskService,
+            ConversationService conversationService
     ) {
         this.documentIngestionService = documentIngestionService;
         this.ragService = ragService;
@@ -69,6 +72,7 @@ public class RagController {
         this.workspaceService = workspaceService;
         this.auditService = auditService;
         this.documentTaskService = documentTaskService;
+        this.conversationService = conversationService;
     }
 
     @PostMapping("/ingest")
@@ -241,7 +245,17 @@ public class RagController {
     public RagChatResponse chat(@Valid @RequestBody RagChatRequest request, HttpServletRequest httpRequest) {
         AppUser user = authenticatedUser(httpRequest);
         WorkspaceAccessContext workspace = workspaceService.access(user, request.workspaceId());
-        return ragService.chat(new RagChatRequest(UserConversationScope.id(user, request.normalizedConversationId()), workspace.workspaceId(), request.message()));
+        String clientConversationId = request.normalizedConversationId();
+        String mode = "rag";
+        conversationService.recordUserMessage(user, workspace.workspaceId(), clientConversationId,
+                request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)), mode,
+                request.message());
+        RagChatResponse response = ragService.chat(user, new RagChatRequest(
+                UserConversationScope.id(user, request.normalizedConversationId()), workspace.workspaceId(),
+                clientConversationId, request.message()));
+        conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
+                mode, response.answer(), response.sources(), List.of());
+        return response;
     }
 
     @PostMapping("/rag/debug")
