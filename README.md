@@ -13,6 +13,7 @@
 - 长 PDF 分批解析、批次状态、失败清理和成功批次跳过恢复。
 - Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。
 - 多轮聊天、SSE 流式回答、会话保存、停止和删除。
+- 统一智海教学助手：自动区分直接回答与主题教学，支持 EXPLAIN、CHECK、PRACTICE、REVIEW 状态恢复和幂等提交。
 - PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
@@ -105,6 +106,27 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 完整默认项见 `src/main/resources/application.properties`。
 
 ## 启动项目
+
+## 统一教学助手接口
+
+前端主入口现在是统一的学习助手工作台。普通问题默认走 `CHAT`，包含“教我、讲解、解释、学习”等明确学习意图的问题自动升级为 `GUIDED`；也可以在界面中显式选择模式。
+
+核心接口如下：
+
+```text
+POST /api/learning-assistant/sessions
+GET  /api/learning-assistant/sessions
+GET  /api/learning-assistant/sessions/{sessionId}
+DELETE /api/learning-assistant/sessions/{sessionId}
+POST /api/learning-assistant/sessions/{sessionId}/messages
+POST /api/learning-assistant/sessions/{sessionId}/messages/stream
+POST /api/learning-assistant/sessions/{sessionId}/check
+POST /api/learning-assistant/sessions/{sessionId}/practice
+```
+
+统一 session 使用 `learning_sessions` 保存 workspace、主题、模式、阶段和状态，聊天正文继续复用 `chat_conversations/chat_messages`，教学过程继续复用 `teaching_attempts` 和 `learning_records`。带 `clientRequestId` 的消息、CHECK、PRACTICE 请求会保存到 `learning_session_events`，重复提交直接返回第一次响应。
+
+旧入口仍保持兼容：`/api/workbench/chat*` 和 `/api/agent/teaching/*` 不在本次改造中删除。
 
 启动后端：
 

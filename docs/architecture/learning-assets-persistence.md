@@ -16,6 +16,7 @@
 ```text
 PostgreSQL 事实层
 ├── chat_conversations / chat_messages
+├── learning_sessions / learning_session_events
 ├── learning_records
 ├── formal_notes
 ├── teaching_attempts
@@ -47,6 +48,21 @@ PostgreSQL 事实层
 `formal_notes` 保存正式笔记正文、内容哈希、兼容文件名/路径和 `index_status`。正式笔记与学习记录是两个不同的事实实体，正式笔记不是把某个 Markdown 文件重新当作事实源。
 
 ## 写入流程
+
+### 统一学习助手
+
+```text
+LearningAssistantController
+  -> WorkspaceService.access
+  -> LearningAssistantService
+  -> intent/mode resolver
+  -> WorkbenchChatService 或 TeachingAgentService
+  -> chat_messages / teaching_attempts / learning_records
+  -> learning_sessions 状态更新
+  -> learning_session_events 幂等响应快照
+```
+
+`learning_sessions` 是统一产品层的长期上下文，不替代聊天正文或教学 attempt。普通问答和主题教学共享一个 session ID，因此前端刷新后可以恢复同一条消息流和教学侧栏。`learning_session_events` 以 `(session_id, client_request_id)` 唯一约束实现重复请求恢复；数据库唯一约束是最终一致性边界，不能只依赖浏览器去重。
 
 ### 普通问答
 
@@ -99,6 +115,7 @@ PRACTICE -> teaching_attempts + learning_records(TEACHING_PRACTICE)
 ## 隔离规则
 
 - `workspace_id` 是学习记录和正式笔记的业务隔离字段。
+- `learning_sessions`、`learning_session_events` 和聊天会话也必须按 `user_id + workspace_id` 查询。
 - API 先通过 `WorkspaceService` 校验用户权限，再进入学习记录服务。
 - 编辑 Markdown 中的 `知识空间` 标记不能改变当前请求的 workspace 归属。
 - 学习记录投影按用户、workspace、日期生成文件，避免不同空间聚合到同一投影。
@@ -124,3 +141,4 @@ PRACTICE -> teaching_attempts + learning_records(TEACHING_PRACTICE)
 - 当前文件投影仍依赖应用工作区路径；生产应改为持久化卷或对象存储抽象。
 - 正式笔记投影已接入统一入口，但索引恢复和 Chroma 失败重试仍需要端到端测试。
 - `document_chunks` 和 Chroma 是派生副本，不应直接作为学习资产业务查询接口的数据来源。
+- 统一学习助手的 SSE 当前按完整服务响应发送 `message_start`、`token`、`source`、`teaching_stage`、`check`、`practice`、`done` 事件；模型 token 级流式生成仍沿用旧 Workbench SSE，后续可抽取共享 RAG evidence 流。
