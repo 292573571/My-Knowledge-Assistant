@@ -8,12 +8,15 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import java.time.Instant;
 import org.hibernate.annotations.Comment;
 
 @Entity
-@Table(name = "document_tasks")
+@Table(name = "document_tasks", uniqueConstraints = @UniqueConstraint(
+        name = "uk_document_task_request_scope",
+        columnNames = {"actor_user_id", "workspace_id", "client_request_id"}))
 @Comment("文档异步处理任务表")
 public class DocumentTaskEntity {
 
@@ -66,7 +69,7 @@ public class DocumentTaskEntity {
     @Comment("已持久化源文件路径")
     private String sourcePath;
 
-    @Column(name = "client_request_id", unique = true, length = 64)
+    @Column(name = "client_request_id", length = 64)
     @Comment("上传请求幂等标识")
     private String clientRequestId;
 

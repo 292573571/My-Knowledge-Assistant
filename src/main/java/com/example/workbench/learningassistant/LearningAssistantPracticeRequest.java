@@ -7,6 +7,6 @@ public record LearningAssistantPracticeRequest(
         @NotBlank @Size(max = 120) String workspaceId,
         @NotBlank @Size(max = 64) String practiceId,
         @NotBlank @Size(max = 4000) String answer,
-        @Size(max = 100) String clientRequestId
+        @NotBlank(message = "clientRequestId 不能为空") @Size(max = 100) String clientRequestId
 ) {
 }

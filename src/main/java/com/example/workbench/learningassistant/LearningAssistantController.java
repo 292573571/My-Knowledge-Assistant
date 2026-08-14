@@ -2,11 +2,17 @@ package com.example.workbench.learningassistant;
 
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AuthFilter;
+import com.example.workbench.conversation.ConversationExecutionRegistry;
+import com.example.workbench.conversation.ConversationService;
+import com.example.workbench.config.HttpRequestLoggingFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -23,11 +29,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 @RequestMapping("/api/learning-assistant/sessions")
 public class LearningAssistantController {
+    private static final Logger log = LoggerFactory.getLogger(LearningAssistantController.class);
     private static final long STREAM_TIMEOUT_MS = 120_000L;
     private final LearningAssistantService service;
+    private final ConversationExecutionRegistry executionRegistry;
+    private final ConversationService conversationService;
 
-    public LearningAssistantController(LearningAssistantService service) {
+    public LearningAssistantController(LearningAssistantService service,
+                                       ConversationExecutionRegistry executionRegistry,
+                                       ConversationService conversationService) {
         this.service = service;
+        this.executionRegistry = executionRegistry;
+        this.conversationService = conversationService;
     }
 
     @PostMapping
@@ -70,10 +83,20 @@ public class LearningAssistantController {
                              @Valid @RequestBody LearningAssistantMessageRequest request,
                              HttpServletRequest httpRequest) {
         AppUser user = user(httpRequest);
+        String workspaceId = request.workspaceId();
+        service.validateSession(user, sessionId, workspaceId);
+        String scope = conversationService.executionScope(user, workspaceId, sessionId);
+        Object requestIdAttribute = httpRequest.getAttribute(HttpRequestLoggingFilter.REQUEST_ID_ATTRIBUTE);
+        String requestId = requestIdAttribute == null ? "" : requestIdAttribute.toString();
+        ConversationExecutionRegistry.Execution execution = executionRegistry.begin(scope);
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
+        emitter.onTimeout(() -> executionRegistry.cancel(scope));
+        emitter.onError(error -> executionRegistry.cancel(scope));
+        emitter.onCompletion(() -> executionRegistry.cancel(scope));
         CompletableFuture.runAsync(() -> {
             try {
-                LearningAssistantResponse response = service.message(user, sessionId, request);
+                LearningAssistantResponse response = service.message(user, sessionId, request, execution);
+                if (execution.isCancelled()) throw new CancellationException("学习请求已停止");
                 send(emitter, "session", Map.of("sessionId", response.sessionId()));
                 send(emitter, "message_start", Map.of("intent", response.intent().name(), "mode", response.mode().name()));
                 if (response.answer() != null && !response.answer().isBlank()) {
@@ -92,13 +115,19 @@ public class LearningAssistantController {
                 if (response.practice() != null) send(emitter, "practice", response.practice());
                 send(emitter, "done", Map.of("response", response));
                 emitter.complete();
+            } catch (CancellationException exception) {
+                emitter.complete();
             } catch (Exception exception) {
+                log.error("统一学习助手流式请求失败 sessionId={} errorType={} message={}",
+                        sessionId, exception.getClass().getSimpleName(), exception.getMessage(), exception);
                 try {
-                    send(emitter, "error", Map.of("message", "请求失败，请稍后重试"));
+                    send(emitter, "error", errorPayload(exception, requestId));
                 } catch (Exception ignored) {
                     // 浏览器可能已关闭连接。
                 }
                 emitter.completeWithError(exception);
+            } finally {
+                executionRegistry.finish(scope, execution);
             }
         });
         return emitter;
@@ -118,6 +147,14 @@ public class LearningAssistantController {
         return service.practice(user(httpRequest), sessionId, request);
     }
 
+    @PostMapping("/{sessionId}/stop")
+    @org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.NO_CONTENT)
+    public void stop(@PathVariable String sessionId,
+                     @RequestParam(required = false) String workspaceId,
+                     HttpServletRequest httpRequest) {
+        service.stop(user(httpRequest), sessionId, workspaceId);
+    }
+
     private AppUser user(HttpServletRequest request) {
         AppUser user = (AppUser) request.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
@@ -126,5 +163,19 @@ public class LearningAssistantController {
 
     private void send(SseEmitter emitter, String event, Object data) throws java.io.IOException {
         emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    private Map<String, Object> errorPayload(Exception exception, String requestId) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("message", exception instanceof ResponseStatusException response && response.getReason() != null
+                ? response.getReason() : "学习助手处理失败，请稍后重试");
+        payload.put("errorType", exception.getClass().getSimpleName());
+        payload.put("requestId", requestId);
+        if (exception instanceof ResponseStatusException response) {
+            int status = response.getStatusCode().value();
+            payload.put("status", status);
+            payload.put("retryable", status == 408 || status == 429 || status >= 500);
+        }
+        return payload;
     }
 }

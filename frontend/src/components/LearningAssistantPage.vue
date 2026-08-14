@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ChatInput from './ChatInput.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationSidebar from './ConversationSidebar.vue'
@@ -9,15 +9,12 @@ import {
   deleteLearningSession,
   fetchLearningSession,
   fetchLearningSessions,
-  sendLearningMessage,
+  stopLearningSession,
   streamLearningMessage,
   submitLearningCheck,
   submitLearningPractice
 } from '../api/learningAssistantApi'
-import { getActiveWorkspaceId } from '../api/workspaceApi'
 import { createUuid } from '../utils/uuid'
-
-defineProps({ workspace: { type: Object, default: null } })
 
 const sessions = ref([])
 const activeSessionId = ref('')
@@ -32,6 +29,8 @@ const checkAnswer = ref('')
 const practiceAnswer = ref('')
 const loading = ref(false)
 const loadingSessions = ref(false)
+const creatingSession = ref(false)
+const deletingSessionId = ref('')
 const error = ref('')
 const messagesEl = ref(null)
 
@@ -44,30 +43,44 @@ const modeLabels = { AUTO: '自动判断', CHAT: '直接回答', GUIDED: '主题
 const activeSession = computed(() => sessions.value.find(item => item.sessionId === activeSessionId.value))
 const latestSources = computed(() => [...messages.value].reverse().find(item => item.role === 'assistant' && item.sources?.length)?.sources || [])
 const closeStream = ref(null)
+const streamingRequest = ref(false)
+let activeRequestId = 0
+let sessionOperationId = 0
 
 onMounted(loadSessions)
+onBeforeUnmount(cancelLocalStream)
 watch(activeSessionId, () => scrollLatest())
 watch(() => messages.value.length, () => scrollLatest())
 
 async function loadSessions() {
+  const operationId = ++sessionOperationId
   loadingSessions.value = true
   error.value = ''
   try {
     const loaded = await fetchLearningSessions()
+    if (operationId !== sessionOperationId) return
     sessions.value = loaded
+    loadingSessions.value = false
     if (loaded.length) await selectSession(loaded[0].sessionId)
     else await newSession()
   } catch (exception) {
-    error.value = formatApiError(exception, '学习会话加载失败。')
+    if (operationId === sessionOperationId) error.value = formatApiError(exception, '学习会话加载失败。')
   } finally {
-    loadingSessions.value = false
+    if (operationId === sessionOperationId) loadingSessions.value = false
   }
 }
 
 async function newSession() {
-  if (loading.value) return
+  if (loading.value || creatingSession.value) return
+  const operationId = ++sessionOperationId
+  creatingSession.value = true
+  // 新建对话必须与上一条会话完全隔离，不能把旧主题带入空会话。
+  topic.value = ''
+  mode.value = 'AUTO'
+  userLevel.value = 'BEGINNER'
   try {
-    const created = await createLearningSession({ topic: topic.value, mode: mode.value, userLevel: userLevel.value })
+    const created = await createLearningSession({ topic: '', mode: 'AUTO', userLevel: 'BEGINNER' })
+    if (operationId !== sessionOperationId) return
     sessions.value.unshift(created)
     activeSessionId.value = created.sessionId
     messages.value = []
@@ -76,30 +89,38 @@ async function newSession() {
     pendingPractice.value = null
     error.value = ''
   } catch (exception) {
-    error.value = formatApiError(exception, '创建学习会话失败。')
+    if (operationId === sessionOperationId) error.value = formatApiError(exception, '创建学习会话失败。')
+  } finally {
+    creatingSession.value = false
   }
 }
 
 async function selectSession(sessionId) {
-  if (!sessionId || loading.value) return
+  if (!sessionId || loading.value || loadingSessions.value || creatingSession.value || deletingSessionId.value) return
+  const operationId = ++sessionOperationId
   try {
     const session = await fetchLearningSession(sessionId)
+    if (operationId !== sessionOperationId) return
     activeSessionId.value = session.sessionId
     messages.value = (session.messages || []).map(message => ({ ...message, streaming: false, error: null }))
     progress.value = session.progress || null
     topic.value = session.topic || ''
     mode.value = session.mode || 'AUTO'
-    pendingCheck.value = null
-    pendingPractice.value = null
+    userLevel.value = session.userLevel || 'BEGINNER'
+    pendingCheck.value = session.pendingCheck || null
+    pendingPractice.value = session.pendingPractice || null
   } catch (exception) {
-    error.value = formatApiError(exception, '学习会话恢复失败。')
+    if (operationId === sessionOperationId) error.value = formatApiError(exception, '学习会话恢复失败。')
   }
 }
 
 async function deleteSession(sessionId) {
-  if (!sessionId || loading.value) return
+  if (!sessionId || loading.value || deletingSessionId.value) return
+  const operationId = ++sessionOperationId
+  deletingSessionId.value = sessionId
   try {
     await deleteLearningSession(sessionId)
+    if (operationId !== sessionOperationId) return
     sessions.value = sessions.value.filter(item => item.sessionId !== sessionId)
     if (activeSessionId.value === sessionId) {
       activeSessionId.value = ''
@@ -111,7 +132,9 @@ async function deleteSession(sessionId) {
       else await newSession()
     }
   } catch (exception) {
-    error.value = formatApiError(exception, '删除学习会话失败。')
+    if (operationId === sessionOperationId) error.value = formatApiError(exception, '删除学习会话失败。')
+  } finally {
+    deletingSessionId.value = ''
   }
 }
 
@@ -122,6 +145,8 @@ async function send(content) {
   if (!activeSessionId.value) return
 
   loading.value = true
+  streamingRequest.value = true
+  const requestId = ++activeRequestId
   error.value = ''
   messages.value.push({ id: createUuid(), role: 'user', content: text, createdAt: new Date().toISOString(), streaming: false })
   const assistant = { id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, createdAt: new Date().toISOString() }
@@ -134,6 +159,7 @@ async function send(content) {
       userLevel: userLevel.value,
       clientRequestId: createUuid()
     }, assistant)
+    if (requestId !== activeRequestId) return
     assistant.content = assistant.content || response.answer || '本次请求没有返回正文。'
     assistant.sources = response.sources || assistant.sources || []
     assistant.learning = response
@@ -148,19 +174,20 @@ async function send(content) {
       item.progress = progress.value
     }
   } catch (exception) {
+    if (requestId !== activeRequestId || exception?.name === 'AbortError') return
     assistant.error = formatApiError(exception, '学习助手暂时无法回答。')
     error.value = assistant.error
   } finally {
     assistant.streaming = false
-    loading.value = false
+    streamingRequest.value = false
+    if (requestId === activeRequestId) loading.value = false
   }
 }
 
 function streamMessage(sessionId, payload, assistant) {
   return new Promise((resolve, reject) => {
-    let response = null
     let settled = false
-    closeStream.value = streamLearningMessage(sessionId, payload, (type, data) => {
+    const close = streamLearningMessage(sessionId, payload, (type, data) => {
       if (settled) return
       if (type === 'token') {
         assistant.content += data.text || ''
@@ -171,28 +198,53 @@ function streamMessage(sessionId, payload, assistant) {
       } else if (type === 'practice') {
         pendingPractice.value = data
       } else if (type === 'done') {
-        response = data.response || response
         settled = true
-        closeStream.value = null
-        resolve(response || {})
+        if (closeStream.value?.close === close) closeStream.value = null
+        resolve(data.response || {})
       } else if (type === 'error') {
         settled = true
-        closeStream.value = null
-        reject(new Error(data.message || '学习助手回答失败。'))
+        if (closeStream.value?.close === close) closeStream.value = null
+        reject(data.apiError || Object.assign(new Error(data.message || '学习助手回答失败。'), {
+          status: data.status || null,
+          requestId: data.requestId || ''
+        }))
       }
     })
+    closeStream.value = {
+      close,
+      cancel() {
+        if (settled) return
+        settled = true
+        close()
+        reject(new DOMException('请求已停止', 'AbortError'))
+      }
+    }
   })
 }
 
-function stop() {
-  closeStream.value?.()
-  closeStream.value = null
+async function stop() {
+  const sessionId = activeSessionId.value
+  cancelLocalStream()
+  activeRequestId += 1
   loading.value = false
   const streaming = [...messages.value].reverse().find(message => message.streaming)
   if (streaming) {
     streaming.streaming = false
     if (!streaming.content) messages.value = messages.value.filter(message => message !== streaming)
   }
+  if (sessionId) {
+    try {
+      await stopLearningSession(sessionId)
+    } catch (exception) {
+      error.value = formatApiError(exception, '停止学习请求失败。')
+    }
+  }
+}
+
+function cancelLocalStream() {
+  const current = closeStream.value
+  closeStream.value = null
+  current?.cancel()
 }
 
 async function submitCheck() {
@@ -244,6 +296,12 @@ function modeChanged() {
 function sourceLabel(source) {
   return source.fileName || source.file || source.title || source.name || '来源'
 }
+
+function sourceKey(source, index) {
+  return [source.documentId, source.fileName, source.file, source.page, source.chunkId, index]
+    .filter(value => value !== undefined && value !== null && value !== '')
+    .join(':')
+}
 </script>
 
 <template>
@@ -252,7 +310,7 @@ function sourceLabel(source) {
       <ConversationSidebar
         :conversations="sessions.map(session => ({ id: session.sessionId, title: session.title, updatedAt: session.updatedAt }))"
         :active-id="activeSessionId"
-        :deleting-disabled="loading"
+        :deleting-disabled="loading || Boolean(deletingSessionId)"
         @new="newSession"
         @select="selectSession"
         @delete="deleteSession"
@@ -279,7 +337,7 @@ function sourceLabel(source) {
           <ChatMessage v-for="message in messages" :key="message.id" :message="message" :streaming="message.streaming" />
         </section>
         <p v-if="error" class="learning-assistant-error" role="alert">{{ error }}</p>
-        <footer class="learning-input-bar"><ChatInput :disabled="loading" @send="send" @stop="stop" /></footer>
+        <footer class="learning-input-bar"><ChatInput :disabled="loading" :stoppable="streamingRequest" @send="send" @stop="stop" /></footer>
       </section>
       <aside class="learning-stage-sidebar">
         <header><span class="learning-eyebrow">GUIDED STATUS</span><h2>学习进度</h2></header>
@@ -300,7 +358,7 @@ function sourceLabel(source) {
           <textarea v-model="practiceAnswer" rows="7" maxlength="4000" placeholder="说明任务目标、工具调用，以及结果如何影响下一步"></textarea>
           <button type="button" :disabled="loading || !practiceAnswer.trim()" @click="submitPractice">{{ loading ? '正在评估...' : '提交实践' }}</button>
         </section>
-        <section v-if="latestSources.length" class="learning-sources-card"><h3>本次依据</h3><span v-for="source in latestSources" :key="sourceLabel(source)">{{ sourceLabel(source) }}</span></section>
+        <section v-if="latestSources.length" class="learning-sources-card"><h3>本次依据</h3><span v-for="(source, index) in latestSources" :key="sourceKey(source, index)">{{ sourceLabel(source) }}</span></section>
       </aside>
     </div>
   </main>

@@ -62,7 +62,7 @@ LearningAssistantController
   -> learning_session_events 幂等响应快照
 ```
 
-`learning_sessions` 是统一产品层的长期上下文，不替代聊天正文或教学 attempt。普通问答和主题教学共享一个 session ID，因此前端刷新后可以恢复同一条消息流和教学侧栏。`learning_session_events` 以 `(session_id, client_request_id)` 唯一约束实现重复请求恢复；数据库唯一约束是最终一致性边界，不能只依赖浏览器去重。
+`learning_sessions` 是统一产品层的长期上下文，不替代聊天正文或教学 attempt。普通问答和主题教学共享一个 session ID，因此前端刷新后可以恢复同一条消息流和教学侧栏。`learning_session_events` 以 `(session_id, event_type, client_request_id)` 唯一约束实现不同事件类型的重复请求恢复；事件还保存请求摘要、`PROCESSING` 租约和成功响应快照。相同 `clientRequestId` 但请求内容不同会返回冲突，过期的处理中事件可以被下一次请求回收。数据库唯一约束是最终一致性边界，不能只依赖浏览器去重。
 
 ### 普通问答
 
@@ -135,10 +135,13 @@ PRACTICE -> teaching_attempts + learning_records(TEACHING_PRACTICE)
 
 因此不应把 `docs/learning-records/` 或 `docs/manual-notes/` 当作唯一备份。生产部署还需要为 PostgreSQL、文件投影目录和 Chroma 分别设计持久化和备份策略。
 
-## 当前限制
+## 迁移与当前限制
 
-- V5/V6 Flyway 迁移、JPA 映射、PostgreSQL claim 和多实例抢占尚未完成真实 PostgreSQL 集成验证。
+- V7/V8/V9/V10 会创建统一学习会话、会话事件幂等字段和文档上传的复合幂等索引。V9 为已有事件填充的全零 `request_hash` 只是历史兼容占位，不能重新证明旧请求内容。
+- V5-V10 Flyway 迁移、JPA 映射、PostgreSQL claim 和多实例抢占尚未完成真实 PostgreSQL 集成验证。
+- `spring.jpa.hibernate.ddl-auto=update` 与 Flyway 并用时，生产环境仍需明确由 Flyway 作为唯一 schema 变更入口，并在升级前检查现有唯一约束名称。
 - 当前文件投影仍依赖应用工作区路径；生产应改为持久化卷或对象存储抽象。
 - 正式笔记投影已接入统一入口，但索引恢复和 Chroma 失败重试仍需要端到端测试。
 - `document_chunks` 和 Chroma 是派生副本，不应直接作为学习资产业务查询接口的数据来源。
 - 统一学习助手的 SSE 当前按完整服务响应发送 `message_start`、`token`、`source`、`teaching_stage`、`check`、`practice`、`done` 事件；模型 token 级流式生成仍沿用旧 Workbench SSE，后续可抽取共享 RAG evidence 流。
+- 统一学习助手的停止协调和执行注册表当前是 JVM 内实现；多实例部署需要进一步接入共享取消状态或外部任务协调，并完成跨实例联调。

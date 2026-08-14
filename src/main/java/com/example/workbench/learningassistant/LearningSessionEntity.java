@@ -110,4 +110,12 @@ public class LearningSessionEntity {
         if (nextStatus != null && !nextStatus.isBlank()) status = nextStatus;
         updatedAt = Instant.now();
     }
+
+    public void updatePreferences(String nextTitle, String nextUserLevel) {
+        if ("新的学习会话".equals(title) && nextTitle != null && !nextTitle.isBlank()) {
+            title = nextTitle.substring(0, Math.min(nextTitle.length(), 120));
+        }
+        if (nextUserLevel != null && !nextUserLevel.isBlank()) userLevel = nextUserLevel;
+        updatedAt = Instant.now();
+    }
 }

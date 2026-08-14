@@ -10,7 +10,6 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import WorkspaceManager from './components/WorkspaceManager.vue'
 import UserManagement from './components/UserManagement.vue'
 import SystemMaintenance from './components/SystemMaintenance.vue'
-import { useChatStore } from './stores/chatStore'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const currentUser = ref(null)
@@ -33,7 +32,6 @@ const activeWorkspaceId = ref('')
 const workspaceError = ref('')
 const switchingWorkspace = ref(false)
 const workspaceManagerOpen = ref(false)
-const { setUser, resetForWorkspace, reloadWorkspace } = useChatStore()
 
 onMounted(async () => {
   clearLegacyAccessToken()
@@ -77,7 +75,6 @@ async function restoreWorkspace(user) {
     workspaceManagerOpen.value = false
     workspaces.value = await initializePersonalWorkspace()
     activeWorkspaceId.value = workspaces.value.find(workspace => workspace.type === 'PERSONAL')?.id || ''
-    await setUser(user.account)
     currentUser.value = user
     await refreshAvatar()
   } finally {
@@ -91,10 +88,8 @@ async function switchWorkspace(event) {
   switchingWorkspace.value = true
   workspaceError.value = ''
   try {
-    await resetForWorkspace()
     setActiveWorkspaceId(workspaceId)
     activeWorkspaceId.value = workspaceId
-    await reloadWorkspace()
   } catch {
     workspaceError.value = '空间切换失败，请稍后重试。'
   } finally {
@@ -228,7 +223,7 @@ async function submitPasswordChange() {
           </div>
         </div>
       </header>
-       <LearningAssistantPage v-if="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+       <LearningAssistantPage v-if="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" />
        <LearningRecords v-else-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
       <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />

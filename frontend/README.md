@@ -1,6 +1,6 @@
-# Personal AI Workbench Frontend
+# 智海学习助手前端
 
-Vue + Vite 实现的个人 AI 工作台前端，支持普通聊天、RAG 问答、SSE 流式输出、来源引用、工具调用面板、Markdown 渲染和服务端会话历史。
+Vue + Vite 实现的统一学习工作台，支持普通 RAG 问答、主题教学、CHECK/PRACTICE、SSE 事件、来源引用、Markdown 渲染和服务端会话历史。
 
 ## 截图
 
@@ -18,32 +18,30 @@ docs/screenshots/workbench.png
 
 ## 功能
 
-- 左侧深色会话列表
-- 中间白色聊天窗口
-- 右侧浅灰信息面板
+- 左侧会话列表、中间对话区和右侧学习进度面板
 - 新建、切换、删除会话
 - 会话历史保存到 PostgreSQL
 - HttpOnly Cookie 会话认证，浏览器 JavaScript 不接触 Token
-- 普通非流式接口调用
-- SSE 流式 token 输出
+- 普通回答和主题教学统一使用 `/api/learning-assistant` 接口
+- SSE 事件输出、EOF 异常检测、停止和组件卸载取消
 - Sources 逐步展示和点击展开
 - Tool Calls 逐步展示和点击展开
 - Markdown 渲染
 - 代码高亮
-- 错误提示和停止生成
+- 结构化错误提示、请求 ID 和停止生成
 
 ## 本地启动
 
 安装依赖：
 
 ```bash
-npm install
+yarn install --frozen-lockfile
 ```
 
 启动开发服务：
 
 ```bash
-npm run dev
+yarn dev
 ```
 
 默认前端地址：
@@ -55,13 +53,13 @@ http://localhost:5173
 构建生产包：
 
 ```bash
-npm run build
+yarn build
 ```
 
 预览生产包：
 
 ```bash
-npm run preview
+yarn preview
 ```
 
 ## 后端代理
@@ -243,20 +241,16 @@ POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 
 ```text
 src/
-├── api/
-│   ├── chatApi.js
-│   └── streamApi.js
+├── api/                     API 请求、认证、工作空间和统一学习助手 SSE
 ├── components/
 │   ├── ChatInput.vue
-│   ├── ChatLayout.vue
 │   ├── ChatMessage.vue
 │   ├── ConversationSidebar.vue
+│   ├── LearningAssistantPage.vue
 │   ├── InfoPanel.vue
 │   ├── LoadingDots.vue
 │   ├── SourcePanel.vue
 │   └── ToolCallPanel.vue
-├── stores/
-│   └── chatStore.js
 ├── styles/
 │   └── main.css
 ├── utils/
@@ -264,6 +258,8 @@ src/
 ├── App.vue
 └── main.js
 ```
+
+统一助手组件只在当前工作空间下加载会话。会话元数据、消息和教学待办由后端恢复，浏览器不把聊天内容写入 `localStorage`。旧版双轨聊天入口已经移除，不再作为前端入口。
 
 ## 常见问题
 
@@ -274,4 +270,4 @@ src/
 - 后端是否实现当前模式对应接口
 - SSE 接口是否返回标准 `text/event-stream`
 
-如果 `/api/workbench/chat/stream` 返回 404，说明后端还没有实现流式接口；非流式 RAG 可先使用 `/api/rag/chat`。
+如果 `/api/learning-assistant/sessions/{sessionId}/messages/stream` 返回 404，说明前后端版本不一致；请确认后端已包含统一学习助手接口。

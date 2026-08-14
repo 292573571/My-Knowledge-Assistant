@@ -194,6 +194,23 @@ public class TeachingCheckService {
         }
     }
 
+    public TeachingPendingActions pendingActions(AppUser user, WorkspaceAccessContext access, String sessionId) {
+        cleanupExpired();
+        TeachingAttemptState latest = attemptStore.findLatest(ownerKey(user), access.workspaceId(), sessionId.strip())
+                .orElse(null);
+        if (latest == null || latest.expiresAt.isBefore(Instant.now())) return TeachingPendingActions.empty();
+        synchronized (latest) {
+            TeachingCheckPrompt check = latest.checkCompleted
+                    ? null : new TeachingCheckPrompt(latest.checkId, latest.question);
+            TeachingPracticePrompt practice = latest.checkCompleted && latest.response != null
+                    && latest.response.passed() && !latest.practiceCompleted && latest.practiceId != null
+                    ? new TeachingPracticePrompt(latest.practiceId, latest.practiceQuestion,
+                    latest.expiresAt, TeachingPracticeStatus.PENDING)
+                    : null;
+            return new TeachingPendingActions(check, practice);
+        }
+    }
+
     private void requireOwnerAndContext(AppUser user, WorkspaceAccessContext access,
                                         SubmitTeachingCheckRequest request, TeachingAttemptState attempt) {
         if (!attempt.ownerKey.equals(ownerKey(user))

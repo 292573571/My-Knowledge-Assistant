@@ -11,7 +11,7 @@ public record LearningAssistantMessageRequest(
         LearningMode mode,
         LearningIntent intent,
         TeachingUserLevel userLevel,
-        @Size(max = 100, message = "clientRequestId 不能超过 100 个字符") String clientRequestId
+        @NotBlank(message = "clientRequestId 不能为空") @Size(max = 100, message = "clientRequestId 不能超过 100 个字符") String clientRequestId
 ) {
     public LearningMode normalizedMode() {
         return mode == null ? LearningMode.AUTO : mode;

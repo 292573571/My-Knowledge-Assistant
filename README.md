@@ -122,11 +122,14 @@ POST /api/learning-assistant/sessions/{sessionId}/messages
 POST /api/learning-assistant/sessions/{sessionId}/messages/stream
 POST /api/learning-assistant/sessions/{sessionId}/check
 POST /api/learning-assistant/sessions/{sessionId}/practice
+POST /api/learning-assistant/sessions/{sessionId}/stop
 ```
 
-统一 session 使用 `learning_sessions` 保存 workspace、主题、模式、阶段和状态，聊天正文继续复用 `chat_conversations/chat_messages`，教学过程继续复用 `teaching_attempts` 和 `learning_records`。带 `clientRequestId` 的消息、CHECK、PRACTICE 请求会保存到 `learning_session_events`，重复提交直接返回第一次响应。
+统一 session 使用 `learning_sessions` 保存 workspace、主题、模式、阶段和状态，聊天正文继续复用 `chat_conversations/chat_messages`，教学过程继续复用 `teaching_attempts` 和 `learning_records`。带 `clientRequestId` 的消息、CHECK、PRACTICE 请求会保存到 `learning_session_events`，重复提交直接返回第一次响应；同一 ID 携带不同内容会返回冲突，处理中请求有租约回收机制。前端会在 SSE EOF、停止、组件卸载和会话切换时收口本地请求，后端 stop 接口负责取消服务端执行。
 
 旧入口仍保持兼容：`/api/workbench/chat*` 和 `/api/agent/teaching/*` 不在本次改造中删除。
+
+本轮审计还将文档上传幂等约束收紧为 `(actor_user_id, workspace_id, client_request_id)`，避免不同用户或知识空间因为复用请求 ID 互相冲突。对应数据库迁移为 V10；已有部署升级前应先备份数据库并检查旧的单列唯一约束。
 
 启动后端：
 

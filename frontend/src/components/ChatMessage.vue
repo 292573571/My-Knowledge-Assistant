@@ -31,6 +31,12 @@ function sourceLabel(source) {
 
   return `${file}${page}${heading}`
 }
+
+function sourceKey(source, index) {
+  return [source.documentId, source.fileName, source.file, source.pageNumber, source.headingPath, index]
+    .filter(value => value !== undefined && value !== null && value !== '')
+    .join(':')
+}
 const timeLabel = computed(() => {
   if (!props.message.createdAt) return ''
 
@@ -77,7 +83,7 @@ async function copyCode(event) {
       </div>
       <div v-if="!streaming && isModelSupplement" class="model-supplement-label"><strong>模型补充</strong><span>不含本地资料依据，请对关键事实进行核实。</span></div>
       <div v-if="isAssistant && displayedSources.length" class="source-chips">
-        <span v-for="source in displayedSources" :key="sourceLabel(source)">
+        <span v-for="(source, index) in displayedSources" :key="sourceKey(source, index)">
           {{ sourceLabel(source) }}
         </span>
       </div>

@@ -5,6 +5,10 @@ defineProps({
   disabled: {
     type: Boolean,
     default: false
+  },
+  stoppable: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -44,8 +48,8 @@ function onKeydown(event) {
     <div class="send-row">
       <span>Enter 发送 · Shift + Enter 换行 · 输入法确认不会发送</span>
       <div>
-        <button v-if="disabled" type="button" class="secondary" @click="emit('stop')">停</button>
-        <button v-else type="submit" class="send-button">➤</button>
+        <button v-if="disabled && stoppable" type="button" class="secondary" @click="emit('stop')">停</button>
+        <button v-else type="submit" class="send-button" :disabled="disabled">➤</button>
       </div>
     </div>
   </form>

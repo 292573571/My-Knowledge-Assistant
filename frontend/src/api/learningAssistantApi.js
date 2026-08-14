@@ -43,6 +43,7 @@ export function deleteLearningSession(sessionId) {
 
 export function streamLearningMessage(sessionId, payload, onEvent) {
   const controller = new AbortController()
+  let sawTerminalEvent = false
   void fetch(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
     method: 'POST',
     credentials: 'include',
@@ -50,7 +51,8 @@ export function streamLearningMessage(sessionId, payload, onEvent) {
     body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), ...payload }),
     signal: controller.signal
   }).then(async response => {
-    if (!response.ok || !response.body) throw new Error(`SSE request failed: ${response.status}`)
+    if (!response.ok) throw await apiErrorFromResponse(response, '学习助手回答失败。')
+    if (!response.body) throw apiErrorFromException(new Error('后端没有返回回答流。'), '后端没有返回回答流。')
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8', { fatal: true })
     let buffer = ''
@@ -59,15 +61,33 @@ export function streamLearningMessage(sessionId, payload, onEvent) {
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
       const blocks = buffer.split(/\r?\n\r?\n/)
       buffer = blocks.pop() || ''
-      for (const block of blocks) dispatchEventBlock(block, onEvent)
+      for (const block of blocks) dispatchEventBlock(block, dispatch)
       if (done) {
-        if (buffer.trim()) dispatchEventBlock(buffer, onEvent)
+        if (buffer.trim()) dispatchEventBlock(buffer, dispatch)
+        if (!sawTerminalEvent) {
+          const apiError = apiErrorFromException(new Error('回答流意外结束，请重试。'), '回答流意外结束，请重试。')
+          dispatch('error', { apiError, message: apiError.message, retryable: true })
+        }
         break
       }
     }
   }).catch(error => {
-    if (error.name !== 'AbortError') onEvent('error', { message: '请求失败，请稍后重试' })
+    if (error.name !== 'AbortError') {
+      const apiError = apiErrorFromException(error, '请求失败，请稍后重试。')
+      dispatch('error', {
+        apiError,
+        message: apiError.message,
+        status: apiError.status,
+        requestId: apiError.requestId,
+        retryable: apiError.retryable
+      })
+    }
   })
+
+  function dispatch(type, data) {
+    if (type === 'done' || type === 'error') sawTerminalEvent = true
+    onEvent(type, data)
+  }
   return () => controller.abort()
 }
 
@@ -84,13 +104,6 @@ function dispatchEventBlock(block, onEvent) {
   onEvent(type, parsed)
 }
 
-export function sendLearningMessage(sessionId, payload) {
-  return request(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), ...payload })
-  }, '学习助手回答失败。')
-}
-
 export function submitLearningCheck(sessionId, payload) {
   return request(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/check`, {
     method: 'POST',
@@ -103,4 +116,10 @@ export function submitLearningPractice(sessionId, payload) {
     method: 'POST',
     body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), ...payload })
   }, '实践提交失败。')
+}
+
+export function stopLearningSession(sessionId) {
+  return request(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/stop${workspaceQuery()}`, {
+    method: 'POST'
+  }, '停止学习请求失败。')
 }
