@@ -13,15 +13,16 @@ public class TeachingAgentOutputParser {
 
     public TeachingAgentDraft parse(String raw) {
         String fallback = raw == null || raw.isBlank() ? "模型未返回教学内容。" : raw.strip();
-        if (raw == null || raw.isBlank()) return new TeachingAgentDraft(fallback, null);
+        if (raw == null || raw.isBlank()) return new TeachingAgentDraft(null, fallback, null);
         try {
             JsonNode root = objectMapper.readTree(stripCodeFence(raw));
             String explanation = text(root, "explanation");
             String checkQuestion = text(root, "checkQuestion");
-            if (explanation == null || checkQuestion == null) return new TeachingAgentDraft(fallback, null);
-            return new TeachingAgentDraft(explanation, checkQuestion);
+            String topic = text(root, "topic");
+            if (explanation == null || checkQuestion == null) return new TeachingAgentDraft(topic, fallback, null);
+            return new TeachingAgentDraft(topic, explanation, checkQuestion);
         } catch (Exception ignored) {
-            return new TeachingAgentDraft(fallback, null);
+            return new TeachingAgentDraft(null, fallback, null);
         }
     }
 

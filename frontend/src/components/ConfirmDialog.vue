@@ -1,5 +1,6 @@
 <script setup>
-import { onBeforeUnmount, onMounted } from 'vue'
+import { ref } from 'vue'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -9,23 +10,19 @@ const props = defineProps({
   danger: { type: Boolean, default: false }
 })
 const emit = defineEmits(['confirm', 'cancel'])
+const dialogRef = ref(null)
 
 function cancel() {
   if (!props.busy) emit('cancel')
 }
 
-function handleKeydown(event) {
-  if (event.key === 'Escape') cancel()
-}
-
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
+useDialogFocus(dialogRef, cancel)
 </script>
 
 <template>
   <Teleport to="body">
     <div class="confirm-dialog-backdrop" role="presentation" @click.self="cancel">
-      <section class="confirm-dialog" role="alertdialog" aria-modal="true" :aria-labelledby="`confirm-title-${title}`">
+       <section ref="dialogRef" class="confirm-dialog" role="alertdialog" aria-modal="true" :aria-labelledby="`confirm-title-${title}`">
         <div :class="['confirm-dialog-icon', { danger }]">{{ danger ? '!' : '?' }}</div>
         <div class="confirm-dialog-copy">
           <h2 :id="`confirm-title-${title}`">{{ title }}</h2>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import ChatInput from './ChatInput.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationSidebar from './ConversationSidebar.vue'
@@ -22,7 +22,6 @@ const messages = ref([])
 const progress = ref(null)
 const pendingCheck = ref(null)
 const pendingPractice = ref(null)
-const topic = ref('')
 const userLevel = ref('BEGINNER')
 const mode = ref('AUTO')
 const checkAnswer = ref('')
@@ -41,16 +40,86 @@ const starterPrompts = [
 ]
 const modeLabels = { AUTO: '自动判断', CHAT: '直接回答', GUIDED: '主题教学', REVIEW: '复习模式', PRACTICE: '实践模式' }
 const activeSession = computed(() => sessions.value.find(item => item.sessionId === activeSessionId.value))
-const latestSources = computed(() => [...messages.value].reverse().find(item => item.role === 'assistant' && item.sources?.length)?.sources || [])
+const isLearningMode = computed(() => ['GUIDED', 'REVIEW', 'PRACTICE'].includes(mode.value))
+const hoveredSource = ref(null)
+const sourceTooltipPosition = ref({ top: 0, left: 0 })
+const latestSources = computed(() => {
+  const sources = [...messages.value].reverse().find(item => item.role === 'assistant' && item.sources?.length)?.sources || []
+  const groups = new Map()
+  sources.forEach((source, index) => {
+    const key = source.documentId || source.path || source.fileName || source.file || source.title || source.name || source.url || `source-${index}`
+    const page = source.pageNumber || source.page
+    const current = groups.get(key) || { ...source, pages: [], chunks: [] }
+    if (page && !current.pages.includes(page)) current.pages.push(page)
+    const chunk = source.chunkIndex ?? source.chunkId
+    if (chunk !== undefined && chunk !== null && !current.chunks.includes(chunk)) current.chunks.push(chunk)
+    groups.set(key, current)
+  })
+  return [...groups.values()]
+})
 const closeStream = ref(null)
 const streamingRequest = ref(false)
+const mobileSessionsOpen = ref(false)
+const inspirationSentinel = ref(null)
+const visibleInspirations = ref([])
+const inspirationLoading = ref(false)
+const inspirationPool = [
+  '用一个真实例子解释 RAG 的检索阶段',
+  '把这篇资料整理成一张知识地图',
+  '比较向量检索和关键词检索的适用场景',
+  '设计一个可验证的 Agent 工具调用流程',
+  '用费曼技巧检查我是否真正理解了这个概念',
+  '把复杂文档拆成三层学习路径',
+  '给我一个 Spring AI 的最小实践任务',
+  '找出当前知识空间里最值得复习的主题'
+]
+let inspirationObserver = null
+let inspirationTimer = null
 let activeRequestId = 0
 let sessionOperationId = 0
 
-onMounted(loadSessions)
-onBeforeUnmount(cancelLocalStream)
+onMounted(() => {
+  loadSessions()
+  loadMoreInspirations()
+  document.addEventListener('pointermove', closeSourceOnPointerMove)
+  if ('IntersectionObserver' in window) {
+    inspirationObserver = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) loadMoreInspirations()
+    }, { root: messagesEl.value, rootMargin: '180px 0px' })
+    nextTick(observeInspirationSentinel)
+  }
+})
+onBeforeUnmount(() => {
+  cancelLocalStream()
+  inspirationObserver?.disconnect()
+  if (inspirationTimer) window.clearTimeout(inspirationTimer)
+  document.removeEventListener('pointermove', closeSourceOnPointerMove)
+})
 watch(activeSessionId, () => scrollLatest())
 watch(() => messages.value.length, () => scrollLatest())
+onUpdated(observeInspirationSentinel)
+
+function observeInspirationSentinel() {
+  if (inspirationObserver && inspirationSentinel.value) inspirationObserver.observe(inspirationSentinel.value)
+}
+
+function loadMoreInspirations() {
+  if (inspirationLoading.value) return
+  if (inspirationObserver && inspirationSentinel.value) inspirationObserver.unobserve(inspirationSentinel.value)
+  inspirationLoading.value = true
+  const start = visibleInspirations.value.length
+  inspirationTimer = window.setTimeout(() => {
+    const next = Array.from({ length: 3 }, (_, index) => inspirationPool[(start + index) % inspirationPool.length])
+    visibleInspirations.value.push(...next.map((prompt, index) => ({ id: `${start + index}-${prompt}`, prompt })))
+    inspirationLoading.value = false
+    inspirationTimer = null
+  }, 180)
+}
+
+function handleLearningScroll(event) {
+  const element = event.currentTarget
+  if (element.scrollHeight - element.scrollTop - element.clientHeight < 220) observeInspirationSentinel()
+}
 
 async function loadSessions() {
   const operationId = ++sessionOperationId
@@ -74,12 +143,10 @@ async function newSession() {
   if (loading.value || creatingSession.value) return
   const operationId = ++sessionOperationId
   creatingSession.value = true
-  // 新建对话必须与上一条会话完全隔离，不能把旧主题带入空会话。
-  topic.value = ''
   mode.value = 'AUTO'
   userLevel.value = 'BEGINNER'
   try {
-    const created = await createLearningSession({ topic: '', mode: 'AUTO', userLevel: 'BEGINNER' })
+    const created = await createLearningSession({ mode: 'AUTO', userLevel: 'BEGINNER' })
     if (operationId !== sessionOperationId) return
     sessions.value.unshift(created)
     activeSessionId.value = created.sessionId
@@ -104,7 +171,6 @@ async function selectSession(sessionId) {
     activeSessionId.value = session.sessionId
     messages.value = (session.messages || []).map(message => ({ ...message, streaming: false, error: null }))
     progress.value = session.progress || null
-    topic.value = session.topic || ''
     mode.value = session.mode || 'AUTO'
     userLevel.value = session.userLevel || 'BEGINNER'
     pendingCheck.value = session.pendingCheck || null
@@ -154,7 +220,6 @@ async function send(content) {
   try {
     const response = await streamMessage(activeSessionId.value, {
       message: text,
-      topic: topic.value.trim() || null,
       mode: mode.value,
       userLevel: userLevel.value,
       clientRequestId: createUuid()
@@ -166,7 +231,6 @@ async function send(content) {
     progress.value = response.progress || progress.value
     if (response.check) pendingCheck.value = response.check
     if (response.practice) pendingPractice.value = response.practice
-    if (response.topic) topic.value = response.topic
     const item = sessions.value.find(session => session.sessionId === activeSessionId.value)
     if (item) {
       item.title = item.title === '新的学习会话' ? text.slice(0, 24) : item.title
@@ -289,58 +353,117 @@ function scrollLatest() {
   nextTick(() => { if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight })
 }
 
-function modeChanged() {
-  if (mode.value === 'GUIDED' && !topic.value.trim()) topic.value = 'Agent'
+function modeChanged(nextMode) {
+  mode.value = nextMode
 }
 
 function sourceLabel(source) {
-  return source.fileName || source.file || source.title || source.name || '来源'
+  const name = source.fileName || source.file || source.title || source.name || '来源'
+  const pages = source.pages?.length ? ` · ${source.pages.map(page => `第 ${page} 页`).join('、')}` : ''
+  return `${name}${pages}`
 }
 
 function sourceKey(source, index) {
-  return [source.documentId, source.fileName, source.file, source.page, source.chunkId, index]
+  return [source.documentId, source.path, source.fileName, source.file, source.title, source.name, index]
     .filter(value => value !== undefined && value !== null && value !== '')
     .join(':')
+}
+
+function sourceHeading(source) {
+  return Array.isArray(source.headingPath) ? source.headingPath.join(' > ') : source.headingPath || '-'
+}
+
+function sourcePreview(source) {
+  const value = source.snippet || source.excerpt || source.content || ''
+  return value.length > 220 ? `${value.slice(0, 220)}...` : value || '后端未返回片段预览。'
+}
+
+function showSource(source, event) {
+  hoveredSource.value = source
+  const rect = event.currentTarget.getBoundingClientRect()
+  const width = Math.min(360, window.innerWidth - 24)
+  const left = Math.min(rect.left, window.innerWidth - width - 12)
+  const top = rect.bottom + 8
+  sourceTooltipPosition.value = {
+    top: Math.min(top, window.innerHeight - 260),
+    left: Math.max(12, left)
+  }
+}
+
+function hideSource(source) {
+  if (hoveredSource.value === source) hoveredSource.value = null
+}
+
+function closeSourceOnPointerMove(event) {
+  if (!hoveredSource.value || event.target.closest('.learning-source-item')) return
+  hoveredSource.value = null
 }
 </script>
 
 <template>
   <main class="learning-assistant-page">
-    <div class="learning-assistant-grid">
+     <div class="learning-assistant-grid" :class="{ 'guided-mode': isLearningMode }">
       <ConversationSidebar
         :conversations="sessions.map(session => ({ id: session.sessionId, title: session.title, updatedAt: session.updatedAt }))"
         :active-id="activeSessionId"
         :deleting-disabled="loading || Boolean(deletingSessionId)"
+        :mobile-open="mobileSessionsOpen"
         @new="newSession"
         @select="selectSession"
         @delete="deleteSession"
+        @close="mobileSessionsOpen = false"
       />
-      <section class="learning-conversation-panel">
-        <header class="learning-conversation-header">
-          <div>
-            <span class="learning-eyebrow">LEARNING ASSISTANT</span>
-            <h1>{{ activeSession?.title || '新的学习会话' }}</h1>
-            <p>普通问题直接回答，想真正掌握时切换为主题教学。</p>
+      <div v-if="mobileSessionsOpen" class="session-drawer-backdrop" role="presentation" @click="mobileSessionsOpen = false"></div>
+       <section class="learning-conversation-panel">
+         <section ref="messagesEl" class="learning-messages" aria-label="统一学习对话" @scroll="handleLearningScroll">
+          <div v-if="loadingSessions" class="learning-session-skeleton" aria-live="polite" aria-label="正在加载学习会话">
+            <span></span><span></span><span></span>
           </div>
-          <div class="learning-controls">
-            <label>模式 <select v-model="mode" @change="modeChanged"><option v-for="(label, value) in modeLabels" :key="value" :value="value">{{ label }}</option></select></label>
-            <label v-if="mode !== 'CHAT'">主题 <input v-model="topic" maxlength="120" placeholder="例如 Agent、RAG" /></label>
-          </div>
-        </header>
-        <section ref="messagesEl" class="learning-messages" aria-label="统一学习对话">
-          <div v-if="!messages.length" class="learning-empty-state">
-            <div class="learning-orbit">✦</div>
-            <h2>从一个问题开始学习</h2>
-            <p>我会在当前知识空间内回答；当你明确要学习、复习或练习时，会进入带检查的教学流程。</p>
-            <div class="starter-prompts"><button v-for="prompt in starterPrompts" :key="prompt" type="button" @click="send(prompt)">{{ prompt }}</button></div>
+          <div v-else-if="!messages.length" class="learning-empty-state">
+            <div class="learning-hero-copy">
+              <span class="learning-hero-index">01 / BEGIN HERE</span>
+              <div class="learning-orbit" aria-hidden="true">✦</div>
+              <h2>把知识变成<br><em>真正会用的能力。</em></h2>
+              <p>在当前知识空间里提问、拆解和练习。普通问题直接回答，想真正掌握时进入带检查的主题教学。</p>
+              <div class="starter-prompts" data-reveal><button v-for="prompt in starterPrompts" :key="prompt" type="button" @click="send(prompt)">{{ prompt }}</button></div>
+            </div>
+            <div class="learning-hero-visual" data-reveal aria-label="学习助手空间化预览">
+              <div class="hero-visual-glow"></div>
+              <div class="hero-browser-window">
+                <div class="hero-browser-bar"><i></i><i></i><i></i><span>knowledge / studio</span></div>
+                <div class="hero-browser-body"><div class="hero-browser-sidebar"><b></b><b></b><b></b><b></b></div><div class="hero-browser-content"><span class="hero-line short"></span><span class="hero-line"></span><div class="hero-card-row"><span></span><span></span></div><div class="hero-signal"><strong>RAG</strong><small>evidence map</small><em></em></div></div></div>
+              </div>
+              <div class="hero-float-card hero-float-card-top"><span>LEARNING PATH</span><strong>RAG → Agent → Tools</strong></div>
+              <div class="hero-float-card hero-float-card-bottom"><span class="hero-status-dot"></span><strong>Ready to explore</strong></div>
+            </div>
+            <div class="learning-bento-grid learning-featured-scroll" data-reveal aria-label="精选学习路径">
+              <article class="learning-bento-card featured"><span>FEATURED</span><strong>从问题到掌握</strong><p>让每一次回答都留下可继续的学习线索。</p></article>
+              <article class="learning-bento-card"><span>CHAT</span><strong>快速问答</strong><p>先解决眼前的问题。</p></article>
+              <article class="learning-bento-card"><span>GUIDED</span><strong>主题教学</strong><p>解释、检查、实践。</p></article>
+              <article class="learning-bento-card learning-bento-note"><span>NOTE</span><strong>你的知识空间</strong><p>依据来自当前工作区，不凭空编造。</p></article>
+            </div>
+            <section class="learning-inspiration-flow" data-reveal aria-labelledby="inspiration-title">
+              <header><div><span class="learning-eyebrow">AI INSPIRATION FLOW</span><h2 id="inspiration-title">下一步，可以从这里开始</h2></div><span>{{ visibleInspirations.length }} 个灵感</span></header>
+              <div class="learning-inspiration-list">
+                <button v-for="item in visibleInspirations" :key="item.id" type="button" @click="send(item.prompt)">{{ item.prompt }} <b aria-hidden="true">↗</b></button>
+                <span ref="inspirationSentinel" class="learning-inspiration-sentinel" aria-hidden="true"></span>
+              </div>
+            </section>
+            <section class="learning-skill-marquee" data-reveal aria-label="学习能力标签">
+              <div class="learning-skill-track"><span v-for="skill in ['检索增强', '主题教学', '理解检查', '实践迁移', '知识地图', '来源核验']" :key="skill">{{ skill }}</span><span aria-hidden="true">检索增强</span><span aria-hidden="true">主题教学</span><span aria-hidden="true">理解检查</span></div>
+            </section>
+            <div v-if="error" class="learning-empty-error" role="alert"><strong>暂时无法打开学习空间</strong><span>{{ error }}</span><button type="button" @click="loadSessions">重试</button></div>
           </div>
           <ChatMessage v-for="message in messages" :key="message.id" :message="message" :streaming="message.streaming" />
         </section>
-        <p v-if="error" class="learning-assistant-error" role="alert">{{ error }}</p>
-        <footer class="learning-input-bar"><ChatInput :disabled="loading" :stoppable="streamingRequest" @send="send" @stop="stop" /></footer>
+        <div v-if="error && messages.length" class="learning-assistant-error" role="alert"><span>{{ error }}</span></div>
+         <footer class="learning-input-bar">
+           <button type="button" class="session-mobile-trigger" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><span></span><span></span><span></span></button>
+           <ChatInput :disabled="loading" :stoppable="streamingRequest" :mode="mode" :mode-labels="modeLabels" @send="send" @stop="stop" @update:mode="modeChanged" />
+         </footer>
       </section>
-      <aside class="learning-stage-sidebar">
-        <header><span class="learning-eyebrow">GUIDED STATUS</span><h2>学习进度</h2></header>
+        <aside v-if="isLearningMode" class="learning-stage-sidebar">
+         <header><span class="learning-eyebrow">GUIDED STATUS</span><h2>学习进度</h2></header>
         <div v-if="progress" class="learning-progress-card">
           <div class="learning-progress-heading"><strong>{{ progress.masteryPercent }}%</strong><span>{{ progress.status === 'MASTERED' ? '已掌握' : progress.status === 'NEEDS_REVIEW' ? '需要复习' : '进行中' }}</span></div>
           <div class="learning-progress-bar"><span :style="{ width: `${progress.masteryPercent}%` }"></span></div>
@@ -351,15 +474,41 @@ function sourceKey(source, index) {
         <section v-if="pendingCheck" class="learning-action-card check-card">
           <span class="learning-action-tag">CHECK</span><h3>检查你的理解</h3><p>{{ pendingCheck.question }}</p>
           <textarea v-model="checkAnswer" rows="5" maxlength="4000" placeholder="用自己的话回答"></textarea>
-          <button type="button" :disabled="loading || !checkAnswer.trim()" @click="submitCheck">{{ loading ? '正在评分...' : '提交检查' }}</button>
+           <button type="button" :disabled="loading || !checkAnswer.trim()" :aria-busy="loading" @click="submitCheck">{{ loading ? '正在评分...' : '提交检查' }}</button>
         </section>
         <section v-if="pendingPractice" class="learning-action-card practice-card">
           <span class="learning-action-tag">PRACTICE</span><h3>把概念带到真实任务</h3><p>{{ pendingPractice.question }}</p>
           <textarea v-model="practiceAnswer" rows="7" maxlength="4000" placeholder="说明任务目标、工具调用，以及结果如何影响下一步"></textarea>
-          <button type="button" :disabled="loading || !practiceAnswer.trim()" @click="submitPractice">{{ loading ? '正在评估...' : '提交实践' }}</button>
+           <button type="button" :disabled="loading || !practiceAnswer.trim()" :aria-busy="loading" @click="submitPractice">{{ loading ? '正在评估...' : '提交实践' }}</button>
         </section>
-        <section v-if="latestSources.length" class="learning-sources-card"><h3>本次依据</h3><span v-for="(source, index) in latestSources" :key="sourceKey(source, index)">{{ sourceLabel(source) }}</span></section>
-      </aside>
-    </div>
+          <section v-if="latestSources.length" class="learning-sources-card">
+            <h3>本次依据 <small>悬停查看详情</small></h3>
+            <div
+              v-for="(source, index) in latestSources"
+              :key="sourceKey(source, index)"
+              class="learning-source-item"
+              tabindex="0"
+              @pointerenter="showSource(source, $event)"
+              @mouseleave="hideSource(source)"
+              @focus="showSource(source, $event)"
+              @blur="hideSource(source)"
+            >
+              <span>{{ sourceLabel(source) }}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            </div>
+          </section>
+        </aside>
+        <Teleport to="body">
+          <aside v-if="hoveredSource" class="learning-source-tooltip" :style="{ top: `${sourceTooltipPosition.top}px`, left: `${sourceTooltipPosition.left}px` }">
+            <strong>{{ sourceLabel(hoveredSource) }}</strong>
+            <dl>
+              <div><dt>标题</dt><dd>{{ sourceHeading(hoveredSource) }}</dd></div>
+              <div><dt>页码</dt><dd>{{ hoveredSource.pages?.length ? hoveredSource.pages.map(page => `第 ${page} 页`).join('、') : '-' }}</dd></div>
+              <div><dt>分块</dt><dd>{{ hoveredSource.chunks?.length ? hoveredSource.chunks.map(chunk => `#${chunk}`).join('、') : '-' }}</dd></div>
+            </dl>
+            <p>{{ sourcePreview(hoveredSource) }}</p>
+          </aside>
+        </Teleport>
+      </div>
   </main>
 </template>

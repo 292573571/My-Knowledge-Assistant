@@ -11,10 +11,14 @@ defineProps({
   deletingDisabled: {
     type: Boolean,
     default: false
+  },
+  mobileOpen: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['new', 'select', 'delete'])
+const emit = defineEmits(['new', 'select', 'delete', 'close'])
 
 function formatRelativeTime(value) {
   if (!value) return '刚刚'
@@ -31,8 +35,17 @@ function formatRelativeTime(value) {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ 'mobile-session-drawer': mobileOpen }">
+    <header class="conversation-sidebar-header">
+      <div>
+        <span class="conversation-sidebar-kicker">YOUR LEARNING SPACE</span>
+        <h2>学习会话</h2>
+      </div>
+      <span class="conversation-count" :aria-label="`${conversations.length} 个会话`">{{ conversations.length }}</span>
+      <button type="button" class="conversation-sidebar-close" aria-label="关闭会话列表" @click="emit('close')">×</button>
+    </header>
     <nav class="conversation-list" aria-label="对话列表">
+      <p v-if="!conversations.length" class="conversation-empty">还没有学习会话</p>
       <div
         v-for="conversation in conversations"
         :key="conversation.id"

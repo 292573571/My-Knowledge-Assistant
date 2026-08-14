@@ -70,13 +70,13 @@ async function selectAvatar(event) {
 
 <template>
   <main class="profile-dashboard">
-    <section class="profile-intro">
-      <img :src="avatarSrc" alt="用户头像">
+    <section class="profile-intro" data-reveal>
+      <img :src="avatarSrc" width="104" height="104" alt="用户头像">
       <h1>欢迎，{{ user.userName }}</h1>
       <p>管理你的个人信息、头像和账户身份。</p>
     </section>
 
-    <section class="profile-card">
+    <section class="profile-card" data-reveal>
       <div class="profile-row">
         <strong>用户 ID</strong>
         <div class="profile-value"><code>{{ user.publicId }}</code><button type="button" @click="copyPublicId">复制</button></div>
@@ -84,7 +84,7 @@ async function selectAvatar(event) {
       <div class="profile-row profile-avatar-row">
         <strong>头像</strong>
         <div class="profile-value">
-          <img :src="avatarSrc" alt="当前头像">
+          <img :src="avatarSrc" width="72" height="72" loading="lazy" alt="当前头像">
           <label class="profile-link">{{ uploading ? '上传中...' : '更换头像' }}<input type="file" accept="image/jpeg,image/png,image/webp" :disabled="uploading" @change="selectAvatar"></label>
           <small>支持 JPEG、PNG、WebP，文件不超过 2 MB</small>
         </div>

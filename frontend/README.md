@@ -67,7 +67,7 @@ yarn preview
 Vite 开发服务器会把 `/api` 代理到后端：
 
 ```js
-// vite.config.js
+// vite.config.mjs
 proxy: {
   '/api': {
     target: 'http://localhost:8080',

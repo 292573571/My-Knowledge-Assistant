@@ -10,7 +10,7 @@ defineEmits(['manage-workspace'])
 
 <template>
   <main class="knowledge-dashboard">
-    <section class="knowledge-hero">
+    <section class="knowledge-hero" data-reveal>
       <div>
         <p class="records-badge">知识库管理</p>
         <h1>管理你的知识沉淀</h1>
@@ -22,7 +22,7 @@ defineEmits(['manage-workspace'])
         管理知识空间
       </button>
     </section>
-    <section class="knowledge-card">
+    <section class="knowledge-card" data-reveal>
       <DocumentPanel :workspace="workspace" />
     </section>
   </main>

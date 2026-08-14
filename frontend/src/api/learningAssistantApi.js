@@ -24,10 +24,10 @@ export function fetchLearningSessions() {
   return request(`/api/learning-assistant/sessions${workspaceQuery()}`, {}, '学习会话加载失败。')
 }
 
-export function createLearningSession({ topic = '', mode = 'AUTO', userLevel = 'BEGINNER' } = {}) {
+export function createLearningSession({ mode = 'AUTO', userLevel = 'BEGINNER' } = {}) {
   return request('/api/learning-assistant/sessions', {
     method: 'POST',
-    body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), topic, mode, userLevel })
+    body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), mode, userLevel })
   }, '创建学习会话失败。')
 }
 

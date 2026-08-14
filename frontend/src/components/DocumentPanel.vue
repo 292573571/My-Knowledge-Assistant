@@ -4,6 +4,7 @@ import { formatApiError } from '../api/apiError'
 import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
+import { useDialogFocus } from '../composables/useDialogFocus'
 import { createUuid } from '../utils/uuid'
 
 const props = defineProps({
@@ -36,6 +37,8 @@ const openingTaskId = ref('')
 const dismissedLatestTaskId = ref('')
 const currentUploadTaskId = ref('')
 const uploadHistoryOpen = ref(false)
+const uploadHistoryDialogRef = ref(null)
+const uploadDialogRef = ref(null)
 const expandedTaskId = ref('')
 const taskBatches = ref({})
 const loadingBatchTaskId = ref('')
@@ -219,10 +222,6 @@ function dismissLatestUploadTask() {
 
 function closeUploadHistory() {
   uploadHistoryOpen.value = false
-}
-
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && uploadHistoryOpen.value) closeUploadHistory()
 }
 
 function showNotice(message) {
@@ -445,17 +444,18 @@ async function confirmDelete() {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleGlobalKeydown)
   loadDocuments()
   loadDocumentTasks()
 })
 onBeforeUnmount(() => {
   disposed = true
-  window.removeEventListener('keydown', handleGlobalKeydown)
   if (noticeTimer) window.clearTimeout(noticeTimer)
   if (errorTimer) window.clearTimeout(errorTimer)
   if (taskPollTimer) window.clearTimeout(taskPollTimer)
 })
+
+useDialogFocus(uploadHistoryDialogRef, closeUploadHistory)
+useDialogFocus(uploadDialogRef, closeUploadDialog)
 </script>
 
 <template>
@@ -468,7 +468,7 @@ onBeforeUnmount(() => {
       <div class="document-actions">
         <button type="button" class="document-history-action" @click="uploadHistoryOpen = true">上传历史</button>
         <button type="button" class="document-upload-action" :disabled="loading" @click="openUploadDialog">上传文档</button>
-        <button type="button" :disabled="loading" @click="loadDocuments">刷新</button>
+        <button type="button" :disabled="loading" :aria-busy="loading" @click="loadDocuments">{{ loading ? '刷新中...' : '刷新' }}</button>
       </div>
     </div>
 
@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="uploadHistoryOpen" class="document-task-history-backdrop" @click.self="closeUploadHistory">
-        <section class="document-task-history-dialog" role="dialog" aria-modal="true" aria-labelledby="document-task-history-title">
+         <section ref="uploadHistoryDialogRef" class="document-task-history-dialog" role="dialog" aria-modal="true" aria-labelledby="document-task-history-title">
           <header>
             <div><p>UPLOAD HISTORY</p><h2 id="document-task-history-title">上传历史</h2><span>最近 {{ uploadTasks.length }} 条上传与索引任务</span></div>
             <button type="button" aria-label="关闭上传历史" @click="closeUploadHistory">×</button>
@@ -563,13 +563,14 @@ onBeforeUnmount(() => {
     </Teleport>
     <Teleport to="body">
       <div v-if="notice" class="document-toast" role="status" aria-live="polite">
-        <span class="document-toast-icon">✓</span>
+         <span class="document-toast-icon" aria-hidden="true">✓</span>
         <span>{{ notice }}</span>
         <button type="button" aria-label="关闭提示" @click="clearNotice">×</button>
       </div>
     </Teleport>
 
-    <div v-if="!documents.length && !loading" class="muted-card">当前空间暂无文档，可上传 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 开始构建知识库</div>
+    <div v-if="loading && !documents.length" class="document-list-skeleton" role="status" aria-label="正在加载文档列表"><span></span><span></span><span></span></div>
+    <div v-else-if="!documents.length" class="muted-card document-empty-state"><strong>当前空间暂无文档</strong><span>上传 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG，开始构建知识库。</span><button type="button" class="document-empty-action" @click="openUploadDialog">上传第一份文档</button></div>
     <div v-else-if="!filteredDocuments.length && !loading" class="muted-card">没有匹配的文档</div>
     <article
       v-for="document in filteredDocuments"
@@ -593,7 +594,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="uploadDialogOpen" class="document-upload-backdrop" role="presentation" @click.self="closeUploadDialog">
-        <section class="document-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="document-upload-title">
+         <section ref="uploadDialogRef" class="document-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="document-upload-title">
           <header class="document-upload-dialog-header">
             <div>
               <p class="eyebrow">知识库文档</p>

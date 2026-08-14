@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { addWorkspaceMember, createPublicWorkspace, createTeamWorkspace, fetchWorkspaceAuditEvents, fetchWorkspaceMembers, removeWorkspaceMember, updateWorkspaceMemberRole } from '../api/workspaceApi'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 const props = defineProps({
   workspace: { type: Object, default: null },
@@ -22,9 +23,12 @@ const memberRole = ref('VIEWER')
 const adding = ref(false)
 const updatingMemberId = ref('')
 const removingMember = ref(null)
+const dialogRef = ref(null)
 
 const isOwner = computed(() => props.workspace?.role === 'OWNER')
 const canManageMembers = computed(() => isOwner.value && props.workspace?.type !== 'PERSONAL')
+
+useDialogFocus(dialogRef, () => emit('close'))
 
 onMounted(loadMembers)
 watch(() => props.workspace?.id, () => {
@@ -158,7 +162,7 @@ function formatTime(value) {
 
 <template>
   <div class="workspace-manager-backdrop" @click.self="emit('close')">
-    <section class="workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-manager-title">
+     <section ref="dialogRef" class="workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-manager-title">
       <header>
         <div>
           <span>{{ workspace?.type === 'PERSONAL' ? '个人空间' : workspace?.type === 'TEAM' ? '团队空间' : '公共空间' }}</span>

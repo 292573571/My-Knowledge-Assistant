@@ -7,7 +7,6 @@ import jakarta.validation.constraints.Size;
 public record LearningAssistantMessageRequest(
         @NotBlank(message = "workspaceId 不能为空") @Size(max = 120, message = "workspaceId 不能超过 120 个字符") String workspaceId,
         @NotBlank(message = "message 不能为空") @Size(max = 4000, message = "message 不能超过 4000 个字符") String message,
-        @Size(max = 120, message = "topic 不能超过 120 个字符") String topic,
         LearningMode mode,
         LearningIntent intent,
         TeachingUserLevel userLevel,

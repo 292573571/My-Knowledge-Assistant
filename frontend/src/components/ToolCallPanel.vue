@@ -53,14 +53,11 @@ function hideTooltip() {
       <article
         v-for="call in toolCalls"
         :key="getToolCallKey(call)"
-        class="tool-call"
-        tabindex="0"
-        @mouseenter="showTooltip(call, $event)"
-        @mousemove="moveTooltip"
-        @mouseleave="hideTooltip"
-        @focus="showTooltip(call, $event)"
-        @blur="hideTooltip"
-      >
+         class="tool-call"
+         @mouseenter="showTooltip(call, $event)"
+         @mousemove="moveTooltip"
+         @mouseleave="hideTooltip"
+       >
         <div class="tool-call-header">
           <strong>{{ call.toolName || call.name || call.tool || '工具' }}</strong>
           <span :class="getStatus(call)">

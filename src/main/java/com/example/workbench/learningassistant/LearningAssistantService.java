@@ -63,12 +63,12 @@ public class LearningAssistantService {
     public LearningAssistantSessionResponse createSession(AppUser user, LearningAssistantSessionRequest request) {
         WorkspaceAccessContext access = access(user, request.workspaceId());
         String sessionId = UUID.randomUUID().toString();
-        String title = request.topic() == null || request.topic().isBlank() ? "新的学习会话" : request.topic().strip();
+        String title = "新的学习会话";
         LearningMode requestedMode = request.mode() == null ? LearningMode.AUTO : request.mode();
         ConversationResponse conversation = conversationService.create(user, access.workspaceId(),
                 new ConversationRequest(sessionId, title, requestedMode == LearningMode.CHAT ? "chat" : "rag"));
         sessionRepository.save(new LearningSessionEntity(sessionId, user.getId(), access.workspaceId(), conversation.id(),
-                title, request.topic(), requestedMode, (request.userLevel() == null ? TeachingUserLevel.BEGINNER : request.userLevel()).name()));
+                title, null, requestedMode, (request.userLevel() == null ? TeachingUserLevel.BEGINNER : request.userLevel()).name()));
         return detail(user, access.workspaceId(), sessionId);
     }
 
@@ -101,11 +101,11 @@ public class LearningAssistantService {
         LearningIntent intent = resolveIntent(request);
         LearningMode mode = resolveMode(request, intent);
         LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
-        String hash = hash(request.message(), request.topic(), mode.name(), request.normalizedUserLevel().name());
+        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name());
         return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
             requireRunning(execution);
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
-                String topic = request.topic() == null || request.topic().isBlank() ? "当前问题" : request.topic().strip();
+                String topic = null;
                 conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
                         request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)),
                         "teaching", request.message());
@@ -115,7 +115,7 @@ public class LearningAssistantService {
                         () -> execution != null && execution.isCancelled());
                 requireRunning(execution);
                 workspaceService.access(user, access.workspaceId());
-                session.touch(mode, topic, result.stage().name(), "ACTIVE");
+                session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
                 session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
                 sessionRepository.save(session);
                 conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, "teaching",

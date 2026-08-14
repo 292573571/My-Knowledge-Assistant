@@ -375,7 +375,7 @@ onMounted(loadTeachingProgress)
           <div class="teaching-answer-markdown markdown-body" v-html="answerHtml"></div>
 
           <div v-if="result.nextAction === 'CHECK' && result.check" class="teaching-check-prompt">
-            <span class="teaching-check-icon">?</span>
+            <span class="teaching-check-icon" aria-hidden="true">?</span>
             <div>
               <strong>接下来检查你的理解</strong>
               <p>{{ result.check.question }}</p>

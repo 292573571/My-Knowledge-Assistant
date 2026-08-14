@@ -66,7 +66,7 @@ function formatTime(value) {
 
 <template>
   <main class="user-management-dashboard">
-    <section class="user-management-hero">
+    <section class="user-management-hero" data-reveal>
       <div>
         <p class="records-badge">系统管理</p>
         <h1>用户管理</h1>
@@ -79,7 +79,7 @@ function formatTime(value) {
       </div>
     </section>
 
-    <section class="user-management-card">
+    <section class="user-management-card" data-reveal>
       <header>
         <div><h2>用户列表</h2><p>{{ isSuperAdmin ? '可调整普通用户和管理员角色' : '当前账号拥有只读管理权限' }}</p></div>
         <input v-model="query" type="search" placeholder="搜索账号、名称或用户 ID" aria-label="搜索用户">

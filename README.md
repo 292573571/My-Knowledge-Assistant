@@ -161,7 +161,7 @@ yarn install --frozen-lockfile
 yarn dev
 ```
 
-前端默认地址：`http://localhost:5173`。开发代理目标由 `frontend/vite.config.js` 配置；修改该文件后，才能把 `/api` 请求切换到本地后端。
+前端默认地址：`http://localhost:5173`。开发代理目标由 `frontend/vite.config.mjs` 配置；修改该文件后，才能把 `/api` 请求切换到本地后端。
 
 生产构建：
 
@@ -454,4 +454,4 @@ eval/                                 评测数据、模板和确定性评测脚
 
 ### 前端请求了错误的后端
 
-检查 `frontend/vite.config.js` 的代理目标。当前代理目标不是由 `VITE_*` 环境变量自动控制；需要修改配置文件后重启 Vite。
+检查 `frontend/vite.config.mjs` 的代理目标。当前代理目标不是由 `VITE_*` 环境变量自动控制；需要修改配置文件后重启 Vite。

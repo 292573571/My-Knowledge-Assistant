@@ -176,7 +176,7 @@ async function confirmMaintenance() {
 
 <template>
   <main class="maintenance-dashboard">
-    <section class="maintenance-hero">
+    <section class="maintenance-hero" data-reveal>
       <div>
         <p class="records-badge">管理员工具</p>
         <h1>系统维护</h1>
@@ -190,11 +190,11 @@ async function confirmMaintenance() {
     </section>
 
     <nav class="maintenance-tabs" aria-label="系统维护功能">
-      <button type="button" :class="{ active: activeTool === 'maintenance' }" @click="activeTool = 'maintenance'">
+      <button type="button" :aria-pressed="activeTool === 'maintenance'" :class="{ active: activeTool === 'maintenance' }" @click="activeTool = 'maintenance'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.2 2.2-3-3 2.2-2.2Z"/></svg>
         维护工具
       </button>
-      <button type="button" :class="{ active: activeTool === 'retrieval' }" @click="activeTool = 'retrieval'">
+      <button type="button" :aria-pressed="activeTool === 'retrieval'" :class="{ active: activeTool === 'retrieval' }" @click="activeTool = 'retrieval'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M7.5 10.5h6M10.5 7.5v6"/></svg>
         检索诊断
       </button>
@@ -308,9 +308,9 @@ async function confirmMaintenance() {
           <span class="maintenance-section-hint">规划中</span>
         </header>
         <div class="maintenance-future-grid">
-          <article><span class="maintenance-future-icon purple">◒</span><div><strong>任务监控</strong><small>查看所有后台任务的执行记录</small></div><em>即将推出</em></article>
-          <article><span class="maintenance-future-icon blue">◈</span><div><strong>模型配置</strong><small>统一管理模型与检索策略</small></div><em>即将推出</em></article>
-          <article><span class="maintenance-future-icon amber">◇</span><div><strong>数据备份</strong><small>保护索引配置与知识库数据</small></div><em>即将推出</em></article>
+           <article><span class="maintenance-future-icon green" aria-hidden="true">◒</span><div><strong>任务监控</strong><small>查看所有后台任务的执行记录</small></div><em>即将推出</em></article>
+           <article><span class="maintenance-future-icon neutral" aria-hidden="true">◈</span><div><strong>模型配置</strong><small>统一管理模型与检索策略</small></div><em>即将推出</em></article>
+           <article><span class="maintenance-future-icon sand" aria-hidden="true">◇</span><div><strong>数据备份</strong><small>保护索引配置与知识库数据</small></div><em>即将推出</em></article>
         </div>
       </section>
     </div>

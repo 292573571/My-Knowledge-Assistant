@@ -15,6 +15,8 @@ const editing = ref(false)
 const draftContent = ref('')
 const saving = ref(false)
 const calendarMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+const recordScroller = ref(null)
+const scrollProgress = ref(0)
 
 const content = computed(() => activeRecord.value?.content ? renderMarkdown(activeRecord.value.content) : '')
 const recordCount = computed(() => records.value.length)
@@ -64,6 +66,12 @@ function formatUpdated(value) {
 
 function changeCalendarMonth(offset) {
   calendarMonth.value = new Date(calendarMonth.value.getFullYear(), calendarMonth.value.getMonth() + offset, 1)
+}
+
+function updateScrollProgress(event) {
+  const element = event.currentTarget
+  const scrollable = element.scrollHeight - element.clientHeight
+  scrollProgress.value = scrollable > 0 ? Math.min(100, Math.round((element.scrollTop / scrollable) * 100)) : 0
 }
 
 async function selectRecord(record) {
@@ -157,7 +165,7 @@ onMounted(load)
 
 <template>
   <main class="records-dashboard">
-    <section class="records-hero">
+       <section class="records-hero" data-reveal>
       <div>
         <p class="records-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21V5.5ZM20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5A2.5 2.5 0 0 1 20 21V5.5Z"/></svg> 学习记录</p>
         <h1>你的学习沉淀</h1>
@@ -174,24 +182,26 @@ onMounted(load)
       </div>
     </section>
 
-    <section class="records-stats" aria-label="学习记录统计">
+     <section class="records-stats" data-reveal aria-label="学习记录统计">
       <div><span>累计记录</span><strong>{{ recordCount }}</strong><small>天</small></div>
       <div><span>本周沉淀</span><strong>{{ thisWeekCount }}</strong><small>天</small></div>
       <div><span>连续记录</span><strong>{{ consecutiveDays }}</strong><small>天</small></div>
       <div><span>最近更新</span><strong class="records-latest">{{ latestRecord ? formatDate(latestRecord.date).replace(/.*年/, '') : '暂无' }}</strong><button type="button" class="records-refresh" :disabled="loading" @click="load">刷新</button></div>
     </section>
 
-    <section class="records-dashboard-grid">
+     <section class="records-dashboard-grid" data-reveal>
       <aside class="records-recent-card">
         <header><h2>最近学习记录</h2><span>点击查看详情</span></header>
-        <div v-if="!records.length && !loading" class="records-empty-state">暂时还没有记录</div>
+        <div v-if="loading" class="records-list-skeleton" aria-label="正在加载学习记录"><span></span><span></span><span></span></div>
+        <div v-else-if="!records.length" class="records-empty-state"><strong>还没有学习记录</strong><span>完成一次有效问答后，这里会自动形成每日沉淀。</span></div>
         <button v-for="record in records" :key="record.date" type="button" :class="{ active: activeRecord?.date === record.date }" @click="selectRecord(record)">
           <strong>{{ formatDate(record.date) }}</strong><span>{{ formatUpdated(record.updatedAt) }}</span>
         </button>
       </aside>
 
-      <section class="record-detail-card">
-      <div v-if="error" class="record-reader-error">{{ error }}</div>
+      <section ref="recordScroller" class="record-detail-card" @scroll="updateScrollProgress">
+      <div class="record-scroll-progress" aria-hidden="true"><span :style="{ width: `${scrollProgress}%` }"></span></div>
+      <div v-if="error" class="record-reader-error"><span>{{ error }}</span><button type="button" @click="load">重试</button></div>
       <p v-if="notice" class="record-operation-notice">{{ notice }}</p>
       <div v-if="reading" class="record-reader-placeholder">正在打开学习记录...</div>
       <article v-else-if="activeRecord" class="record-article">
@@ -199,7 +209,7 @@ onMounted(load)
           <div class="record-heading-row"><div><p class="section-kicker">DAILY NOTE</p><h2>{{ formatDate(activeRecord.date) }}</h2></div><div class="record-actions"><button v-if="!editing" type="button" :disabled="saving" @click="startEditing">编辑</button><button type="button" :disabled="saving" @click="promoteRecord">保存为正式笔记</button></div></div>
           <p>编辑后可先暂存草稿；保存为正式笔记后，内容才会进入知识库参与检索。</p>
         </header>
-        <div v-if="editing" class="record-editor"><textarea v-model="draftContent" aria-label="编辑学习记录"></textarea><div><button type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="button" :disabled="saving" @click="saveRecord">{{ saving ? '暂存中...' : '暂存' }}</button></div></div>
+         <div v-if="editing" class="record-editor"><textarea v-model="draftContent" aria-label="编辑学习记录"></textarea><div><button type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="button" :disabled="saving" :aria-busy="saving" @click="saveRecord">{{ saving ? '暂存中...' : '暂存' }}</button></div></div>
         <div v-else class="record-markdown markdown-body" v-html="content"></div>
       </article>
       <div v-else class="record-reader-placeholder">从左侧选择一个已学习日期，查看当天的学习沉淀。</div>
