@@ -22,7 +22,8 @@ eval/reports/*
 # 本地部署和执行脚本
 deploy/*
 !deploy/release-local.sh
-!deploy/deploy-zhihai
+!deploy/deploy-shihai
+!deploy/migrate-zhihai-to-shihai.sh
 scripts/
 docker-compose.yml
 
@@ -36,8 +37,8 @@ docker-compose.yml
 *.pfx
 *.jks
 *.keystore
-zhihai_deploy_key
-zhihai_deploy_key.pub
+shihai_deploy_key
+shihai_deploy_key.pub
 
 # IDE 和操作系统文件
 .idea/

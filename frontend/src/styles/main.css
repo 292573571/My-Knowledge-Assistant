@@ -3295,7 +3295,7 @@ textarea:focus-visible,
   .portal-account-dropdown { position: fixed; top: 58px; right: 12px; width: min(280px, calc(100vw - 24px)); }
 }
 
-/* 智海新视觉：米白底、深绿强调、空间化面板。 */
+/* 识海新视觉：米白底、深绿强调、空间化面板。 */
 .learning-portal {
   display: flex;
   height: 100vh;

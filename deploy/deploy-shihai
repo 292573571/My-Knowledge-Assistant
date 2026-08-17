@@ -6,12 +6,12 @@ set -Eeuo pipefail
 remote_deploy() {
   local archive=${1:-}
   local revision=${2:-}
-  local app_root=/opt/zhihai
-  local app_jar="$app_root/app/zhihai.jar"
+  local app_root=/opt/shihai
+  local app_jar="$app_root/app/shihai.jar"
   local frontend_root="$app_root/frontend/dist"
   local releases_root="$app_root/releases"
   local backups_root="$app_root/backups/releases"
-  local lock_file=/run/lock/zhihai-deploy.lock
+  local lock_file=/run/lock/shihai-deploy.lock
   local health_url=${HEALTH_URL:-http://127.0.0.1:8080/api/health}
   local startup_attempts=${STARTUP_ATTEMPTS:-90}
   local startup_interval_seconds=${STARTUP_INTERVAL_SECONDS:-2}
@@ -20,7 +20,7 @@ remote_deploy() {
   local activated=false
 
   if [[ -z "$archive" || -z "$revision" || ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "用法: deploy-zhihai remote <release.tar.gz> <40位Git提交ID>" >&2
+    echo "用法: deploy-shihai remote <release.tar.gz> <40位Git提交ID>" >&2
     exit 2
   fi
   if [[ ! -f "$archive" ]]; then
@@ -40,11 +40,11 @@ remote_deploy() {
 
   print_diagnostics() {
     echo "--- systemd status ---" >&2
-    systemctl status zhihai --no-pager >&2 || true
+    systemctl status shihai --no-pager >&2 || true
     echo "--- systemd properties ---" >&2
-    systemctl show zhihai -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus -p Result >&2 || true
+    systemctl show shihai -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus -p Result >&2 || true
     echo "--- recent application log ---" >&2
-    journalctl -u zhihai.service -n 200 --no-pager >&2 || true
+    journalctl -u shihai.service -n 200 --no-pager >&2 || true
     echo "--- health response ---" >&2
     curl -i --max-time 5 "$health_url" >&2 || true
   }
@@ -58,9 +58,9 @@ remote_deploy() {
 
     echo "发布失败，恢复上一版本" >&2
     print_diagnostics
-    systemctl stop zhihai || true
-    if [[ -f "$backup_dir/zhihai.jar" ]]; then
-      install -m 640 "$backup_dir/zhihai.jar" "$app_jar"
+    systemctl stop shihai || true
+    if [[ -f "$backup_dir/shihai.jar" ]]; then
+      install -m 640 "$backup_dir/shihai.jar" "$app_jar"
     fi
     if [[ -d "$backup_dir/frontend" ]]; then
       rm -rf "$frontend_root"
@@ -70,7 +70,7 @@ remote_deploy() {
       chcon -R system_u:object_r:httpd_sys_content_t:s0 "$frontend_root" 2>/dev/null || true
     fi
     if [[ "$service_was_active" == true ]]; then
-      systemctl start zhihai || true
+      systemctl start shihai || true
     fi
     cleanup_archive
     exit "$status"
@@ -80,15 +80,15 @@ remote_deploy() {
 
   mkdir -p "$releases_root" "$backups_root" "$release_dir" "$backup_dir"
   tar -xzf "$archive" -C "$release_dir" --no-same-owner --no-same-permissions
-  test -s "$release_dir/backend/zhihai.jar"
+  test -s "$release_dir/backend/shihai.jar"
   test -s "$release_dir/frontend/index.html"
   [[ "$(tr -d '\r\n' < "$release_dir/REVISION")" == "$revision" ]]
 
-  if systemctl is-active --quiet zhihai; then
+  if systemctl is-active --quiet shihai; then
     service_was_active=true
   fi
   if [[ -f "$app_jar" ]]; then
-    cp -a "$app_jar" "$backup_dir/zhihai.jar"
+    cp -a "$app_jar" "$backup_dir/shihai.jar"
   fi
   if [[ -d "$frontend_root" ]]; then
     mkdir -p "$backup_dir/frontend"
@@ -96,14 +96,14 @@ remote_deploy() {
   fi
 
   activated=true
-  systemctl stop zhihai
-  install -m 640 "$release_dir/backend/zhihai.jar" "$app_jar"
+  systemctl stop shihai
+  install -m 640 "$release_dir/backend/shihai.jar" "$app_jar"
   rm -rf "$frontend_root"
   mkdir -p "$frontend_root"
   cp -a "$release_dir/frontend/." "$frontend_root/"
   chmod -R a+rX "$frontend_root"
   chcon -R system_u:object_r:httpd_sys_content_t:s0 "$frontend_root" 2>/dev/null || true
-  systemctl start zhihai
+  systemctl start shihai
 
   for attempt in $(seq 1 "$startup_attempts"); do
     if curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null; then
@@ -113,8 +113,8 @@ remote_deploy() {
       exit 0
     fi
 
-    if ! systemctl is-active --quiet zhihai; then
-      echo "zhihai 服务已退出，提前结束健康检查" >&2
+    if ! systemctl is-active --quiet shihai; then
+      echo "shihai 服务已退出，提前结束健康检查" >&2
       exit 1
     fi
     sleep "$startup_interval_seconds"
@@ -126,13 +126,13 @@ remote_deploy() {
 
 cleanup_old_releases() {
   local revision=${1:-}
-  local app_root=/opt/zhihai
+  local app_root=/opt/shihai
   local releases_root="$app_root/releases"
   local backups_root="$app_root/backups/releases"
-  local lock_file=/run/lock/zhihai-deploy.lock
+  local lock_file=/run/lock/shihai-deploy.lock
 
   if [[ -z "$revision" || ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "用法: deploy-zhihai cleanup <40位Git提交ID>" >&2
+    echo "用法: deploy-shihai cleanup <40位Git提交ID>" >&2
     exit 2
   fi
   [[ -d "$releases_root/$revision" ]] || {
@@ -153,24 +153,24 @@ release_local() {
   local deploy_host=${DEPLOY_HOST:-175.178.229.209}
   local deploy_port=${DEPLOY_PORT:-22}
   local deploy_user=${DEPLOY_USER:-deploy}
-  local deploy_key=${DEPLOY_KEY:-$HOME/.ssh/zhihai_deploy_key}
+  local deploy_key=${DEPLOY_KEY:-$HOME/.ssh/shihai_deploy_key}
   local public_health_url=${PUBLIC_HEALTH_URL:-http://$deploy_host/api/health}
-  local remote_deploy_script=/usr/local/sbin/deploy-zhihai
+  local remote_deploy_script=/usr/local/sbin/deploy-shihai
   local assume_yes=false
 
   usage() {
     cat <<'EOF'
-用法: ./deploy/deploy-zhihai [--yes]
+用法: ./deploy/deploy-shihai [--yes]
 
 服务器内部模式：
-  deploy-zhihai remote <release.tar.gz> <40位Git提交ID>
-  deploy-zhihai cleanup <40位Git提交ID>
+  deploy-shihai remote <release.tar.gz> <40位Git提交ID>
+  deploy-shihai cleanup <40位Git提交ID>
 
 环境变量：
   DEPLOY_HOST        服务器地址，默认 175.178.229.209
   DEPLOY_PORT        SSH 端口，默认 22
   DEPLOY_USER        SSH 用户，默认 deploy
-  DEPLOY_KEY         SSH 私钥，默认 ~/.ssh/zhihai_deploy_key
+  DEPLOY_KEY         SSH 私钥，默认 ~/.ssh/shihai_deploy_key
   MAVEN_BIN          Maven 命令路径
   PUBLIC_HEALTH_URL  公网健康检查地址
 EOF
@@ -257,19 +257,19 @@ EOF
     echo "$remote_help" >&2
     exit 1
   }
-  if [[ "$remote_help" != *"deploy-zhihai cleanup"* ]]; then
+  if [[ "$remote_help" != *"deploy-shihai cleanup"* ]]; then
     echo "服务器上的 $remote_deploy_script 仍是旧版，请先更新一次统一发版脚本。" >&2
     echo "旧版输出: $remote_help" >&2
     echo "请先运行：" >&2
-    echo "  scp -i \"$deploy_key\" -P \"$deploy_port\" deploy/deploy-zhihai \"$remote:/tmp/deploy-zhihai\"" >&2
-    echo "  ssh -tt -i \"$deploy_key\" -p \"$deploy_port\" \"$remote\" \"sudo install -m 750 /tmp/deploy-zhihai $remote_deploy_script && rm -f /tmp/deploy-zhihai\"" >&2
+    echo "  scp -i \"$deploy_key\" -P \"$deploy_port\" deploy/deploy-shihai \"$remote:/tmp/deploy-shihai\"" >&2
+    echo "  ssh -tt -i \"$deploy_key\" -p \"$deploy_port\" \"$remote\" \"sudo install -m 750 /tmp/deploy-shihai $remote_deploy_script && rm -f /tmp/deploy-shihai\"" >&2
     exit 1
   fi
 
   local work_dir archive remote_archive
-  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/zhihai-release.XXXXXX")
-  archive="$work_dir/zhihai-$revision.tar.gz"
-  remote_archive="/tmp/zhihai-$revision.tar.gz"
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/shihai-release.XXXXXX")
+  archive="$work_dir/shihai-$revision.tar.gz"
+  remote_archive="/tmp/shihai-$revision.tar.gz"
   cleanup_local() { rm -rf "$work_dir"; }
   trap cleanup_local EXIT
 
@@ -299,7 +299,7 @@ EOF
 
   echo "[3/5] 生成发布包"
   mkdir -p "$work_dir/release/backend" "$work_dir/release/frontend"
-  cp "${backend_jars[0]}" "$work_dir/release/backend/zhihai.jar"
+  cp "${backend_jars[0]}" "$work_dir/release/backend/shihai.jar"
   cp -R frontend/dist/. "$work_dir/release/frontend/"
   printf '%s\n' "$revision" > "$work_dir/release/REVISION"
   COPYFILE_DISABLE=1 tar -czf "$archive" -C "$work_dir/release" .

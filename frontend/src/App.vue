@@ -288,8 +288,8 @@ async function submitPasswordChange() {
     <div class="learning-portal" :class="{ 'content-page': activeSection !== 'assistant' }" @keydown.esc="mobileNavOpen = false">
       <header class="portal-header">
         <button type="button" class="portal-brand" @click="navigateTo('assistant')">
-           <img class="portal-mark" src="/brand/ChatGPT%20Image%202026%E5%B9%B47%E6%9C%8826%E6%97%A5%2020_41_19.png" width="34" height="34" alt="智海" />
-          <span>智海 <small>LEARNING STUDIO</small></span>
+           <img class="portal-mark" src="/brand/ChatGPT%20Image%202026%E5%B9%B47%E6%9C%8826%E6%97%A5%2020_41_19.png" width="34" height="34" alt="识海" />
+          <span>识海 <small>LEARNING STUDIO</small></span>
         </button>
          <button type="button" class="portal-mobile-menu-button" :aria-expanded="mobileNavOpen" aria-controls="portal-navigation" :aria-label="mobileNavOpen ? '关闭主导航' : '打开主导航'" @click="mobileNavOpen = !mobileNavOpen"><span></span><span></span><span></span></button>
         <nav id="portal-navigation" class="portal-nav" :class="{ 'mobile-open': mobileNavOpen }" aria-label="主导航">

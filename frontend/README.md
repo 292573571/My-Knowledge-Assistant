@@ -1,4 +1,4 @@
-# 智海学习助手前端
+# 识海学习助手前端
 
 Vue + Vite 实现的统一学习工作台，支持普通 RAG 问答、主题教学、CHECK/PRACTICE、SSE 事件、来源引用、Markdown 渲染和服务端会话历史。
 

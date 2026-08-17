@@ -13,7 +13,7 @@
 - 长 PDF 分批解析、批次状态、失败清理和成功批次跳过恢复。
 - Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。
 - 多轮聊天、SSE 流式回答、会话保存、停止和删除。
-- 统一智海教学助手：自动区分直接回答与主题教学，支持 EXPLAIN、CHECK、PRACTICE、REVIEW 状态恢复和幂等提交。
+- 统一识海教学助手：自动区分直接回答与主题教学，支持 EXPLAIN、CHECK、PRACTICE、REVIEW 状态恢复和幂等提交。
 - PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
@@ -176,35 +176,67 @@ yarn preview
 项目只保留一个发版入口：
 
 ```bash
-./deploy/deploy-zhihai
+./deploy/deploy-shihai
 ```
 
-它会在本地完成后端测试打包、前端构建、上传发布包，然后在服务器上停止并启动 `zhihai` 服务，执行服务器本地和公网健康检查。服务器部署端使用同一个脚本的内部子命令，不再维护第二份启动逻辑。
+它会在本地完成后端测试打包、前端构建、上传发布包，然后在服务器上停止并启动 `shihai` 服务，执行服务器本地和公网健康检查。服务器部署端使用同一个脚本的内部子命令，不再维护第二份启动逻辑。
 
 首次配置或更新服务器部署脚本时，在本地项目根目录执行一次：
 
 ```bash
-scp -i "$DEPLOY_KEY" -P "$DEPLOY_PORT" deploy/deploy-zhihai "$DEPLOY_USER@$DEPLOY_HOST:/tmp/deploy-zhihai"
+scp -i "$DEPLOY_KEY" -P "$DEPLOY_PORT" deploy/deploy-shihai "$DEPLOY_USER@$DEPLOY_HOST:/tmp/deploy-shihai"
 ssh -tt -i "$DEPLOY_KEY" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-  "sudo install -m 750 /tmp/deploy-zhihai /usr/local/sbin/deploy-zhihai && rm -f /tmp/deploy-zhihai"
+  "sudo install -m 750 /tmp/deploy-shihai /usr/local/sbin/deploy-shihai && rm -f /tmp/deploy-shihai"
 ```
 
 并为 `deploy` 用户配置只允许执行这个固定脚本的免密 sudo，例如：
 
 ```text
-deploy ALL=(root) NOPASSWD: /usr/local/sbin/deploy-zhihai *
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/deploy-shihai *
 ```
 
 服务器预检会分别检查 `rsync` 和 sudo 权限；如果失败，会明确提示是缺少 `rsync`，还是 sudoers 不允许执行部署脚本。服务器上可以分别验证：
 
 ```bash
 command -v rsync
-su - deploy -c 'sudo -n /usr/local/sbin/deploy-zhihai --help'
+su - deploy -c 'sudo -n /usr/local/sbin/deploy-shihai --help'
 ```
 
 发版脚本不会要求 `sudo -n true`，也不会要求 `deploy` 用户免密执行任意 root 命令。后续发版只上传发布包并调用这个固定部署脚本；修改部署脚本本身时，需要重新手工安装一次。脚本会在发版前检查服务器脚本是否支持 `remote` 和 `cleanup` 子命令。
 
 只有服务器本地健康检查和公网健康检查都成功后，脚本才会删除旧的 release 和备份；任一检查失败时，旧版本仍会保留用于回滚。
+
+## 从 zhihai 迁移到 shihai
+
+项目品牌名已从「智海」改为「识海」，部署服务名、目录、jar 和 SSH 私钥也随之从 `zhihai` 改为 `shihai`。**已在服务器上按旧名部署的环境，必须先执行迁移，否则新发版脚本会创建全新的 `/opt/shihai`，与仍占用 8080 端口的旧 `zhihai` 服务冲突。**
+
+仓库提供了一键迁移脚本，在服务器上以 root 执行：
+
+```bash
+sudo bash deploy/migrate-zhihai-to-shihai.sh
+```
+
+它会依次完成：
+
+1. 停止并禁用 `zhihai` 服务。
+2. 根据 `systemctl show -p FragmentPath zhihai` 找到 unit 文件，生成内容一致的 `shihai.service` 并启用。
+3. 迁移应用目录 `/opt/zhihai` → `/opt/shihai`。
+4. 迁移部署脚本 `/usr/local/sbin/deploy-zhihai` → `/usr/local/sbin/deploy-shihai`。
+5. 迁移 `deploy` 用户 SSH 私钥 `zhihai_deploy_key` → `shihai_deploy_key`。
+6. 更新 sudoers 规则 `deploy-zhihai` → `deploy-shihai`。
+7. 启动新服务并执行本地健康检查。
+
+脚本幂等，重复执行会跳过已完成步骤；失败时会在 `/opt/shihai-migration-backup/` 保留备份，可据此回滚。执行前建议手动确认以下路径与现有环境一致：
+
+- 应用目录默认 `/opt/zhihai`，如不同请修改脚本顶部变量。
+- `deploy` 用户名默认 `deploy`，可通过环境变量 `DEPLOY_USER` 覆盖。
+- 健康检查默认 `http://127.0.0.1:8080/api/health`，可通过 `HEALTH_URL` 覆盖。
+
+如果服务器环境与默认值不一致，也可以参照脚本手动迁移。迁移完成后用新脚本验证：
+
+```bash
+su - deploy -c 'sudo -n /usr/local/sbin/deploy-shihai --help'
+```
 
 ## 登录和空间使用
 
