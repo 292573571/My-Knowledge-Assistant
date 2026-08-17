@@ -49,6 +49,8 @@ public class RagService {
     private static final double WEAK_DENSE_DISTANCE = 0.72;
     private static final double STRONG_SPARSE_SCORE = 2.0;
     private static final int RECENT_CONVERSATION_ROUNDS = 4;
+    // 在线流式链路的 LLM 相关度筛选阈值：候选片段不超过该数量时跳过，超过时才启用语义把关。
+    private static final int LLM_GATE_MIN_CANDIDATES = 3;
     private static final String LEARNING_ASSISTANT_INTRODUCTION = """
             您好，我是您的 AI 学习助理。
 
@@ -1098,7 +1100,7 @@ public class RagService {
         return filterByThreshold(question, sources, true);
     }
 
-    private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources, boolean llmGate) {
+    private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources, boolean alwaysGate) {
         // AI 学习记录仅用于学习记录页面，不属于知识库事实来源。
         List<SourceDocument> eligibleSources = sources.stream()
                 .filter(source -> !isLearningRecord(source))
@@ -1116,9 +1118,10 @@ public class RagService {
                 .filter(this::passesThreshold)
                 .filter(source -> hasStrongRetrievalSignal(question, source))
                 .toList())));
-        // 在线流式链路跳过同步 LLM 相关度筛选，避免首 token 前多一次完整模型调用；
-        // 最终依据校验由流式完成后的异步质量审计（RagQualityAuditService）兜底。
-        List<SourceDocument> relevantSources = llmGate
+        // 在线流式链路：候选片段少时跳过同步 LLM 相关度筛选（规则把关已足够），
+        // 候选多时启用语义把关；非流式链路（评测/调试）始终启用，精确性优先。
+        boolean shouldLlmGate = alwaysGate || thresholdSources.size() > LLM_GATE_MIN_CANDIDATES;
+        List<SourceDocument> relevantSources = shouldLlmGate
                 ? time("quality_validation", () -> qualityGate.relevantSources(question, thresholdSources))
                 : thresholdSources;
         List<SourceDocument> contextSources = applyContextPolicy(expandAdjacent(relevantSources));
