@@ -11,8 +11,11 @@ import com.example.workbench.workspace.WorkspaceService;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagService;
+import com.example.workbench.rag.RagStreamResponse;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -109,5 +112,82 @@ public class WorkbenchChatService {
 
     private String newMessageId() {
         return "msg-" + UUID.randomUUID();
+    }
+
+    /**
+     * 流式问答：RAG 检索后逐 token 输出回答，消息持久化和学习记录在回答输出完成后执行，
+     * 使首字延迟不再被完整回答生成和数据库写操作阻塞。
+     */
+    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request, Consumer<String> onToken) {
+        long startedAt = System.currentTimeMillis();
+        String mode = request.normalizedMode();
+        String clientConversationId = request.normalizedConversationId();
+        WorkspaceAccessContext workspace = workspaceService.access(user, request.workspaceId());
+        String conversationId = conversationService.executionScope(user, workspace.workspaceId(), clientConversationId);
+
+        ConversationExecutionRegistry.Execution execution = executionRegistry.begin(conversationId);
+        try {
+            conversationService.recordUserMessage(
+                    user,
+                    workspace.workspaceId(),
+                    clientConversationId,
+                    request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)),
+                    mode,
+                    request.message()
+            );
+
+            log.info(
+                    "Workbench stream chat received userId={} mode={} conversationId={} messageLength={}",
+                    user.getId(),
+                    mode,
+                    conversationId,
+                    request.message() == null ? 0 : request.message().length()
+            );
+
+            workspaceService.access(user, workspace.workspaceId());
+            RagStreamResponse ragResponse = ragService.stream(user,
+                    new RagChatRequest(conversationId, workspace.workspaceId(), clientConversationId, request.message()));
+
+            StringBuilder content = new StringBuilder();
+            AtomicBoolean firstTokenSent = new AtomicBoolean(false);
+            ragResponse.tokens().doOnNext(token -> {
+                        if (execution.isCancelled()) return;
+                        if (token == null || token.isEmpty()) return;
+                        if (firstTokenSent.compareAndSet(false, true)) {
+                            log.info("Workbench stream chat first token forwarded conversationId={} latencyMs={}",
+                                    conversationId, System.currentTimeMillis() - startedAt);
+                        }
+                        content.append(token);
+                        onToken.accept(token);
+                    })
+                    .blockLast();
+
+            if (execution.isCancelled()) {
+                log.info("Workbench stream chat result discarded because conversation was stopped or deleted userId={} conversationId={}",
+                        user.getId(), conversationId);
+                return new WorkbenchChatResponse(newMessageId(), content.toString(), ragResponse.sources(), List.of());
+            }
+
+            workspaceService.access(user, workspace.workspaceId());
+            String answerContent = ragService.sanitizePresentedAnswer(content.toString(), request.message());
+            WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), answerContent, ragResponse.sources(), List.of());
+            boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
+                    mode, answerContent, response.sources(), response.toolCalls());
+            if (recorded) {
+                learningRecordService.record(user, workspace.workspaceId(), request.message(), answerContent, ragResponse.sources());
+            }
+            log.info(
+                    "Workbench stream chat completed route=RAG_LOCAL_KNOWLEDGE conversationId={} sources={} durationMs={}",
+                    conversationId,
+                    ragResponse.sources().size(),
+                    System.currentTimeMillis() - startedAt
+            );
+            return response;
+        } finally {
+            if (execution.isCancelled()) {
+                conversationMemory.remove(conversationId);
+            }
+            executionRegistry.finish(conversationId, execution);
+        }
     }
 }

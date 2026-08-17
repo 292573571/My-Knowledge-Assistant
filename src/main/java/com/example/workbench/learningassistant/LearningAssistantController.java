@@ -95,13 +95,18 @@ public class LearningAssistantController {
         emitter.onCompletion(() -> executionRegistry.cancel(scope));
         CompletableFuture.runAsync(() -> {
             try {
-                LearningAssistantResponse response = service.message(user, sessionId, request, execution);
+                LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
+                        token -> {
+                            try {
+                                send(emitter, "token", Map.of("text", token));
+                            } catch (java.io.IOException exception) {
+                                throw new IllegalStateException("Failed to send stream token", exception);
+                            }
+                        },
+                        execution);
                 if (execution.isCancelled()) throw new CancellationException("学习请求已停止");
                 send(emitter, "session", Map.of("sessionId", response.sessionId()));
                 send(emitter, "message_start", Map.of("intent", response.intent().name(), "mode", response.mode().name()));
-                if (response.answer() != null && !response.answer().isBlank()) {
-                    send(emitter, "token", Map.of("text", response.answer()));
-                }
                 if (response.sources() != null) {
                     for (Object source : response.sources()) send(emitter, "source", source);
                 }

@@ -16,6 +16,7 @@ const SystemMaintenance = defineAsyncComponent(() => import('./components/System
 const currentUser = ref(null)
 const checkingSession = ref(true)
 const restoringWorkspace = ref(false)
+const appReady = ref(false)
 const activeSection = ref('assistant')
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
@@ -112,6 +113,7 @@ onMounted(async () => {
     setActiveWorkspaceId('')
   } finally {
     checkingSession.value = false
+    appReady.value = true
   }
 })
 
@@ -161,6 +163,7 @@ async function handleLogout() {
 }
 
 async function restoreWorkspace(user) {
+  appReady.value = false
   restoringWorkspace.value = true
   try {
     activeSection.value = 'assistant'
@@ -177,6 +180,7 @@ async function restoreWorkspace(user) {
     await refreshAvatar()
   } finally {
     restoringWorkspace.value = false
+    appReady.value = true
   }
 }
 
@@ -278,8 +282,7 @@ async function submitPasswordChange() {
 </script>
 
 <template>
-  <div v-if="checkingSession" class="auth-page"><p>正在恢复登录状态...</p></div>
-  <div v-else-if="restoringWorkspace" class="auth-page"><p>正在打开工作台...</p></div>
+  <div v-if="checkingSession || restoringWorkspace || !appReady" class="auth-page"><p>{{ currentUser ? '正在打开工作台...' : '正在恢复登录状态...' }}</p></div>
   <AuthPage v-else-if="!currentUser" @authenticated="restoreWorkspace" />
   <template v-else>
     <div class="learning-portal" :class="{ 'content-page': activeSection !== 'assistant' }" @keydown.esc="mobileNavOpen = false">

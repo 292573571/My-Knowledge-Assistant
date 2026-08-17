@@ -24,6 +24,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -124,6 +125,50 @@ public class LearningAssistantService {
             }
             WorkbenchChatResponse result = chatService.chat(user,
                     new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()));
+            requireRunning(execution);
+            workspaceService.access(user, access.workspaceId());
+            session.touch(LearningMode.CHAT, null, "CHAT", "ACTIVE");
+            session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
+            sessionRepository.save(session);
+            return LearningAssistantResponse.chat(sessionId, result);
+        });
+    }
+
+    /**
+     * 流式消息：教学讲解和普通问答都逐 token 输出，回答正文完成后才执行持久化收尾。
+     */
+    public LearningAssistantResponse streamMessage(AppUser user, String sessionId, LearningAssistantMessageRequest request,
+                                                   Consumer<String> onToken,
+                                                   ConversationExecutionRegistry.Execution execution) {
+        WorkspaceAccessContext access = access(user, request.workspaceId());
+        conversationService.messages(user, access.workspaceId(), sessionId);
+        LearningIntent intent = resolveIntent(request);
+        LearningMode mode = resolveMode(request, intent);
+        LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
+        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name());
+        return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
+            requireRunning(execution);
+            if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
+                String topic = null;
+                conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
+                        request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)),
+                        "teaching", request.message());
+                TeachingAgentResult result = teachingService.streamChat(user, access,
+                        new TeachingAgentRequest(access.workspaceId(), sessionId, topic,
+                                request.normalizedUserLevel(), request.message()),
+                        onToken,
+                        () -> execution != null && execution.isCancelled());
+                requireRunning(execution);
+                workspaceService.access(user, access.workspaceId());
+                session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
+                session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
+                sessionRepository.save(session);
+                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, "teaching",
+                        result.answer(), result.sources(), result.traces());
+                return LearningAssistantResponse.teaching(result, intent);
+            }
+            WorkbenchChatResponse result = chatService.streamChat(user,
+                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()), onToken);
             requireRunning(execution);
             workspaceService.access(user, access.workspaceId());
             session.touch(LearningMode.CHAT, null, "CHAT", "ACTIVE");

@@ -423,7 +423,8 @@ public class RagService {
         List<SourceDocument> candidates = retrieveCandidates(
                 question.strip(), ownerUserId, workspaceId,
                 new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
-        return toRagSources(filterByThreshold(question.strip(), candidates)).stream()
+        // 教学 Agent 工具检索同样跳过同步 LLM 筛选，降低工具调用带来的首字延迟。
+        return toRagSources(filterByThreshold(question.strip(), candidates, false)).stream()
                 .limit(safeLimit)
                 .toList();
     }
@@ -452,7 +453,7 @@ public class RagService {
         List<SourceDocument> retrievedSources = retrieveCandidates(
                 question, conversationContext.standaloneQuestion(), ownerUserId(conversationId), request.workspaceId(),
                 new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
-        List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
+        List<SourceDocument> sources = filterByThreshold(question, retrievedSources, false);
         if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
             // 通用知识代码必须先完整生成并校验，避免错误标识符流到页面后无法撤回。
             RagChatResponse response = answerWithModelFallback(
@@ -1094,6 +1095,10 @@ public class RagService {
     }
 
     private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources) {
+        return filterByThreshold(question, sources, true);
+    }
+
+    private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources, boolean llmGate) {
         // AI 学习记录仅用于学习记录页面，不属于知识库事实来源。
         List<SourceDocument> eligibleSources = sources.stream()
                 .filter(source -> !isLearningRecord(source))
@@ -1111,8 +1116,11 @@ public class RagService {
                 .filter(this::passesThreshold)
                 .filter(source -> hasStrongRetrievalSignal(question, source))
                 .toList())));
-        List<SourceDocument> relevantSources = time("quality_validation",
-                () -> qualityGate.relevantSources(question, thresholdSources));
+        // 在线流式链路跳过同步 LLM 相关度筛选，避免首 token 前多一次完整模型调用；
+        // 最终依据校验由流式完成后的异步质量审计（RagQualityAuditService）兜底。
+        List<SourceDocument> relevantSources = llmGate
+                ? time("quality_validation", () -> qualityGate.relevantSources(question, thresholdSources))
+                : thresholdSources;
         List<SourceDocument> contextSources = applyContextPolicy(expandAdjacent(relevantSources));
         if (metrics != null) {
             metrics.recordContextCount(contextSources.size());
