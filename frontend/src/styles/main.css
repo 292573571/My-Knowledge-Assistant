@@ -2159,8 +2159,8 @@ textarea:focus-visible,
 
 .portal-mark {
   display: block;
-  width: 35px;
-  height: 35px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   border-radius: 50%;
   object-fit: cover;
@@ -3228,7 +3228,7 @@ textarea:focus-visible,
     padding-inline: 14px;
   }
 
-  .portal-mark { width: 32px; height: 32px; }
+  .portal-mark { width: 36px; height: 36px; }
   .portal-brand { gap: 7px; }
   .portal-user-tools { min-width: 0; gap: 6px; }
   .portal-account-menu { flex: 0 0 auto; }

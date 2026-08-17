@@ -249,14 +249,14 @@ onMounted(loadTeachingProgress)
   <main class="teaching-dashboard">
     <section class="teaching-hero">
       <div>
-        <p class="teaching-kicker">GUIDED LEARNING · {{ workspaceName }}</p>
+        <p class="teaching-kicker">引导式学习 · {{ workspaceName }}</p>
         <h1>主题教学</h1>
         <p>让 Agent 不只回答问题，而是先解释，再用一个问题检查你是否真正理解。</p>
       </div>
       <div class="teaching-lesson-note">
         <span class="teaching-note-dot"></span>
         <strong>本课范围</strong>
-        <span>EXPLAIN → CHECK → PRACTICE</span>
+        <span>讲解 → 检查 → 实践</span>
       </div>
     </section>
 
@@ -392,7 +392,7 @@ onMounted(loadTeachingProgress)
           <section v-if="result.stage === 'REVIEW' && result.review" class="teaching-review-card">
             <header>
               <span class="teaching-review-mark">R</span>
-              <div><small>REVIEW</small><h3>针对性复习</h3></div>
+              <div><small>复习</small><h3>针对性复习</h3></div>
             </header>
             <dl>
               <div><dt>薄弱点</dt><dd>{{ result.review.weakPoint }}</dd></div>
@@ -405,7 +405,7 @@ onMounted(loadTeachingProgress)
           <section v-if="result.practice && (result.nextAction === 'PRACTICE' || result.practice.status === 'COMPLETED')" class="teaching-practice-card">
             <header>
               <span class="teaching-practice-mark">P</span>
-              <div><small>PRACTICE</small><h3>{{ result.practice.status === 'COMPLETED' ? '实践结果' : '把概念带到真实任务' }}</h3></div>
+              <div><small>实践</small><h3>{{ result.practice.status === 'COMPLETED' ? '实践结果' : '把概念带到真实任务' }}</h3></div>
             </header>
             <p class="teaching-practice-question">{{ result.practice.question }}</p>
             <p class="teaching-practice-instruction">请完成下面三步，不需要写成长文章。</p>

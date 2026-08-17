@@ -206,7 +206,7 @@ onMounted(load)
       <div v-if="reading" class="record-reader-placeholder">正在打开学习记录...</div>
       <article v-else-if="activeRecord" class="record-article">
         <header>
-          <div class="record-heading-row"><div><p class="section-kicker">DAILY NOTE</p><h2>{{ formatDate(activeRecord.date) }}</h2></div><div class="record-actions"><button v-if="!editing" type="button" :disabled="saving" @click="startEditing">编辑</button><button type="button" :disabled="saving" @click="promoteRecord">保存为正式笔记</button></div></div>
+          <div class="record-heading-row"><div><p class="section-kicker">每日笔记</p><h2>{{ formatDate(activeRecord.date) }}</h2></div><div class="record-actions"><button v-if="!editing" type="button" :disabled="saving" @click="startEditing">编辑</button><button type="button" :disabled="saving" @click="promoteRecord">保存为正式笔记</button></div></div>
           <p>编辑后可先暂存草稿；保存为正式笔记后，内容才会进入知识库参与检索。</p>
         </header>
          <div v-if="editing" class="record-editor"><textarea v-model="draftContent" aria-label="编辑学习记录"></textarea><div><button type="button" :disabled="saving" @click="editing = false">取消</button><button class="primary" type="button" :disabled="saving" :aria-busy="saving" @click="saveRecord">{{ saving ? '暂存中...' : '暂存' }}</button></div></div>

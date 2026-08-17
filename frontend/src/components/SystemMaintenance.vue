@@ -25,6 +25,7 @@ let disposed = false
 
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
+const workspaceTypeLabel = computed(() => ({ PERSONAL: '个人', TEAM: '团队', PUBLIC: '公共' })[props.workspace?.type] || '空间')
 const latestRebuildTask = computed(() => documentTasks.value.find((task) => task.type === 'REBUILD') || null)
 const latestMaintenanceTask = computed(() => documentTasks.value.find((task) => ['REBUILD', 'SYNC'].includes(task.type)) || null)
 const rebuildRunning = computed(() => latestRebuildTask.value
@@ -185,7 +186,7 @@ async function confirmMaintenance() {
       <div class="maintenance-scope">
         <span>当前维护范围</span>
         <strong>{{ workspaceName }}</strong>
-        <small>{{ workspace?.type || 'SPACE' }} · {{ documents.length }} 个文档 · {{ totalChunks }} 个 chunks</small>
+        <small>{{ workspaceTypeLabel }} · {{ documents.length }} 个文档 · {{ totalChunks }} 个分块</small>
       </div>
     </section>
 

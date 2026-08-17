@@ -38,7 +38,7 @@ function formatRelativeTime(value) {
   <aside class="sidebar" :class="{ 'mobile-session-drawer': mobileOpen }">
     <header class="conversation-sidebar-header">
       <div>
-        <span class="conversation-sidebar-kicker">YOUR LEARNING SPACE</span>
+        <span class="conversation-sidebar-kicker">你的学习空间</span>
         <h2>学习会话</h2>
       </div>
       <span class="conversation-count" :aria-label="`${conversations.length} 个会话`">{{ conversations.length }}</span>

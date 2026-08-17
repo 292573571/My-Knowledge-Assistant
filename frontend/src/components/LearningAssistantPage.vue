@@ -421,7 +421,7 @@ function closeSourceOnPointerMove(event) {
           </div>
           <div v-else-if="!messages.length" class="learning-empty-state">
             <div class="learning-hero-copy">
-              <span class="learning-hero-index">01 / BEGIN HERE</span>
+              <span class="learning-hero-index">01 / 从这里开始</span>
               <div class="learning-orbit" aria-hidden="true">✦</div>
               <h2>把知识变成<br><em>真正会用的能力。</em></h2>
               <p>在当前知识空间里提问、拆解和练习。普通问题直接回答，想真正掌握时进入带检查的主题教学。</p>
@@ -430,20 +430,20 @@ function closeSourceOnPointerMove(event) {
             <div class="learning-hero-visual" data-reveal aria-label="学习助手空间化预览">
               <div class="hero-visual-glow"></div>
               <div class="hero-browser-window">
-                <div class="hero-browser-bar"><i></i><i></i><i></i><span>knowledge / studio</span></div>
-                <div class="hero-browser-body"><div class="hero-browser-sidebar"><b></b><b></b><b></b><b></b></div><div class="hero-browser-content"><span class="hero-line short"></span><span class="hero-line"></span><div class="hero-card-row"><span></span><span></span></div><div class="hero-signal"><strong>RAG</strong><small>evidence map</small><em></em></div></div></div>
+                <div class="hero-browser-bar"><i></i><i></i><i></i><span>知识 / 工作室</span></div>
+                <div class="hero-browser-body"><div class="hero-browser-sidebar"><b></b><b></b><b></b><b></b></div><div class="hero-browser-content"><span class="hero-line short"></span><span class="hero-line"></span><div class="hero-card-row"><span></span><span></span></div><div class="hero-signal"><strong>RAG</strong><small>依据地图</small><em></em></div></div></div>
               </div>
-              <div class="hero-float-card hero-float-card-top"><span>LEARNING PATH</span><strong>RAG → Agent → Tools</strong></div>
-              <div class="hero-float-card hero-float-card-bottom"><span class="hero-status-dot"></span><strong>Ready to explore</strong></div>
+              <div class="hero-float-card hero-float-card-top"><span>学习路径</span><strong>RAG → Agent → Tools</strong></div>
+              <div class="hero-float-card hero-float-card-bottom"><span class="hero-status-dot"></span><strong>准备好探索</strong></div>
             </div>
             <div class="learning-bento-grid learning-featured-scroll" data-reveal aria-label="精选学习路径">
-              <article class="learning-bento-card featured"><span>FEATURED</span><strong>从问题到掌握</strong><p>让每一次回答都留下可继续的学习线索。</p></article>
-              <article class="learning-bento-card"><span>CHAT</span><strong>快速问答</strong><p>先解决眼前的问题。</p></article>
-              <article class="learning-bento-card"><span>GUIDED</span><strong>主题教学</strong><p>解释、检查、实践。</p></article>
-              <article class="learning-bento-card learning-bento-note"><span>NOTE</span><strong>你的知识空间</strong><p>依据来自当前工作区，不凭空编造。</p></article>
+              <article class="learning-bento-card featured"><span>精选</span><strong>从问题到掌握</strong><p>让每一次回答都留下可继续的学习线索。</p></article>
+              <article class="learning-bento-card"><span>问答</span><strong>快速问答</strong><p>先解决眼前的问题。</p></article>
+              <article class="learning-bento-card"><span>教学</span><strong>主题教学</strong><p>解释、检查、实践。</p></article>
+              <article class="learning-bento-card learning-bento-note"><span>说明</span><strong>你的知识空间</strong><p>依据来自当前工作区，不凭空编造。</p></article>
             </div>
             <section class="learning-inspiration-flow" data-reveal aria-labelledby="inspiration-title">
-              <header><div><span class="learning-eyebrow">AI INSPIRATION FLOW</span><h2 id="inspiration-title">下一步，可以从这里开始</h2></div><span>{{ visibleInspirations.length }} 个灵感</span></header>
+              <header><div><span class="learning-eyebrow">AI 灵感流</span><h2 id="inspiration-title">下一步，可以从这里开始</h2></div><span>{{ visibleInspirations.length }} 个灵感</span></header>
               <div class="learning-inspiration-list">
                 <button v-for="item in visibleInspirations" :key="item.id" type="button" @click="send(item.prompt)">{{ item.prompt }} <b aria-hidden="true">↗</b></button>
                 <span ref="inspirationSentinel" class="learning-inspiration-sentinel" aria-hidden="true"></span>
@@ -463,7 +463,7 @@ function closeSourceOnPointerMove(event) {
          </footer>
       </section>
         <aside v-if="isLearningMode" class="learning-stage-sidebar">
-         <header><span class="learning-eyebrow">GUIDED STATUS</span><h2>学习进度</h2></header>
+         <header><span class="learning-eyebrow">教学状态</span><h2>学习进度</h2></header>
         <div v-if="progress" class="learning-progress-card">
           <div class="learning-progress-heading"><strong>{{ progress.masteryPercent }}%</strong><span>{{ progress.status === 'MASTERED' ? '已掌握' : progress.status === 'NEEDS_REVIEW' ? '需要复习' : '进行中' }}</span></div>
           <div class="learning-progress-bar"><span :style="{ width: `${progress.masteryPercent}%` }"></span></div>
@@ -472,12 +472,12 @@ function closeSourceOnPointerMove(event) {
         </div>
         <div v-else class="learning-sidebar-empty">进入主题教学后，这里会显示讲解、检查和实践进度。</div>
         <section v-if="pendingCheck" class="learning-action-card check-card">
-          <span class="learning-action-tag">CHECK</span><h3>检查你的理解</h3><p>{{ pendingCheck.question }}</p>
+          <span class="learning-action-tag">检查</span><h3>检查你的理解</h3><p>{{ pendingCheck.question }}</p>
           <textarea v-model="checkAnswer" rows="5" maxlength="4000" placeholder="用自己的话回答"></textarea>
            <button type="button" :disabled="loading || !checkAnswer.trim()" :aria-busy="loading" @click="submitCheck">{{ loading ? '正在评分...' : '提交检查' }}</button>
         </section>
         <section v-if="pendingPractice" class="learning-action-card practice-card">
-          <span class="learning-action-tag">PRACTICE</span><h3>把概念带到真实任务</h3><p>{{ pendingPractice.question }}</p>
+          <span class="learning-action-tag">实践</span><h3>把概念带到真实任务</h3><p>{{ pendingPractice.question }}</p>
           <textarea v-model="practiceAnswer" rows="7" maxlength="4000" placeholder="说明任务目标、工具调用，以及结果如何影响下一步"></textarea>
            <button type="button" :disabled="loading || !practiceAnswer.trim()" :aria-busy="loading" @click="submitPractice">{{ loading ? '正在评估...' : '提交实践' }}</button>
         </section>
