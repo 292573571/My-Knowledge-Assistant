@@ -39,7 +39,7 @@ public class AdminUserService {
     }
 
     private AdminUserResponse response(AppUser user) {
-        return new AdminUserResponse(user.getPublicId(), user.getAccount(), user.getUserName(),
-                authorizationService.effectiveRole(user), user.getCreatedAt());
+        return new AdminUserResponse(user.getPublicId(), user.getAccount(), user.getEmail(), user.getPhone(),
+                user.getUserName(), authorizationService.effectiveRole(user), user.getCreatedAt());
     }
 }

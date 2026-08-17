@@ -27,24 +27,33 @@ public class AuthController {
     private final AuthService authService;
     private final UserProfileService userProfileService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final EmailVerificationService emailVerificationService;
     private final boolean secureCookie;
     private final Duration sessionDuration;
 
     public AuthController(AuthService authService, UserProfileService userProfileService,
                           AdminAuthorizationService adminAuthorizationService,
+                          EmailVerificationService emailVerificationService,
                           @Value("${app.auth.cookie-secure:false}") boolean secureCookie,
                           @Value("${app.auth.session-hours:168}") long sessionHours) {
         this.authService = authService;
         this.userProfileService = userProfileService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.emailVerificationService = emailVerificationService;
         this.secureCookie = secureCookie;
         this.sessionDuration = Duration.ofHours(sessionHours);
     }
 
+    @PostMapping("/send-code")
+    public RegisterResultResponse sendCode(@Valid @RequestBody SendCodeRequest request) {
+        emailVerificationService.send(request.email());
+        return new RegisterResultResponse("验证码已发送，请查收邮件");
+    }
+
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public CurrentUserResponse register(@Valid @RequestBody RegisterRequest request, HttpServletResponse response) {
-        return authenticated(authService.register(request), response);
+    public RegisterResultResponse register(@Valid @RequestBody RegisterRequest request) {
+        return authService.register(request);
     }
 
     @PostMapping("/login")
@@ -95,13 +104,14 @@ public class AuthController {
     }
 
     private CurrentUserResponse profile(AppUser user) {
-        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+        return new CurrentUserResponse(user.getAccount(), user.getEmail(), user.getPhone(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
                 user.getCreatedAt(), adminAuthorizationService.effectiveRole(user));
     }
 
     private CurrentUserResponse authenticated(AuthResponse authentication, HttpServletResponse response) {
         response.addHeader("Set-Cookie", sessionCookie(authentication.token(), sessionDuration).toString());
-        return new CurrentUserResponse(authentication.account(), authentication.userName(), authentication.publicId(),
+        return new CurrentUserResponse(authentication.account(), authentication.email(), authentication.phone(),
+                authentication.userName(), authentication.publicId(),
                 authentication.avatarUrl(), authentication.createdAt(), effectiveRole(authentication));
     }
 

@@ -34,7 +34,7 @@ class UserProfileServiceTest {
 
     @Test
     void updatesDisplayNameWithoutChangingAccount() {
-        CurrentUserResponse response = service.update(user, new UpdateProfileRequest("Alice Zhang"));
+        CurrentUserResponse response = service.update(user, new UpdateProfileRequest("Alice Zhang", null));
 
         assertThat(response.userName()).isEqualTo("Alice Zhang");
         assertThat(response.account()).isEqualTo("alice");

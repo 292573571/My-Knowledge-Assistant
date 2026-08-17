@@ -17,7 +17,7 @@ const isSuperAdmin = computed(() => props.currentUser.systemRole === 'SUPER_ADMI
 const filteredUsers = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase()
   if (!keyword) return users.value
-  return users.value.filter(user => [user.account, user.userName, user.publicId]
+  return users.value.filter(user => [user.account, user.userName]
     .some(value => String(value || '').toLocaleLowerCase().includes(keyword)))
 })
 const roleCounts = computed(() => ({
@@ -82,18 +82,19 @@ function formatTime(value) {
     <section class="user-management-card" data-reveal>
       <header>
         <div><h2>用户列表</h2><p>{{ isSuperAdmin ? '可调整普通用户和管理员角色' : '当前账号拥有只读管理权限' }}</p></div>
-        <input v-model="query" type="search" placeholder="搜索账号、名称或用户 ID" aria-label="搜索用户">
+        <input v-model="query" type="search" placeholder="搜索账号或名称" aria-label="搜索用户">
       </header>
       <p v-if="error" class="user-management-message error">{{ error }}</p>
       <p v-if="success" class="user-management-message success">{{ success }}</p>
       <p v-if="loading" class="user-management-empty">正在加载用户...</p>
       <div v-else class="user-management-table-wrap" tabindex="0" aria-label="用户列表，可横向滚动">
         <table class="user-management-table">
-          <thead><tr><th>用户</th><th>账号</th><th>注册时间</th><th>系统角色</th></tr></thead>
+          <thead><tr><th>用户</th><th>账号</th><th>手机号</th><th>注册时间</th><th>系统角色</th></tr></thead>
           <tbody>
             <tr v-for="user in filteredUsers" :key="user.publicId">
-              <td><div class="user-management-identity"><span>{{ user.userName.slice(0, 1) }}</span><div><strong>{{ user.userName }}</strong><small>{{ user.publicId }}</small></div></div></td>
+              <td><div class="user-management-identity"><span>{{ user.userName.slice(0, 1) }}</span><div><strong>{{ user.userName }}</strong></div></div></td>
               <td><code>{{ user.account }}</code></td>
+              <td>{{ user.phone || '-' }}</td>
               <td>{{ formatTime(user.createdAt) }}</td>
               <td>
                 <span v-if="user.systemRole === 'SUPER_ADMIN' || !isSuperAdmin" :class="['user-system-role', user.systemRole.toLowerCase()]">{{ roleLabel(user.systemRole) }}</span>

@@ -45,6 +45,9 @@ public class UserProfileService {
     public CurrentUserResponse update(AppUser user, UpdateProfileRequest request) {
         String userName = request.userName().strip();
         user.changeUserName(userName);
+        if (request.phone() != null) {
+            user.changePhone(request.phone().strip());
+        }
         userRepository.save(user);
         return response(user);
     }
@@ -171,7 +174,7 @@ public class UserProfileService {
     }
 
     private CurrentUserResponse response(AppUser user) {
-        return new CurrentUserResponse(user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+        return new CurrentUserResponse(user.getAccount(), user.getEmail(), user.getPhone(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
                 user.getCreatedAt(), adminAuthorizationService.effectiveRole(user));
     }
 }

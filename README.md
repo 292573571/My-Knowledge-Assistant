@@ -93,6 +93,11 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 | `ADMIN_ACCOUNTS` | 空 | 启动时把已有账号迁移为 `ADMIN` |
 | `AUTH_COOKIE_SECURE` | `false` | HTTPS 环境设为 `true` |
 | `AVATAR_DIRECTORY` | `data/avatars` | 头像目录 |
+| `SMTP_HOST` | 空 | 邮箱 SMTP 服务器，例如 QQ 邮箱 `smtp.qq.com` |
+| `SMTP_PORT` | `465` | SMTP 端口 |
+| `SMTP_USERNAME` | 空 | SMTP 登录账号（邮箱地址） |
+| `SMTP_PASSWORD` | 空 | SMTP 授权码（不是邮箱登录密码） |
+| `SMTP_SSL_ENABLE` | `true` | 是否启用 SSL |
 | `EVAL_IMPORT_DIRECTORY` | `data/eval-imports` | 评测导入文件目录 |
 | `OCR_COMMAND` | `tesseract` | OCR 命令路径 |
 | `OCR_LANGUAGES` | `chi_sim+eng` | OCR 语言 |
@@ -104,6 +109,18 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 | `WORKBENCH_EVAL_GATE_ENABLED` | `false` | 是否启用评测质量门禁 |
 
 完整默认项见 `src/main/resources/application.properties`。
+
+邮箱验证码使用 SMTP 发送，未配置 `SMTP_HOST` 时会回退为「开发模式」：验证码只打印到后端日志，不真正发邮件。使用 QQ 邮箱时的配置示例：
+
+```bash
+export SMTP_HOST='smtp.qq.com'
+export SMTP_PORT='465'
+export SMTP_USERNAME='你的QQ邮箱@qq.com'
+export SMTP_PASSWORD='QQ邮箱SMTP授权码'
+export SMTP_SSL_ENABLE='true'
+```
+
+QQ 邮箱授权码获取方式：登录 QQ 邮箱 → 设置 → 账户 → 开启「POP3/SMTP 服务」，按提示生成授权码（不是 QQ 登录密码）。项目根目录的 `.env.example` 也包含一份完整的 SMTP 示例。
 
 ## 启动项目
 

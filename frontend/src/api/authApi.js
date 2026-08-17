@@ -36,6 +36,10 @@ export function login(credentials) {
   return authenticate('/api/auth/login', credentials)
 }
 
+export function sendCode(email) {
+  return authenticate('/api/auth/send-code', { email })
+}
+
 export async function fetchCurrentUser() {
   const response = await fetch('/api/auth/me', { credentials: 'include', headers: authHeaders() })
   if (!response.ok) {

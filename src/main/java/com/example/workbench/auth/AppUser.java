@@ -21,9 +21,17 @@ public class AppUser {
     @Comment("用户主键")
     private Long id;
 
-    @Column(name = "account", nullable = false, unique = true, length = 64)
+    @Column(name = "account", nullable = false, unique = true, length = 128)
     @Comment("登录账号")
     private String account;
+
+    @Column(name = "email", length = 128)
+    @Comment("邮箱")
+    private String email;
+
+    @Column(name = "phone", length = 32)
+    @Comment("手机号")
+    private String phone;
 
     @Column(name = "user_name", nullable = false, length = 64)
     @Comment("用户显示名称")
@@ -70,12 +78,25 @@ public class AppUser {
         this.createdAt = Instant.now();
     }
 
+    public AppUser(String account, String email, String userName, String passwordHash) {
+        this(account, userName, passwordHash);
+        this.email = email;
+    }
+
     public Long getId() {
         return id;
     }
 
     public String getAccount() {
         return account;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public String getPhone() {
+        return phone;
     }
 
     public String getUserName() {
@@ -113,6 +134,14 @@ public class AppUser {
 
     public void changeUserName(String userName) {
         this.userName = userName;
+    }
+
+    public void changeEmail(String email) {
+        this.email = email;
+    }
+
+    public void changePhone(String phone) {
+        this.phone = phone;
     }
 
     public void changeAvatar(String avatarFileName, String avatarContentType) {

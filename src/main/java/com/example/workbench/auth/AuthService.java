@@ -4,6 +4,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -16,43 +17,56 @@ public class AuthService {
 
     private static final SecureRandom TOKEN_RANDOM = new SecureRandom();
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 
     private final AppUserRepository userRepository;
     private final UserSessionRepository sessionRepository;
+    private final EmailVerificationService emailVerificationService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final Duration sessionDuration;
 
     public AuthService(
             AppUserRepository userRepository,
             UserSessionRepository sessionRepository,
+            EmailVerificationService emailVerificationService,
             @Value("${app.auth.session-hours:168}") long sessionHours
     ) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
+        this.emailVerificationService = emailVerificationService;
         this.sessionDuration = Duration.ofHours(Math.max(1, sessionHours));
     }
 
     @Transactional
-    public AuthResponse register(RegisterRequest request) {
-        String account = normalizeAccount(request.account());
-        if ("admin".equals(account)) {
+    public RegisterResultResponse register(RegisterRequest request) {
+        String email = normalizeEmail(request.email());
+        if ("admin".equals(email)) {
             throw new IllegalArgumentException("admin 为系统保留账号，不能通过注册接口创建");
         }
-        if (userRepository.findByAccount(account).isPresent()) {
+        if (userRepository.findByAccount(email).isPresent()) {
             log.warn("User registration rejected reason=account_already_registered");
-            throw new IllegalArgumentException("account is already registered");
+            throw new IllegalArgumentException("该邮箱已注册");
         }
+        emailVerificationService.verify(email, request.code());
 
-        AppUser user = new AppUser(account, account, passwordEncoder.encode(request.password()));
+        String userName = emailPrefix(email);
+        AppUser user = new AppUser(email, email, userName, passwordEncoder.encode(request.password()));
         initializeProfile(user);
-        user = userRepository.save(user);
+        userRepository.save(user);
         log.info("User registered userId={}", user.getId());
-        return createSession(user);
+        return new RegisterResultResponse("注册成功，请登录");
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
         String account = normalizeAccount(request.account());
+        if (!"admin".equals(account) && !isEmailFormat(account)) {
+            AppUser existing = userRepository.findByAccount(account).orElse(null);
+            if (existing == null || !existing.getSystemRole().canAdministerSystem()) {
+                log.warn("User login rejected reason=account_not_email");
+                throw new InvalidCredentialsException("账号必须是邮箱地址");
+            }
+        }
         AppUser user = userRepository.findByAccount(account)
                 .filter(candidate -> passwordEncoder.matches(request.password(), candidate.getPasswordHash()))
                 .orElseThrow(() -> {
@@ -108,12 +122,26 @@ public class AuthService {
         sessionRepository.save(new UserSession(user, token, Instant.now().plus(sessionDuration)));
         log.info("User session created userId={} expiresInHours={}", user.getId(), sessionDuration.toHours());
         initializeProfile(user);
-        return new AuthResponse(token, user.getAccount(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
+        return new AuthResponse(token, user.getAccount(), user.getEmail(), user.getPhone(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
                 user.getCreatedAt(), user.getSystemRole());
     }
 
     private String normalizeAccount(String account) {
         return account.trim().toLowerCase();
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase();
+    }
+
+    private String emailPrefix(String email) {
+        int at = email.indexOf('@');
+        String prefix = at > 0 ? email.substring(0, at) : email;
+        return prefix.length() > 64 ? prefix.substring(0, 64) : prefix;
+    }
+
+    private boolean isEmailFormat(String account) {
+        return account != null && EMAIL_PATTERN.matcher(account).matches();
     }
 
     private String newToken() {
