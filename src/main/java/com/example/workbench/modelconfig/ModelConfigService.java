@@ -44,13 +44,14 @@ public class ModelConfigService {
         this.defaultFallbackModels = defaultFallbackModels;
     }
 
+    /** 解析用户对话模型的完整配置 */
     public ModelSpec resolve(Long userId) {
         if (userId == null) {
-            return defaultSpec();
+            return defaultChatSpec();
         }
         UserModelConfig config = userModelConfigRepository.findByUserId(userId).orElse(null);
         if (config == null || config.getMode() == UserModelMode.FOLLOW_DEFAULT) {
-            return defaultSpec();
+            return defaultChatSpec();
         }
         if (config.getMode() == UserModelMode.USE_POOL_MODEL) {
             AiModel model = config.getModelId() == null ? null
@@ -59,18 +60,30 @@ public class ModelConfigService {
                 return toSpec(model);
             }
             log.warn("User selected model unavailable or disabled userId={} modelId={}", userId, config.getModelId());
-            return defaultSpec();
+            return defaultChatSpec();
         }
         return toSpec(config);
     }
 
-    private ModelSpec defaultSpec() {
-        AiModel adminDefault = aiModelRepository.findFirstByIsDefaultTrueAndEnabledTrue().orElse(null);
+    /** 返回模型池中启用的默认对话模型，无则回退配置默认值 */
+    public ModelSpec defaultChatSpec() {
+        AiModel adminDefault = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.CHAT)
+                .orElse(null);
         if (adminDefault != null) {
             return toSpec(adminDefault);
         }
-        return new ModelSpec("默认模型", defaultBaseUrl, defaultApiKey, defaultModel,
+        return new ModelSpec("默认对话模型", defaultBaseUrl, defaultApiKey, defaultModel,
                 defaultTemperature, null, defaultMaxOutputTokens, defaultRequestTimeoutMs, defaultFallbackModels);
+    }
+
+    /** 返回模型池中启用的默认嵌入模型，无则回退 application.properties 的嵌入配置 */
+    public ModelSpec defaultEmbeddingSpec() {
+        AiModel adminDefault = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.EMBEDDING)
+                .orElse(null);
+        if (adminDefault != null) {
+            return toSpec(adminDefault);
+        }
+        return null;
     }
 
     private ModelSpec toSpec(AiModel model) {

@@ -8,6 +8,7 @@ public record AiModelRequest(
         @NotBlank(message = "API 地址不能为空") @Size(max = 256) String baseUrl,
         @NotBlank(message = "API Key 不能为空") @Size(max = 256) String apiKey,
         @NotBlank(message = "模型标识不能为空") @Size(max = 128) String model,
+        AiModelType modelType,
         Double temperature,
         Double topP,
         Integer maxOutputTokens,

@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
+import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
@@ -22,6 +23,20 @@ const taskStatusOpen = ref(false)
 const trackedTaskId = ref('')
 let taskPollTimer = null
 let disposed = false
+
+const poolModels = ref([])
+const poolLoading = ref(false)
+const poolSaving = ref(false)
+const poolError = ref('')
+const poolSuccess = ref('')
+const showPoolForm = ref(false)
+const editingPoolModel = ref(null)
+const testingModelId = ref(null)
+const poolForm = reactive({
+  name: '', baseUrl: '', apiKey: '', model: '', modelType: 'CHAT',
+  temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: '',
+  enabled: true, isDefault: false
+})
 
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
@@ -68,13 +83,13 @@ const taskStageLabels = {
 const confirmation = computed(() => pendingAction.value === 'rebuild'
   ? {
       title: '重建当前空间索引？',
-      message: `将清理“${workspaceName.value}”现有文档索引和向量，再从空间源文件重新生成。其他空间不会受到影响。`,
+      message: `将清理"${workspaceName.value}"现有文档索引和向量，再从空间源文件重新生成。其他空间不会受到影响。`,
       confirmText: '开始重建',
       danger: true
     }
   : {
       title: '同步当前空间？',
-      message: `将扫描“${workspaceName.value}”的受管源文件，更新变化内容并清理已丢失文件的旧索引。`,
+      message: `将扫描"${workspaceName.value}"的受管源文件，更新变化内容并清理已丢失文件的旧索引。`,
       confirmText: '开始同步',
       danger: false
     })
@@ -82,6 +97,7 @@ const confirmation = computed(() => pendingAction.value === 'rebuild'
 onMounted(() => {
   loadSummary()
   loadDocumentTasks()
+  loadPool()
 })
 
 onBeforeUnmount(() => {
@@ -117,10 +133,7 @@ function scheduleTaskPoll() {
 function formatTime(value) {
   if (!value) return '-'
   return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
   }).format(new Date(value))
 }
 
@@ -173,6 +186,108 @@ async function confirmMaintenance() {
   if (action === 'sync') await run('sync', () => syncDocuments(props.workspace?.id), '空间同步任务已提交')
   if (action === 'rebuild') await run('rebuild', () => rebuildDocuments(props.workspace?.id), '索引重建任务已提交')
 }
+
+async function loadPool() {
+  poolLoading.value = true
+  poolError.value = ''
+  try { poolModels.value = await fetchModelPool() || [] }
+  catch (e) { poolError.value = formatApiError(e) }
+  finally { poolLoading.value = false }
+}
+
+function openAddPoolModel() {
+  editingPoolModel.value = null
+  resetPoolForm()
+  showPoolForm.value = true
+}
+
+function openEditPoolModel(model) {
+  editingPoolModel.value = model
+  Object.assign(poolForm, {
+    name: model.name || '', baseUrl: model.baseUrl || '', apiKey: model.apiKey || '',
+    model: model.model || '', modelType: model.modelType || 'CHAT',
+    temperature: model.temperature != null ? String(model.temperature) : '',
+    topP: model.topP != null ? String(model.topP) : '',
+    maxOutputTokens: model.maxOutputTokens != null ? String(model.maxOutputTokens) : '',
+    requestTimeoutMs: model.requestTimeoutMs != null ? String(model.requestTimeoutMs) : '',
+    fallbackModels: model.fallbackModels || '',
+    enabled: model.enabled, isDefault: model.isDefault || false
+  })
+  showPoolForm.value = true
+}
+
+function resetPoolForm() {
+  Object.assign(poolForm, { name: '', baseUrl: '', apiKey: '', model: '', modelType: 'CHAT', temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: '', enabled: true, isDefault: false })
+}
+
+async function submitPoolForm() {
+  poolSaving.value = true
+  poolError.value = ''
+  try {
+    const data = {
+      name: poolForm.name, baseUrl: poolForm.baseUrl, apiKey: poolForm.apiKey, model: poolForm.model,
+      modelType: poolForm.modelType,
+      temperature: poolForm.temperature ? Number(poolForm.temperature) : null,
+      topP: poolForm.topP ? Number(poolForm.topP) : null,
+      maxOutputTokens: poolForm.maxOutputTokens ? Number(poolForm.maxOutputTokens) : null,
+      requestTimeoutMs: poolForm.requestTimeoutMs ? Number(poolForm.requestTimeoutMs) : null,
+      fallbackModels: poolForm.fallbackModels || null,
+      enabled: poolForm.enabled, isDefault: poolForm.isDefault
+    }
+    if (editingPoolModel.value) await updatePoolModel(editingPoolModel.value.id, data)
+    else await createPoolModel(data)
+    showPoolForm.value = false
+    await loadPool()
+    poolSuccess.value = editingPoolModel.value ? '模型已更新。' : '模型已添加。'
+  } catch (e) {
+    poolError.value = formatApiError(e)
+  } finally {
+    poolSaving.value = false
+  }
+}
+
+async function handleDeletePoolModel(model) {
+  if (!confirm(`确定要删除「${model.name}」吗？`)) return
+  poolSaving.value = true
+  poolError.value = ''
+  try {
+    await deletePoolModel(model.id)
+    await loadPool()
+    poolSuccess.value = '模型已删除。'
+  } catch (e) {
+    poolError.value = formatApiError(e)
+  } finally {
+    poolSaving.value = false
+  }
+}
+
+async function handleSetDefault(model) {
+  poolSaving.value = true
+  poolError.value = ''
+  try {
+    await setDefaultPoolModel(model.id)
+    await loadPool()
+    poolSuccess.value = `已将「${model.name}」设为默认${model.modelType === 'EMBEDDING' ? '嵌入' : '对话'}模型。`
+  } catch (e) {
+    poolError.value = formatApiError(e)
+  } finally {
+    poolSaving.value = false
+  }
+}
+
+async function handleTestModel(model) {
+  testingModelId.value = model.id
+  poolError.value = ''
+  poolSuccess.value = ''
+  try {
+    await testPoolModel(model.id)
+    poolSuccess.value = `「${model.name}」连接测试通过。`
+  } catch (e) {
+    poolError.value = formatApiError(e)
+  } finally {
+    testingModelId.value = null
+  }
+}
 </script>
 
 <template>
@@ -198,6 +313,10 @@ async function confirmMaintenance() {
       <button type="button" :aria-pressed="activeTool === 'retrieval'" :class="{ active: activeTool === 'retrieval' }" @click="activeTool = 'retrieval'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M7.5 10.5h6M10.5 7.5v6"/></svg>
         检索诊断
+      </button>
+      <button type="button" :aria-pressed="activeTool === 'model-pool'" :class="{ active: activeTool === 'model-pool' }" @click="activeTool = 'model-pool'">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v2"/><path d="M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M12 12.5v4M9 12.5h6"/></svg>
+        模型管理
       </button>
     </nav>
 
@@ -310,14 +429,87 @@ async function confirmMaintenance() {
         </header>
         <div class="maintenance-future-grid">
            <article><span class="maintenance-future-icon green" aria-hidden="true">◒</span><div><strong>任务监控</strong><small>查看所有后台任务的执行记录</small></div><em>即将推出</em></article>
-           <article><span class="maintenance-future-icon neutral" aria-hidden="true">◈</span><div><strong>模型配置</strong><small>统一管理模型与检索策略</small></div><em>即将推出</em></article>
-           <article><span class="maintenance-future-icon sand" aria-hidden="true">◇</span><div><strong>数据备份</strong><small>保护索引配置与知识库数据</small></div><em>即将推出</em></article>
+           <article><span class="maintenance-future-icon neutral" aria-hidden="true">◈</span><div><strong>数据备份</strong><small>保护索引配置与知识库数据</small></div><em>即将推出</em></article>
+           <article><span class="maintenance-future-icon sand" aria-hidden="true">◇</span><div><strong>日志中心</strong><small>集中查看和检索系统运行时日志</small></div><em>即将推出</em></article>
         </div>
       </section>
     </div>
 
-    <RetrievalDebug v-else embedded />
+    <div v-if="activeTool === 'model-pool'" class="maintenance-model-pool">
+      <section class="maintenance-section">
+        <header class="maintenance-section-heading">
+          <div>
+            <p class="maintenance-section-kicker">MODEL MANAGEMENT</p>
+            <h2>全局模型池</h2>
+            <span>管理可用的 AI 模型，设置默认模型，控制模型启用状态。</span>
+          </div>
+        </header>
+
+        <p v-if="poolLoading" class="maintenance-message">加载中...</p>
+        <p v-if="poolError" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ poolError }}</p>
+        <p v-if="poolSuccess" class="maintenance-message" role="status"><strong>{{ poolSuccess }}</strong></p>
+
+        <div class="maintenance-index-toolbar">
+          <button class="maintenance-add-btn" @click="openAddPoolModel">+ 添加模型</button>
+        </div>
+
+        <div v-if="poolModels.length === 0 && !poolLoading" class="maintenance-message">模型池为空，请添加第一个模型。</div>
+
+        <div v-for="model in poolModels" :key="model.id" class="maintenance-model-row">
+          <div class="maintenance-model-info">
+            <strong>{{ model.name }}</strong>
+            <span class="maintenance-model-identifier">{{ model.model }}</span>
+            <span :class="['maintenance-model-tag', model.modelType === 'EMBEDDING' ? 'embedding' : 'chat']">{{ model.modelType === 'EMBEDDING' ? '嵌入' : '对话' }}</span>
+            <span v-if="model.isDefault" class="maintenance-model-tag default">{{ model.modelType === 'EMBEDDING' ? '默认嵌入' : '默认对话' }}</span>
+            <span v-if="!model.enabled" class="maintenance-model-tag disabled">已停用</span>
+          </div>
+          <div class="maintenance-model-actions">
+            <button class="maintenance-model-btn" @click="openEditPoolModel(model)">编辑</button>
+            <button v-if="!model.isDefault && model.enabled" class="maintenance-model-btn primary" @click="handleSetDefault(model)">设默认</button>
+            <button class="maintenance-model-btn" :disabled="testingModelId === model.id" @click="handleTestModel(model)">{{ testingModelId === model.id ? '测试中...' : '测试' }}</button>
+            <button class="maintenance-model-btn danger" @click="handleDeletePoolModel(model)">删除</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <RetrievalDebug v-else-if="activeTool === 'retrieval'" embedded />
 
     <ConfirmDialog v-if="pendingAction" v-bind="confirmation" :busy="Boolean(busyAction)" @confirm="confirmMaintenance" @cancel="pendingAction = ''" />
+
+    <div v-if="showPoolForm" class="model-config-backdrop" @click.self="showPoolForm = false">
+      <div class="model-config-dialog">
+        <header class="model-config-dialog-header">
+          <h2>{{ editingPoolModel ? '编辑模型' : '添加模型' }}</h2>
+          <button class="model-config-close-btn" aria-label="关闭" @click="showPoolForm = false">&times;</button>
+        </header>
+        <div class="pool-edit-body">
+          <div v-if="poolError" class="model-config-message error">{{ poolError }}</div>
+          <div class="model-config-form-grid">
+            <label>类型 *<select v-model="poolForm.modelType">
+              <option value="CHAT">对话模型</option>
+              <option value="EMBEDDING">嵌入模型</option>
+            </select></label>
+            <label>名称 *<input v-model="poolForm.name" placeholder="例如：DeepSeek V4" maxlength="64" required></label>
+            <label>模型标识 *<input v-model="poolForm.model" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128" required></label>
+            <label class="span-2">API 地址 *<input v-model="poolForm.baseUrl" placeholder="https://api.example.com" maxlength="256" required></label>
+            <label class="span-2">API Key *<input v-model="poolForm.apiKey" type="password" placeholder="sk-..." maxlength="256" required></label>
+            <label>温度<input v-model="poolForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
+            <label>Top P<input v-model="poolForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
+            <label>最大输出 Token<input v-model="poolForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
+            <label>请求超时(ms)<input v-model="poolForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
+            <label class="span-2">备用模型 (逗号分隔)<input v-model="poolForm.fallbackModels" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
+            <label class="span-2 checkbox"><input v-model="poolForm.enabled" type="checkbox"> 启用模型</label>
+            <label class="span-2 checkbox"><input v-model="poolForm.isDefault" type="checkbox"> 设为该类型的默认模型</label>
+          </div>
+        </div>
+        <div class="pool-edit-footer">
+          <button class="model-config-footer-btn secondary" :disabled="poolSaving" @click="showPoolForm = false">取消</button>
+          <button class="model-config-footer-btn primary" :disabled="poolSaving" :aria-busy="poolSaving" @click="submitPoolForm">
+            {{ poolSaving ? '保存中...' : (editingPoolModel ? '更新' : '添加') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>

@@ -2,6 +2,8 @@ package com.example.workbench.modelconfig;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -18,6 +20,11 @@ public class AiModel {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Comment("模型主键")
     private Long id;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "model_type", nullable = false, length = 16)
+    @Comment("模型类型：CHAT / EMBEDDING")
+    private AiModelType modelType = AiModelType.CHAT;
 
     @Column(name = "name", nullable = false, length = 64)
     @Comment("模型显示名称")
@@ -82,6 +89,7 @@ public class AiModel {
     }
 
     public Long getId() { return id; }
+    public AiModelType getModelType() { return modelType; }
     public String getName() { return name; }
     public String getBaseUrl() { return baseUrl; }
     public String getApiKey() { return apiKey; }
@@ -96,12 +104,14 @@ public class AiModel {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
-    public void update(String name, String baseUrl, String apiKey, String model, Double temperature,
-                       Double topP, Integer maxOutputTokens, Long requestTimeoutMs, String fallbackModels) {
+    public void update(String name, String baseUrl, String apiKey, String model, AiModelType modelType,
+                       Double temperature, Double topP, Integer maxOutputTokens, Long requestTimeoutMs,
+                       String fallbackModels) {
         this.name = name;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.model = model;
+        this.modelType = modelType;
         this.temperature = temperature;
         this.topP = topP;
         this.maxOutputTokens = maxOutputTokens;

@@ -4,6 +4,7 @@ import { changePassword, clearLegacyAccessToken, fetchAvatarUrl, fetchCurrentUse
 import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
 import HomePage from './components/HomePage.vue'
+import ModelConfig from './components/ModelConfig.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
@@ -26,6 +27,7 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const passwordError = ref('')
 const passwordSuccess = ref('')
+const modelConfigOpen = ref(false)
 const changingPassword = ref(false)
 const avatarSrc = ref('')
 const logoutConfirmOpen = ref(false)
@@ -319,7 +321,7 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.2 2.2-3-3 2.2-2.2Z"/></svg>
             <span>系统维护</span>
           </button>
-        </nav>
+          </nav>
         <div class="portal-user-tools">
           <label class="portal-workspace-select" title="当前知识空间">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 10 6 2.7 6-2.7M6 14l6 2.7 6-2.7"/></svg>
@@ -338,6 +340,7 @@ async function submitPasswordChange() {
             <strong class="portal-user-name">{{ currentUser.userName }}</strong>
              <div v-if="accountMenuOpen" id="portal-account-dropdown" class="portal-account-dropdown">
               <div class="portal-account-profile"><img v-if="avatarSrc" :src="avatarSrc" width="34" height="34" loading="lazy" alt=""><span v-else>{{ currentUser.userName.slice(0, 1) }}</span><strong>{{ currentUser.userName }}</strong></div>
+              <button type="button" @click="modelConfigOpen = true; accountMenuOpen = false">模型配置</button>
               <button type="button" @click="openProfile">个人资料</button>
               <button type="button" @click="passwordFormOpen = !passwordFormOpen">修改密码</button>
            <form v-if="passwordFormOpen" class="portal-password-form" aria-live="polite" @submit.prevent="submitPasswordChange">
@@ -363,6 +366,7 @@ async function submitPasswordChange() {
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
+      <ModelConfig v-if="modelConfigOpen" @close="modelConfigOpen = false" />
     </div>
   </template>
 </template>

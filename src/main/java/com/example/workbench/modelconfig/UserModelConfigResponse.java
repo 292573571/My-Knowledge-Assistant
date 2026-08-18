@@ -8,6 +8,7 @@ public record UserModelConfigResponse(
         ModelSpec custom,
         ModelSpec resolved,
         List<AiModelResponse> poolModels,
-        Long defaultModelId
+        Long defaultModelId,
+        Long defaultEmbeddingId
 ) {
 }

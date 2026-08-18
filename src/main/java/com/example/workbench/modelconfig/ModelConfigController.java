@@ -57,6 +57,12 @@ public class ModelConfigController {
         return aiModelService.setDefault(user(request), id);
     }
 
+    @PostMapping("/pool/{id}/test")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void test(@PathVariable Long id, HttpServletRequest request) {
+        aiModelService.testConnect(user(request), id);
+    }
+
     @GetMapping("/me")
     public UserModelConfigResponse get(HttpServletRequest request) {
         return userModelConfigService.get(user(request));

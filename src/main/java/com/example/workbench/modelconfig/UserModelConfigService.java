@@ -29,7 +29,9 @@ public class UserModelConfigService {
                 .filter(AiModel::isEnabled)
                 .map(AiModelResponse::from)
                 .toList();
-        Long defaultModelId = aiModelRepository.findFirstByIsDefaultTrueAndEnabledTrue()
+        Long defaultModelId = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.CHAT)
+                .map(AiModel::getId).orElse(null);
+        Long defaultEmbeddingId = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.EMBEDDING)
                 .map(AiModel::getId).orElse(null);
         ModelSpec resolved = modelConfigService.resolve(user.getId());
         return new UserModelConfigResponse(
@@ -38,7 +40,8 @@ public class UserModelConfigService {
                 config == null || config.getMode() != UserModelMode.CUSTOM ? null : toSpec(config),
                 resolved,
                 pool,
-                defaultModelId
+                defaultModelId,
+                defaultEmbeddingId
         );
     }
 
