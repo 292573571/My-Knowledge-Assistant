@@ -3,6 +3,7 @@ import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 
 import { changePassword, clearLegacyAccessToken, fetchAvatarUrl, fetchCurrentUser, logout } from './api/authApi'
 import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
+import HomePage from './components/HomePage.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
@@ -17,7 +18,7 @@ const currentUser = ref(null)
 const checkingSession = ref(true)
 const restoringWorkspace = ref(false)
 const appReady = ref(false)
-const activeSection = ref('assistant')
+const activeSection = ref('home')
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
 const currentPassword = ref('')
@@ -39,13 +40,13 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
   const section = params.get('section') || window.location.hash.slice(1)
   return {
-    section: navigableSections.has(section) ? section : 'assistant',
+    section: navigableSections.has(section) ? section : 'home',
     workspaceId: params.get('workspace') || ''
   }
 }
@@ -151,7 +152,7 @@ async function handleLogout() {
     workspaces.value = []
     activeWorkspaceId.value = ''
     setActiveWorkspaceId('')
-    activeSection.value = 'assistant'
+    activeSection.value = 'home'
     syncUrlState({ replace: true })
     accountMenuOpen.value = false
     passwordFormOpen.value = false
@@ -166,7 +167,7 @@ async function restoreWorkspace(user) {
   appReady.value = false
   restoringWorkspace.value = true
   try {
-    activeSection.value = 'assistant'
+    activeSection.value = 'home'
     accountMenuOpen.value = false
     passwordFormOpen.value = false
     workspaceManagerOpen.value = false
@@ -287,13 +288,17 @@ async function submitPasswordChange() {
   <template v-else>
     <div class="learning-portal" :class="{ 'content-page': activeSection !== 'assistant' }" @keydown.esc="mobileNavOpen = false">
       <header class="portal-header">
-        <button type="button" class="portal-brand" @click="navigateTo('assistant')">
+        <button type="button" class="portal-brand" @click="navigateTo('home')">
            <img class="portal-mark" src="/brand/ChatGPT%20Image%202026%E5%B9%B48%E6%9C%8817%E6%97%A5%2016_29_03.png" width="40" height="40" alt="识海" />
           <span>识海 <small>LEARNING STUDIO</small></span>
         </button>
          <button type="button" class="portal-mobile-menu-button" :aria-expanded="mobileNavOpen" aria-controls="portal-navigation" :aria-label="mobileNavOpen ? '关闭主导航' : '打开主导航'" @click="mobileNavOpen = !mobileNavOpen"><span></span><span></span><span></span></button>
         <nav id="portal-navigation" class="portal-nav" :class="{ 'mobile-open': mobileNavOpen }" aria-label="主导航">
           <button type="button" class="portal-nav-close" aria-label="关闭主导航" @click="mobileNavOpen = false">×</button>
+          <button :class="{ active: activeSection === 'home' }" type="button" @click="navigateTo('home')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5-1.5 1.3-.5-.5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7.7l-.5.5zM9.5 21v-6h5v6"/></svg>
+            <span>首页</span>
+          </button>
           <button :class="{ active: activeSection === 'assistant' }" type="button" @click="navigateTo('assistant')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a7 7 0 0 0-7 7v2.5a3.5 3.5 0 0 0 3.5 3.5H10v2H8.5a1.5 1.5 0 0 0 0 3H12a3 3 0 0 0 3-3v-2h.5a3.5 3.5 0 0 0 3.5-3.5V10a7 7 0 0 0-7-7Z"/><path d="M9 10h.01M15 10h.01M9.5 13.5c1.4 1 3.6 1 5 0"/></svg>
             <span>AI 学习助手</span>
@@ -349,7 +354,8 @@ async function submitPasswordChange() {
         </div>
       </header>
       <div v-if="mobileNavOpen" class="portal-nav-backdrop" role="presentation" @click="mobileNavOpen = false"></div>
-       <LearningAssistantPage v-if="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" />
+       <HomePage v-if="activeSection === 'home'" :user="currentUser" @navigate="navigateTo" />
+       <LearningAssistantPage v-else-if="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" />
        <LearningRecords v-else-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
       <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />

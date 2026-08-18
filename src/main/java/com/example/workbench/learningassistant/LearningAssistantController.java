@@ -81,9 +81,14 @@ public class LearningAssistantController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@PathVariable String sessionId,
                              @Valid @RequestBody LearningAssistantMessageRequest request,
-                             HttpServletRequest httpRequest) {
+                             HttpServletRequest httpRequest,
+                             jakarta.servlet.http.HttpServletResponse httpResponse) {
         AppUser user = user(httpRequest);
         String workspaceId = request.workspaceId();
+        // 显式禁止代理、网关或压缩层缓冲 SSE，确保每个 token 抵达后立即交给浏览器。
+        httpResponse.setHeader("Cache-Control", "no-cache, no-transform");
+        httpResponse.setHeader("X-Accel-Buffering", "no");
+        httpResponse.setCharacterEncoding("UTF-8");
         service.validateSession(user, sessionId, workspaceId);
         String scope = conversationService.executionScope(user, workspaceId, sessionId);
         Object requestIdAttribute = httpRequest.getAttribute(HttpRequestLoggingFilter.REQUEST_ID_ATTRIBUTE);

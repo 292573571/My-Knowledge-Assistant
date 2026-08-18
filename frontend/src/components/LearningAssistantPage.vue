@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, reactive, ref, watch } from 'vue'
 import ChatInput from './ChatInput.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationSidebar from './ConversationSidebar.vue'
@@ -33,11 +33,6 @@ const deletingSessionId = ref('')
 const error = ref('')
 const messagesEl = ref(null)
 
-const starterPrompts = [
-  '总结当前知识库的主要内容',
-  '请教我 Spring AI 如何实现 RAG',
-  '帮我梳理文档导入和重建流程'
-]
 const modeLabels = { AUTO: '自动判断', CHAT: '直接回答', GUIDED: '主题教学', REVIEW: '复习模式', PRACTICE: '实践模式' }
 const activeSession = computed(() => sessions.value.find(item => item.sessionId === activeSessionId.value))
 const isLearningMode = computed(() => ['GUIDED', 'REVIEW', 'PRACTICE'].includes(mode.value))
@@ -215,7 +210,7 @@ async function send(content) {
   const requestId = ++activeRequestId
   error.value = ''
   messages.value.push({ id: createUuid(), role: 'user', content: text, createdAt: new Date().toISOString(), streaming: false })
-  const assistant = { id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, createdAt: new Date().toISOString() }
+  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, createdAt: new Date().toISOString() })
   messages.value.push(assistant)
   try {
     const response = await streamMessage(activeSessionId.value, {
@@ -420,22 +415,6 @@ function closeSourceOnPointerMove(event) {
             <span></span><span></span><span></span>
           </div>
           <div v-else-if="!messages.length" class="learning-empty-state">
-            <div class="learning-hero-copy">
-              <span class="learning-hero-index">01 / 从这里开始</span>
-              <div class="learning-orbit" aria-hidden="true">✦</div>
-              <h2>把知识变成<br><em>真正会用的能力。</em></h2>
-              <p>在当前知识空间里提问、拆解和练习。普通问题直接回答，想真正掌握时进入带检查的主题教学。</p>
-              <div class="starter-prompts" data-reveal><button v-for="prompt in starterPrompts" :key="prompt" type="button" @click="send(prompt)">{{ prompt }}</button></div>
-            </div>
-            <div class="learning-hero-visual" data-reveal aria-label="学习助手空间化预览">
-              <div class="hero-visual-glow"></div>
-              <div class="hero-browser-window">
-                <div class="hero-browser-bar"><i></i><i></i><i></i><span>知识 / 工作室</span></div>
-                <div class="hero-browser-body"><div class="hero-browser-sidebar"><b></b><b></b><b></b><b></b></div><div class="hero-browser-content"><span class="hero-line short"></span><span class="hero-line"></span><div class="hero-card-row"><span></span><span></span></div><div class="hero-signal"><strong>RAG</strong><small>依据地图</small><em></em></div></div></div>
-              </div>
-              <div class="hero-float-card hero-float-card-top"><span>学习路径</span><strong>RAG → Agent → Tools</strong></div>
-              <div class="hero-float-card hero-float-card-bottom"><span class="hero-status-dot"></span><strong>准备好探索</strong></div>
-            </div>
             <div class="learning-bento-grid learning-featured-scroll" data-reveal aria-label="精选学习路径">
               <article class="learning-bento-card featured"><span>精选</span><strong>从问题到掌握</strong><p>让每一次回答都留下可继续的学习线索。</p></article>
               <article class="learning-bento-card"><span>问答</span><strong>快速问答</strong><p>先解决眼前的问题。</p></article>
