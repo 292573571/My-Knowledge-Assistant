@@ -167,7 +167,7 @@ onMounted(load)
   <main class="records-dashboard">
        <section class="records-hero" data-reveal>
       <div>
-        <p class="records-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21V5.5ZM20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5A2.5 2.5 0 0 1 20 21V5.5Z"/></svg> 学习记录</p>
+        <p class="records-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21V5.5ZM20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5A2.5 2.5 0 0 1 20 21V5.5Z"/></svg> 学习记录 · {{ workspace?.name || '当前空间' }}</p>
         <h1>你的学习沉淀</h1>
         <p>每次有效问答都会自动沉淀为每日记录，方便你回顾已经理解的问题与知识。</p>
       </div>

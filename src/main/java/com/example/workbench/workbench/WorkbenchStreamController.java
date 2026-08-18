@@ -7,6 +7,7 @@ import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.learning.LearningRecordService;
+import com.example.workbench.modelconfig.ModelConfigContext;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
@@ -46,6 +47,7 @@ public class WorkbenchStreamController {
     private final LearningRecordService learningRecordService;
     private final RagQualityAuditService ragQualityAuditService;
     private final WorkspaceService workspaceService;
+    private final ModelConfigContext modelConfigContext;
 
     public WorkbenchStreamController(
             RagService ragService,
@@ -55,7 +57,8 @@ public class WorkbenchStreamController {
             ConversationMemory conversationMemory,
             LearningRecordService learningRecordService,
             RagQualityAuditService ragQualityAuditService,
-            WorkspaceService workspaceService
+            WorkspaceService workspaceService,
+            ModelConfigContext modelConfigContext
     ) {
         this.ragService = ragService;
         this.workbenchChatService = workbenchChatService;
@@ -65,6 +68,7 @@ public class WorkbenchStreamController {
         this.learningRecordService = learningRecordService;
         this.ragQualityAuditService = ragQualityAuditService;
         this.workspaceService = workspaceService;
+        this.modelConfigContext = modelConfigContext;
     }
 
     @PostMapping
@@ -96,6 +100,7 @@ public class WorkbenchStreamController {
 
         CompletableFuture.runAsync(() -> {
             long startedAt = System.currentTimeMillis();
+            modelConfigContext.set(user.getId());
 
             try {
                 String normalizedMode = "rag";
@@ -186,6 +191,7 @@ public class WorkbenchStreamController {
                     conversationMemory.remove(scopedConversationId);
                 }
                 executionRegistry.finish(scopedConversationId, execution);
+                modelConfigContext.clear();
             }
         });
 

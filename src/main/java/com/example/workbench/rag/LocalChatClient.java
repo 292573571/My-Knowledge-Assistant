@@ -2,6 +2,10 @@ package com.example.workbench.rag;
 
 import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.memory.ChatMessage;
+import com.example.workbench.modelconfig.ModelClientFactory;
+import com.example.workbench.modelconfig.ModelConfigContext;
+import com.example.workbench.modelconfig.ModelConfigService;
+import com.example.workbench.modelconfig.ModelSpec;
 import com.example.workbench.tools.WebSearchResult;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
@@ -51,6 +55,9 @@ public class LocalChatClient {
     private final double temperature;
     private final int maxOutputTokens;
     private RagMetrics metrics;
+    private ModelConfigContext modelConfigContext;
+    private ModelConfigService modelConfigService;
+    private ModelClientFactory modelClientFactory;
 
     /**
      * 注入可选的模型调用指标记录器，单元测试直接构造客户端时可以不提供。
@@ -62,18 +69,27 @@ public class LocalChatClient {
         this.metrics = metrics;
     }
 
+    /** 注入用户级模型解析依赖；测试直接构造时不提供，回退到全局默认模型。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setModelConfigDependencies(ModelConfigContext context, ModelConfigService service,
+                                           ModelClientFactory factory) {
+        this.modelConfigContext = context;
+        this.modelConfigService = service;
+        this.modelClientFactory = factory;
+    }
+
     public LocalChatClient(
             ObjectProvider<ChatClient> chatClientProvider,
             @Value("${spring.ai.openai.chat.base-url:${spring.ai.openai.base-url:unknown}}") String chatBaseUrl,
-            @Value("${spring.ai.openai.chat.options.model:${app.ai.model:unknown}}") String chatModel,
-            @Value("${app.ai.fallback-models:}") String fallbackModels,
-            @Value("${app.ai.retry.max-attempts:2}") int maxAttempts,
+            @Value("${spring.ai.openai.chat.options.model:deepseek-ai/DeepSeek-V4-Flash}") String chatModel,
+            @Value("${app.ai.fallback-models:Qwen/Qwen2.5-7B-Instruct}") String fallbackModels,
+            @Value("${app.ai.retry.max-attempts:1}") int maxAttempts,
             @Value("${app.ai.retry.backoff-ms:500}") long retryBackoffMs,
             @Value("${app.ai.request-timeout-ms:20000}") long requestTimeoutMs,
             @Value("${app.ai.fallback-request-timeout-ms:45000}") long fallbackRequestTimeoutMs,
             @Value("${app.ai.fallback-strategy:local-answer}") String fallbackStrategy,
-            @Value("${app.ai.temperature:0.3}") double temperature,
-            @Value("${app.ai.max-output-tokens:1200}") int maxOutputTokens
+            @Value("${app.ai.temperature:0.0}") double temperature,
+            @Value("${app.ai.max-output-tokens:1800}") int maxOutputTokens
     ) {
         this.chatClient = chatClientProvider.getIfAvailable();
         this.chatBaseUrl = chatBaseUrl;
@@ -171,22 +187,60 @@ public class LocalChatClient {
      * @return 模型文本流
      */
     public Flux<String> stream(String prompt, List<ChatMessage> history, Map<String, String> options) {
-        if (chatClient == null) {
+        ResolvedModel resolved = resolveModel();
+        if (resolved.client() == null) {
             return Flux.error(new IllegalStateException("ChatClient is not available"));
         }
 
         String conversationId = options.getOrDefault("conversationId", "default");
         AtomicBoolean receivedToken = new AtomicBoolean(false);
-        Flux<String> primary = ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId, chatModel, requestTimeout))
+        Flux<String> primary = ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                        resolved.client(), resolved.models().get(0), resolved.requestTimeout(),
+                        resolved.temperature(), resolved.maxOutputTokens()))
                 .map(this::sanitizeModelText)
                 .filter(token -> !token.isEmpty())
                 .doOnNext(token -> receivedToken.set(true))
-                .onErrorResume(error -> !receivedToken.get() && !fallbackModels.isEmpty()
-                        ? ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId, fallbackModels.get(0), fallbackRequestTimeout))
+                .onErrorResume(error -> !receivedToken.get() && resolved.models().size() > 1
+                        ? ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                                resolved.client(), resolved.models().get(1), resolved.fallbackRequestTimeout(),
+                                resolved.temperature(), resolved.maxOutputTokens()))
                                 .map(this::sanitizeModelText)
                                 .filter(token -> !token.isEmpty())
                         : Flux.error(error));
         return primary;
+    }
+
+    /** 解析当前请求实际使用的模型，未启用动态配置时回退到全局默认。 */
+    private ResolvedModel resolveModel() {
+        if (modelConfigContext == null || modelConfigService == null || modelClientFactory == null) {
+            return new ResolvedModel(chatClient, modelsToTry(), temperature, maxOutputTokens,
+                    requestTimeout, fallbackRequestTimeout);
+        }
+        ModelSpec spec = modelConfigService.resolve(modelConfigContext.get());
+        ChatClient client = modelClientFactory.clientFor(spec);
+        List<String> models = new ArrayList<>();
+        models.add(spec.model());
+        if (spec.fallbackModels() != null && !spec.fallbackModels().isBlank()) {
+            Arrays.stream(spec.fallbackModels().split(","))
+                    .map(String::trim)
+                    .filter(model -> !model.isBlank() && !models.contains(model))
+                    .forEach(models::add);
+        }
+        double resolvedTemperature = spec.temperature() == null ? temperature : Math.max(0.0, Math.min(1.0, spec.temperature()));
+        int resolvedMaxTokens = spec.maxOutputTokens() == null ? maxOutputTokens : Math.max(256, spec.maxOutputTokens());
+        Duration resolvedTimeout = spec.requestTimeoutMs() == null || spec.requestTimeoutMs() <= 0
+                ? requestTimeout : Duration.ofMillis(spec.requestTimeoutMs());
+        return new ResolvedModel(client, models, resolvedTemperature, resolvedMaxTokens, resolvedTimeout, fallbackRequestTimeout);
+    }
+
+    private record ResolvedModel(
+            ChatClient client,
+            List<String> models,
+            double temperature,
+            int maxOutputTokens,
+            Duration requestTimeout,
+            Duration fallbackRequestTimeout
+    ) {
     }
 
     String sanitizeModelText(String text) {
@@ -199,16 +253,17 @@ public class LocalChatClient {
     }
 
     private Flux<String> streamModel(
-            String prompt, List<ChatMessage> history, String conversationId, String model, Duration timeout) {
+            String prompt, List<ChatMessage> history, String conversationId, ChatClient client,
+            String model, Duration timeout, double resolvedTemperature, int resolvedMaxTokens) {
         log.info("AI model stream started provider=openai-compatible model={} conversationId={} requestTimeoutMs={} promptLength={}",
                 model, conversationId, timeout.toMillis(), prompt == null ? 0 : prompt.length());
         AtomicInteger answerLength = new AtomicInteger();
         java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(false);
         long startedAt = System.nanoTime();
-        return chatClient.prompt()
+        return client.prompt()
                 .messages(toSpringAiMessages(history))
                 .user(prompt)
-                .options(chatOptions(model))
+                .options(chatOptions(model, resolvedTemperature, resolvedMaxTokens))
                 .advisors(advisorSpec -> advisorSpec.param("conversationId", conversationId))
                 .stream()
                 .content()
@@ -230,22 +285,22 @@ public class LocalChatClient {
     }
 
     private String callSpringAi(String prompt, List<ChatMessage> history, Map<String, String> options) {
-        if (chatClient == null) {
-            log.warn("AI model skipped reason=chatClient_not_available model={} baseUrl={}", chatModel, chatBaseUrl);
+        ResolvedModel resolved = resolveModel();
+        if (resolved.client() == null) {
+            log.warn("AI model skipped reason=chatClient_not_available model={}", resolved.models().isEmpty() ? "unknown" : resolved.models().get(0));
             return null;
         }
 
         String conversationId = options.getOrDefault("conversationId", "default");
-        List<String> models = modelsToTry();
+        List<String> models = resolved.models();
         log.info(
-                "AI model call policy provider=openai-compatible primaryModel={} fallbackModels={} baseUrl={} conversationId={} temperature={} primaryTimeoutMs={} fallbackTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={} promptLength={}",
-                chatModel,
-                fallbackModels,
-                chatBaseUrl,
+                "AI model call policy provider=openai-compatible primaryModel={} fallbackModels={} conversationId={} temperature={} primaryTimeoutMs={} fallbackTimeoutMs={} retryMaxAttempts={} retryBackoffMs={} fallbackStrategy={} promptLength={}",
+                models.isEmpty() ? "unknown" : models.get(0),
+                models.size() > 1 ? models.subList(1, models.size()) : List.of(),
                 conversationId,
-                temperature,
-                requestTimeout.toMillis(),
-                fallbackRequestTimeout.toMillis(),
+                resolved.temperature(),
+                resolved.requestTimeout().toMillis(),
+                resolved.fallbackRequestTimeout().toMillis(),
                 maxAttempts,
                 retryBackoff.toMillis(),
                 fallbackStrategy,
@@ -254,15 +309,14 @@ public class LocalChatClient {
 
         for (int modelIndex = 0; modelIndex < models.size(); modelIndex++) {
             String model = models.get(modelIndex);
-            Duration timeout = modelIndex == 0 ? requestTimeout : fallbackRequestTimeout;
+            Duration timeout = modelIndex == 0 ? resolved.requestTimeout() : resolved.fallbackRequestTimeout();
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 long startedAt = System.currentTimeMillis();
                 log.info(
-                        "AI model call started provider=openai-compatible model={} modelRole={} baseUrl={} conversationId={} attempt={} maxAttempts={} requestTimeoutMs={} promptLength={}",
+                        "AI model call started provider=openai-compatible model={} modelRole={} conversationId={} attempt={} maxAttempts={} requestTimeoutMs={} promptLength={}",
                         model,
                         modelIndex == 0 ? "primary" : "fallback",
-                        chatBaseUrl,
                         conversationId,
                         attempt,
                         maxAttempts,
@@ -271,7 +325,8 @@ public class LocalChatClient {
                 );
 
                 try {
-                    ChatResponse response = callChatResponse(prompt, history, conversationId, model, timeout);
+                    ChatResponse response = callChatResponse(prompt, history, conversationId, resolved.client(),
+                            model, timeout, resolved.temperature(), resolved.maxOutputTokens());
                     String content = content(response);
                     logModelResponse(response, model, conversationId, attempt, startedAt, content);
                     recordModelCall(response, model, modelIndex == 0 ? "primary" : "fallback", "success", startedAt);
@@ -292,8 +347,8 @@ public class LocalChatClient {
         log.warn(
                 "AI model fallback selected strategy={} provider=openai-compatible primaryModel={} fallbackModels={} conversationId={} result=local_answer",
                 fallbackStrategy,
-                chatModel,
-                fallbackModels,
+                models.isEmpty() ? "unknown" : models.get(0),
+                models.size() > 1 ? models.subList(1, models.size()) : List.of(),
                 conversationId
         );
         if (metrics != null) {
@@ -314,11 +369,12 @@ public class LocalChatClient {
     }
 
     private ChatResponse callChatResponse(
-            String prompt, List<ChatMessage> history, String conversationId, String model, Duration timeout) {
-        CompletableFuture<ChatResponse> future = CompletableFuture.supplyAsync(() -> chatClient.prompt()
+            String prompt, List<ChatMessage> history, String conversationId, ChatClient client,
+            String model, Duration timeout, double resolvedTemperature, int resolvedMaxTokens) {
+        CompletableFuture<ChatResponse> future = CompletableFuture.supplyAsync(() -> client.prompt()
                 .messages(toSpringAiMessages(history))
                 .user(prompt)
-                .options(chatOptions(model))
+                .options(chatOptions(model, resolvedTemperature, resolvedMaxTokens))
                 .advisors(advisorSpec -> advisorSpec.param(
                         "conversationId",
                         conversationId
@@ -343,11 +399,11 @@ public class LocalChatClient {
         }
     }
 
-    private OpenAiChatOptions chatOptions(String model) {
+    private OpenAiChatOptions chatOptions(String model, double resolvedTemperature, int resolvedMaxTokens) {
         return OpenAiChatOptions.builder()
                 .model(model)
-                .temperature(temperature)
-                .maxTokens(maxOutputTokens)
+                .temperature(resolvedTemperature)
+                .maxTokens(resolvedMaxTokens)
                 .build();
     }
 

@@ -70,14 +70,7 @@ export OPENAI_API_KEY='聊天模型 API Key'
 export OPENAI_EMBEDDING_API_KEY='Embedding API Key'
 ```
 
-默认模型和服务配置在 `src/main/resources/application.properties`：
-
-```properties
-spring.ai.openai.chat.options.model=deepseek-ai/DeepSeek-V4-Flash
-spring.ai.openai.embedding.options.model=BAAI/bge-m3
-spring.ai.openai.chat.base-url=https://api.siliconflow.cn
-spring.ai.openai.embedding.base-url=https://api.siliconflow.cn
-```
+默认模型和服务配置在 `src/main/resources/application.properties`。管理员可通过 `/api/model-config/pool` 管理全局模型池并设置默认模型；用户可在前端「模型配置」页面或 `/api/model-config/me` 选择自己的模型模式（跟随默认 / 使用池模型 / 自定义），运行时按用户配置动态解析 ChatClient。
 
 当前默认 Chroma 地址是配置文件中的远程地址。连接本地 Chroma 时覆盖：
 
@@ -331,6 +324,43 @@ curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
 
 流式接口返回 `text/event-stream`。前端会处理文本片段、来源和工具调用事件。当前 RAG 默认启用混合检索和答案依据校验；知识库没有足够依据时可以使用模型兜底，但默认不连接真实 Web 搜索。
 
+## 模型配置
+
+每个用户可以独立选择大模型，支持三种模式：
+
+- **跟随默认（FOLLOW_DEFAULT）**：使用管理员设置的全局默认模型。
+- **使用池模型（USE_POOL_MODEL）**：从管理员维护的模型池中选择一个已启用的模型。
+- **自定义（CUSTOM）**：填写自己的 API 地址、密钥和模型标识。
+
+管理员通过 `/api/model-config/pool` 维护全局模型池：
+
+```bash
+# 查看模型池
+curl -b cookies.txt http://localhost:8080/api/model-config/pool
+
+# 添加模型
+curl -b cookies.txt -X POST http://localhost:8080/api/model-config/pool \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"DeepSeek V4","baseUrl":"https://api.siliconflow.cn","apiKey":"sk-xxx","model":"deepseek-ai/DeepSeek-V4-Flash"}'
+
+# 设为默认
+curl -b cookies.txt -X PUT http://localhost:8080/api/model-config/pool/1/default
+```
+
+用户通过 `/api/model-config/me` 配置自己的模型模式：
+
+```bash
+# 查看当前配置
+curl -b cookies.txt http://localhost:8080/api/model-config/me
+
+# 设为自定义模型
+curl -b cookies.txt -X PUT http://localhost:8080/api/model-config/me \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"CUSTOM","name":"我的模型","baseUrl":"https://api.openai.com","apiKey":"sk-xxx","model":"gpt-4o"}'
+```
+
+后端通过 ThreadLocal（`ModelConfigContext`）在请求链路中携带用户 ID，`TeachingAgentService` 和 RAG 问答均能按用户配置动态创建对应的 ChatClient。管理员修改池模型后，对应的 ChatClient 缓存会自动刷新。
+
 ## 会话和学习记录
 
 Teaching Agent 的当前教学检查和实践状态保存在 PostgreSQL 的 `teaching_attempts` 表中，状态默认保留 30 分钟。服务重启或多实例切换后，仍可以使用原来的 `sessionId`、`checkId` 和 `practiceId` 继续当前教学流程；访问教学接口时会即时清理过期状态。后台清理任务的启用状态、下一次执行时间、执行间隔、租约、最近执行结果都保存在 PostgreSQL 的 `scheduled_jobs` 表中，应用内的 `@Scheduled` 只负责高频唤醒和抢占数据库任务，不决定业务执行周期。同一个检查或实践在提交时使用数据库行锁，多实例同时提交相同答案只会完成一次评分和学习记录写入；提交不同答案仍返回冲突。
@@ -389,6 +419,7 @@ POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 | 文档 | `/api/documents/*` | 上传、导入、同步、重建、删除 |
 | 文档任务 | `/api/document-tasks/*` | 查询、批次、重试、源文件 |
 | 会话 | `/api/conversations/*` | 会话列表、消息、停止、删除 |
+| 模型配置 | `/api/model-config/*` | 全局模型池管理（管理员）和用户模型模式配置 |
 | 问答 | `/api/rag/chat`、`/api/workbench/chat*` | 普通和 SSE 流式问答 |
 | 评测 | `/api/eval/*` | 题库、运行、结果和导入文件 |
 | 记录 | `/api/learning-records/*` | 学习记录和正式笔记 |
@@ -495,7 +526,11 @@ eval/                                 评测数据、模板和确定性评测脚
 
 ### 模型调用失败
 
-确认 PostgreSQL、Chroma、聊天模型 API Key、Embedding API Key 和 OpenAI-compatible base URL 均正确。应用会在可配置范围内重试或使用本地保守回答，但这不代表外部模型配置已经正常。
+先检查用户级模型配置：前端「设置 → 模型配置」或 `/api/model-config/me` 确认当前模式（跟随默认 / 池模型 / 自定义）。自定义模式下需确保 API Key、base URL 和模型标识正确且模型可用。
+
+全局默认模型通过 `/api/model-config/pool` 查看；管理员可在此检查默认模型的启用状态和 API 配置。
+
+最后确认 PostgreSQL、Chroma 和 `application.properties` 中的兜底模型参数正常。应用会在可配置范围内重试或使用本地保守回答，但这不代表外部模型配置已经正常。
 
 ### OCR 失败
 

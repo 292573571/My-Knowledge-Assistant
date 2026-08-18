@@ -2,6 +2,9 @@ package com.example.workbench.agent;
 
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.workspace.WorkspaceAccessContext;
+import com.example.workbench.modelconfig.ModelClientFactory;
+import com.example.workbench.modelconfig.ModelConfigContext;
+import com.example.workbench.modelconfig.ModelConfigService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,11 +69,16 @@ public class TeachingAgentService {
     private final LearningRecordService learningRecordService;
     private final TeachingAgentOutputParser outputParser;
     private final WorkspaceService workspaceService;
+    private final ModelConfigContext modelConfigContext;
+    private final ModelConfigService modelConfigService;
+    private final ModelClientFactory modelClientFactory;
     private final TeachingQualityGate qualityGate = new TeachingQualityGate();
 
     public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
                                  TeachingCheckService checkService, LearningRecordService learningRecordService,
-                                 ObjectMapper objectMapper, WorkspaceService workspaceService) {
+                                 ObjectMapper objectMapper, WorkspaceService workspaceService,
+                                 ModelConfigContext modelConfigContext, ModelConfigService modelConfigService,
+                                 ModelClientFactory modelClientFactory) {
         this.chatClient = chatClient;
         this.readOnlyService = readOnlyService;
         this.checkService = checkService;
@@ -78,6 +86,16 @@ public class TeachingAgentService {
         this.outputParser = new TeachingAgentOutputParser(objectMapper);
         this.objectMapper = objectMapper;
         this.workspaceService = workspaceService;
+        this.modelConfigContext = modelConfigContext;
+        this.modelConfigService = modelConfigService;
+        this.modelClientFactory = modelClientFactory;
+    }
+
+    private ChatClient resolveClient() {
+        if (modelConfigContext == null || modelConfigService == null || modelClientFactory == null) {
+            return chatClient;
+        }
+        return modelClientFactory.clientFor(modelConfigService.resolve(modelConfigContext.get()));
     }
 
     public TeachingAgentResult chat(AppUser user, WorkspaceAccessContext access, TeachingAgentRequest request) {
@@ -105,7 +123,7 @@ public class TeachingAgentService {
         String failureMessage = null;
         try {
             requireRunning(cancelled);
-            rawAnswer = chatClient.prompt()
+            rawAnswer = resolveClient().prompt()
                     .system(SYSTEM_PROMPT)
                     .user(userPrompt)
                     .tools(tools)
@@ -172,7 +190,7 @@ public class TeachingAgentService {
         String failureMessage = null;
         try {
             requireRunning(cancelled);
-            chatClient.prompt()
+            resolveClient().prompt()
                     .system(EXPLAIN_SYSTEM_PROMPT)
                     .user(userPrompt)
                     .tools(tools)
@@ -233,7 +251,8 @@ public class TeachingAgentService {
                     用户问题：%s
                     讲解摘要：%s
                     """.formatted(question, truncate(explanation, 900));
-            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> chatClient.prompt()
+            ChatClient client = resolveClient();
+            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> client.prompt()
                     .system(CHECK_SYSTEM_PROMPT)
                     .user(prompt)
                     .call()

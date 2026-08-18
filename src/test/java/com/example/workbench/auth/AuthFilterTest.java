@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
+import com.example.workbench.modelconfig.ModelConfigContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.Cookie;
@@ -21,7 +22,7 @@ class AuthFilterTest {
         AuthService authService = mock(AuthService.class);
         AppUser user = new AppUser("alice", "Alice", "hash");
         when(authService.authenticate("cookie-token")).thenReturn(user);
-        AuthFilter filter = new AuthFilter(authService, new ObjectMapper());
+        AuthFilter filter = new AuthFilter(authService, new ObjectMapper(), mock(ModelConfigContext.class));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/auth/me");
         request.setCookies(new Cookie(AuthFilter.SESSION_COOKIE, "cookie-token"));
         FilterChain chain = mock(FilterChain.class);
@@ -36,7 +37,7 @@ class AuthFilterTest {
     void rejectsLegacyQueryToken() throws Exception {
         AuthService authService = mock(AuthService.class);
         when(authService.authenticate(null)).thenThrow(new InvalidCredentialsException("authentication is required"));
-        AuthFilter filter = new AuthFilter(authService, new ObjectMapper());
+        AuthFilter filter = new AuthFilter(authService, new ObjectMapper(), mock(ModelConfigContext.class));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/workbench/chat/stream");
         request.setParameter("access_token", "legacy-token");
         MockHttpServletResponse response = new MockHttpServletResponse();

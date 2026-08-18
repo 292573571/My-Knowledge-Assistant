@@ -5,6 +5,7 @@ import com.example.workbench.auth.AuthFilter;
 import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.config.HttpRequestLoggingFilter;
+import com.example.workbench.modelconfig.ModelConfigContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -34,13 +35,16 @@ public class LearningAssistantController {
     private final LearningAssistantService service;
     private final ConversationExecutionRegistry executionRegistry;
     private final ConversationService conversationService;
+    private final ModelConfigContext modelConfigContext;
 
     public LearningAssistantController(LearningAssistantService service,
                                        ConversationExecutionRegistry executionRegistry,
-                                       ConversationService conversationService) {
+                                       ConversationService conversationService,
+                                       ModelConfigContext modelConfigContext) {
         this.service = service;
         this.executionRegistry = executionRegistry;
         this.conversationService = conversationService;
+        this.modelConfigContext = modelConfigContext;
     }
 
     @PostMapping
@@ -99,6 +103,7 @@ public class LearningAssistantController {
         emitter.onError(error -> executionRegistry.cancel(scope));
         emitter.onCompletion(() -> executionRegistry.cancel(scope));
         CompletableFuture.runAsync(() -> {
+            modelConfigContext.set(user.getId());
             try {
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
                         token -> {
@@ -138,6 +143,7 @@ public class LearningAssistantController {
                 emitter.completeWithError(exception);
             } finally {
                 executionRegistry.finish(scope, execution);
+                modelConfigContext.clear();
             }
         });
         return emitter;
