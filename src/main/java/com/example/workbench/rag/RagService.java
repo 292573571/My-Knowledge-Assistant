@@ -1125,7 +1125,7 @@ public class RagService {
                 .toList())));
         // 在线流式链路：候选片段少时跳过同步 LLM 相关度筛选（规则把关已足够），
         // 候选多时启用语义把关；非流式链路（评测/调试）始终启用，精确性优先。
-        boolean shouldLlmGate = alwaysGate || thresholdSources.size() > LLM_GATE_MIN_CANDIDATES;
+        boolean shouldLlmGate = alwaysGate;
         List<SourceDocument> relevantSources = shouldLlmGate
                 ? time("quality_validation", () -> qualityGate.relevantSources(question, thresholdSources))
                 : thresholdSources;

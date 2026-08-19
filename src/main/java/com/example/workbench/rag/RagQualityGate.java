@@ -50,9 +50,8 @@ public class RagQualityGate {
         String verdict = chatClient.generate(prompt.toString());
         List<Integer> keptIndexes = parseKeptIndexes(verdict, candidates.size());
         if (keptIndexes == null) {
-            // 无法确认候选相关时宁可转入通用模型，也不能把可能无关的片段作为本地知识依据。
-            log.warn("RAG source relevance verdict unavailable action=reject_all candidateCount={}", candidates.size());
-            return List.of();
+            log.warn("RAG source relevance verdict unavailable action=pass_through candidateCount={}", candidates.size());
+            return candidates;
         }
 
         List<SourceDocument> kept = new ArrayList<>();
