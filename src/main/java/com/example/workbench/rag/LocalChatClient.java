@@ -219,7 +219,7 @@ public class LocalChatClient {
         }
         Long userId = modelConfigContext.get();
         ModelSpec spec = modelConfigService.resolve(userId);
-        log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKey={}***{}",
+        log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKey={}***",
                 userId, spec.name(), spec.model(), spec.baseUrl(),
                 spec.apiKey() != null && spec.apiKey().length() > 4 ? spec.apiKey().substring(0, 4) : "null");
         ChatClient client = modelClientFactory.clientFor(spec);
@@ -464,7 +464,7 @@ public class LocalChatClient {
         boolean retryable = isRetryable(errorType, statusCode);
 
         log.warn(
-                "AI model call failed provider=openai-compatible model={} conversationId={} attempt={} maxAttempts={} durationMs={} errorType={} httpStatus={} exceptionClass={} rootCauseClass={} retryable={} willRetry={} willSwitchModel={} fallbackStrategy={}",
+                "AI model call failed provider=openai-compatible model={} conversationId={} attempt={} maxAttempts={} durationMs={} errorType={} httpStatus={} exceptionClass={} rootCauseClass={} retryable={} willRetry={} willSwitchModel={} fallbackStrategy={} rootCauseMessage={}",
                 model,
                 conversationId,
                 attempt,
@@ -477,7 +477,8 @@ public class LocalChatClient {
                 retryable,
                 retryable && attempt < maxAttempts,
                 willSwitchModel && attempt == maxAttempts,
-                fallbackStrategy
+                fallbackStrategy,
+                rootCause == null ? "null" : (rootCause.getMessage() != null ? rootCause.getMessage().substring(0, Math.min(200, rootCause.getMessage().length())) : "null")
         );
         return retryable;
     }
