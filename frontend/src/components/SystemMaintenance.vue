@@ -7,6 +7,11 @@ import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, re
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
 import MaintenanceAgentPanel from './MaintenanceAgentPanel.vue'
+import ToastContainer from './ToastContainer.vue'
+
+const toast = ref(null)
+function notifyError(msg) { toast.value?.error(msg) }
+function notifySuccess(msg) { toast.value?.success(msg) }
 
 const props = defineProps({
   workspace: { type: Object, default: null }
@@ -60,7 +65,7 @@ async function loadLogs() {
     logTotal.value = result.total || 0
     logTotalPages.value = result.totalPages || 0
   } catch (e) {
-    logError.value = e.message || '加载日志失败'
+    notifyError(e.message || '加载日志失败')
   } finally {
     logLoading.value = false
   }
@@ -94,7 +99,7 @@ async function clearAllLogs() {
     logTotalPages.value = 0
     logPage.value = 0
   } catch (e) {
-    logError.value = e.message || '清除日志失败'
+    notifyError(e.message || '清除日志失败')
   }
 }
 
@@ -170,7 +175,7 @@ async function loadSummary() {
   try {
     documents.value = await fetchDocuments(props.workspace?.id)
   } catch (exception) {
-    error.value = `空间概览加载失败：${formatApiError(exception)}`
+    notifyError(`空间概览加载失败：${formatApiError(exception)}`)
   }
 }
 
@@ -180,7 +185,7 @@ async function loadDocumentTasks() {
     documentTasks.value = await fetchDocumentTasks(props.workspace?.id)
     if (latestMaintenanceTask.value?.status === 'SUCCEEDED' && previousStatus !== 'SUCCEEDED') await loadSummary()
   } catch (exception) {
-    if (!documentTasks.value.length) error.value = `任务状态加载失败：${formatApiError(exception)}`
+    if (!documentTasks.value.length) notifyError(`任务状态加载失败：${formatApiError(exception)}`)
   } finally {
     if (!disposed) scheduleTaskPoll()
   }
@@ -212,7 +217,7 @@ async function run(actionKey, action, successTitle) {
     await loadDocumentTasks()
     await loadSummary()
   } catch (exception) {
-    error.value = formatApiError(exception)
+    notifyError(formatApiError(exception))
     result.value = exception.requestId ? { title: '操作未完成', requestId: exception.requestId, failed: true } : null
   } finally {
     busyAction.value = ''
@@ -252,7 +257,7 @@ async function loadPool() {
   poolLoading.value = true
   poolError.value = ''
   try { poolModels.value = await fetchModelPool() || [] }
-  catch (e) { poolError.value = formatApiError(e) }
+  catch (e) { notifyError(formatApiError(e, '加载模型列表失败')) }
   finally { poolLoading.value = false }
 }
 
@@ -299,9 +304,9 @@ async function submitPoolForm() {
     else await createPoolModel(data)
     showPoolForm.value = false
     await loadPool()
-    poolSuccess.value = editingPoolModel.value ? '模型已更新。' : '模型已添加。'
+    notifySuccess(editingPoolModel.value ? '模型已更新。' : '模型已添加。')
   } catch (e) {
-    poolError.value = formatApiError(e)
+    notifyError(formatApiError(e, '保存模型失败'))
   } finally {
     poolSaving.value = false
   }
@@ -314,9 +319,9 @@ async function handleDeletePoolModel(model) {
   try {
     await deletePoolModel(model.id)
     await loadPool()
-    poolSuccess.value = '模型已删除。'
+    notifySuccess('模型已删除。')
   } catch (e) {
-    poolError.value = formatApiError(e)
+    notifyError(formatApiError(e, '删除模型失败'))
   } finally {
     poolSaving.value = false
   }
@@ -328,9 +333,9 @@ async function handleSetDefault(model) {
   try {
     await setDefaultPoolModel(model.id)
     await loadPool()
-    poolSuccess.value = `已将「${model.name}」设为默认${model.modelType === 'EMBEDDING' ? '嵌入' : '对话'}模型。`
+    notifySuccess(`已将「${model.name}」设为默认${model.modelType === 'EMBEDDING' ? '嵌入' : '对话'}模型。`)
   } catch (e) {
-    poolError.value = formatApiError(e)
+    notifyError(formatApiError(e, '设置默认模型失败'))
   } finally {
     poolSaving.value = false
   }
@@ -342,9 +347,9 @@ async function handleTestModel(model) {
   poolSuccess.value = ''
   try {
     await testPoolModel(model.id)
-    poolSuccess.value = `「${model.name}」连接测试通过。`
+    notifySuccess(`「${model.name}」连接测试通过。`)
   } catch (e) {
-    poolError.value = formatApiError(e)
+    notifyError(formatApiError(e, '连接测试失败'))
   } finally {
     testingModelId.value = null
   }
@@ -511,8 +516,6 @@ async function handleTestModel(model) {
         </header>
 
         <p v-if="poolLoading" class="maintenance-message">加载中...</p>
-        <p v-if="poolError" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ poolError }}</p>
-        <p v-if="poolSuccess" class="maintenance-message" role="status"><strong>{{ poolSuccess }}</strong></p>
 
         <div class="maintenance-index-toolbar">
           <button class="maintenance-add-btn" @click="openAddPoolModel">+ 添加模型</button>
@@ -571,7 +574,7 @@ async function handleTestModel(model) {
         <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="clearAllLogs">清除全部</button>
         <span class="log-count">{{ logTotal }} 条</span>
       </div>
-      <div v-if="logError" class="model-config-message error">{{ logError }}</div>
+
       <div class="log-viewer-body">
         <div v-if="logLoading && !logEntries.length" class="retrieval-eval-empty">正在加载日志...</div>
         <div v-else-if="!logEntries.length" class="retrieval-eval-empty">暂无日志。</div>
@@ -602,7 +605,6 @@ async function handleTestModel(model) {
           <button class="model-config-close-btn" aria-label="关闭" @click="showPoolForm = false">&times;</button>
         </header>
         <div class="pool-edit-body">
-          <div v-if="poolError" class="model-config-message error">{{ poolError }}</div>
           <div class="model-config-form-grid">
             <label><span>类型</span><select v-model="poolForm.modelType">
               <option value="CHAT">对话模型</option>
@@ -629,5 +631,7 @@ async function handleTestModel(model) {
         </div>
       </div>
     </div>
+
+    <ToastContainer ref="toast" />
   </main>
 </template>

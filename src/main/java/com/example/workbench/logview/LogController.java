@@ -93,7 +93,7 @@ public class LogController {
                 log.info("Cleaned up old system logs olderThan={} deleted={}", cutoff, deleted);
             }
         } catch (Exception e) {
-            log.warn("Log cleanup failed: {}", e.getMessage());
+            log.warn("Log cleanup failed", e);
         }
     }
 

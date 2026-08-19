@@ -50,17 +50,7 @@ export function apiErrorFromException(error, fallbackMessage = '请求失败，�
 
 export function formatApiError(error, fallbackMessage) {
   const apiError = apiErrorFromException(error, fallbackMessage)
-  const parts = [apiError.message]
-
-  if (apiError.status) {
-    parts.push(`HTTP ${apiError.status}`)
-  }
-
-  if (apiError.requestId) {
-    parts.push(`requestId: ${apiError.requestId}`)
-  }
-
-  return parts.join(' · ')
+  return apiError.message
 }
 
 function messageForStatus(status) {

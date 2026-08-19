@@ -105,6 +105,7 @@ public class LearningAssistantController {
         CompletableFuture.runAsync(() -> {
             modelConfigContext.set(user.getId());
             try {
+                send(emitter, "session", Map.of("sessionId", sessionId));
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
                         token -> {
                             if (execution.isCancelled() || Thread.currentThread().isInterrupted()) return;
@@ -116,19 +117,6 @@ public class LearningAssistantController {
                         },
                         execution);
                 if (execution.isCancelled()) throw new CancellationException("学习请求已停止");
-                send(emitter, "session", Map.of("sessionId", response.sessionId()));
-                send(emitter, "message_start", Map.of("intent", response.intent().name(), "mode", response.mode().name()));
-                if (response.sources() != null) {
-                    for (Object source : response.sources()) send(emitter, "source", source);
-                }
-                if (response.stage() != null) {
-                    Map<String, Object> stage = new java.util.HashMap<>();
-                    stage.put("stage", response.stage());
-                    stage.put("nextAction", response.nextAction());
-                    send(emitter, "teaching_stage", stage);
-                }
-                if (response.check() != null) send(emitter, "check", response.check());
-                if (response.practice() != null) send(emitter, "practice", response.practice());
                 send(emitter, "done", Map.of("response", response));
                 emitter.complete();
             } catch (CancellationException exception) {

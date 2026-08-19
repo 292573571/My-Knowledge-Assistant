@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { fetchMyConfig, saveMyConfig } from '../api/modelConfigApi'
+import ToastContainer from './ToastContainer.vue'
 
 const emit = defineEmits(['close', 'saved'])
 
+const toast = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -62,7 +64,7 @@ async function loadData() {
       }
     }
   } catch (error) {
-    errorMessage.value = error.message || '加载失败。'
+    toast.value?.error(error.message || '加载失败。')
   } finally {
     loading.value = false
   }
@@ -88,11 +90,11 @@ async function handleSave() {
     }
     const result = await saveMyConfig(body)
     myConfig.value = result
-    successMessage.value = '已保存。'
+    toast.value?.success('已保存。')
     emit('saved')
     setTimeout(() => emit('close'), 800)
   } catch (error) {
-    errorMessage.value = error.message || '保存失败。'
+    toast.value?.error(error.message || '保存失败。')
   } finally {
     saving.value = false
   }
@@ -112,9 +114,6 @@ onMounted(loadData)
       <div v-if="loading" class="model-config-state">加载中...</div>
       <template v-else>
         <div class="model-config-body">
-          <div v-if="errorMessage" class="model-config-message error">{{ errorMessage }}</div>
-          <div v-if="successMessage" class="model-config-message success">{{ successMessage }}</div>
-
           <div class="model-config-current" v-if="resolvedSpec">
             <span class="model-config-current-label">当前生效</span>
             <strong>{{ resolvedDisplay }}</strong>
@@ -178,5 +177,6 @@ onMounted(loadData)
         </div>
       </template>
     </div>
+    <ToastContainer ref="toast" />
   </div>
 </template>

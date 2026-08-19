@@ -5,11 +5,11 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@vitejs/plugin-vue": "latest",
-    "dompurify": "latest",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.3.0",
-    "vite": "latest",
-    "vue": "latest"
+    "vite": "^8.2.0",
+    "vue": "^8.2.0"
   }
 }

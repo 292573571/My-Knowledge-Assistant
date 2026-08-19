@@ -17,8 +17,15 @@ public record AiModelResponse(
 ) {
     public static AiModelResponse from(AiModel entity) {
         return new AiModelResponse(entity.getId(), entity.getName(), entity.getModelType(),
-                entity.getBaseUrl(), entity.getApiKey(),
+                entity.getBaseUrl(), maskApiKey(entity.getApiKey()),
                 entity.getModel(), entity.getTemperature(), entity.getTopP(), entity.getMaxOutputTokens(),
                 entity.getRequestTimeoutMs(), entity.getFallbackModels(), entity.isDefault(), entity.isEnabled());
+    }
+
+    private static String maskApiKey(String apiKey) {
+        if (apiKey == null || apiKey.length() <= 8) {
+            return "****";
+        }
+        return apiKey.substring(0, 4) + "***" + apiKey.substring(apiKey.length() - 4);
     }
 }

@@ -43,7 +43,7 @@ public class JpaLogAppender extends AbstractAppender {
             repositoryChecked = true;
         } catch (Exception e) {
             repository = null;
-            repositoryChecked = false;
+            repositoryChecked = true;
         }
     }
 

@@ -51,6 +51,7 @@ public class LocalChatClient {
     private final Duration retryBackoff;
     private final Duration requestTimeout;
     private final Duration fallbackRequestTimeout;
+    private final Duration syncRequestTimeout;
     private final String fallbackStrategy;
     private final double temperature;
     private final int maxOutputTokens;
@@ -85,8 +86,9 @@ public class LocalChatClient {
             @Value("${app.ai.fallback-models:Qwen/Qwen2.5-7B-Instruct}") String fallbackModels,
             @Value("${app.ai.retry.max-attempts:1}") int maxAttempts,
             @Value("${app.ai.retry.backoff-ms:500}") long retryBackoffMs,
-            @Value("${app.ai.request-timeout-ms:20000}") long requestTimeoutMs,
-            @Value("${app.ai.fallback-request-timeout-ms:45000}") long fallbackRequestTimeoutMs,
+            @Value("${app.ai.request-timeout-ms:60000}") long requestTimeoutMs,
+            @Value("${app.ai.fallback-request-timeout-ms:90000}") long fallbackRequestTimeoutMs,
+            @Value("${app.ai.sync-request-timeout-ms:20000}") long syncRequestTimeoutMs,
             @Value("${app.ai.fallback-strategy:local-answer}") String fallbackStrategy,
             @Value("${app.ai.temperature:0.0}") double temperature,
             @Value("${app.ai.max-output-tokens:1800}") int maxOutputTokens
@@ -99,6 +101,7 @@ public class LocalChatClient {
         this.retryBackoff = Duration.ofMillis(Math.max(0, retryBackoffMs));
         this.requestTimeout = Duration.ofMillis(Math.max(1, requestTimeoutMs));
         this.fallbackRequestTimeout = Duration.ofMillis(Math.max(1, fallbackRequestTimeoutMs));
+        this.syncRequestTimeout = Duration.ofMillis(Math.max(1, syncRequestTimeoutMs));
         this.fallbackStrategy = fallbackStrategy == null || fallbackStrategy.isBlank() ? "local-answer" : fallbackStrategy;
         this.temperature = Math.max(0.0, Math.min(1.0, temperature));
         this.maxOutputTokens = Math.max(256, maxOutputTokens);
@@ -314,7 +317,7 @@ public class LocalChatClient {
 
         for (int modelIndex = 0; modelIndex < models.size(); modelIndex++) {
             String model = models.get(modelIndex);
-            Duration timeout = modelIndex == 0 ? resolved.requestTimeout() : resolved.fallbackRequestTimeout();
+            Duration timeout = modelIndex == 0 ? syncRequestTimeout : resolved.fallbackRequestTimeout();
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 long startedAt = System.currentTimeMillis();
@@ -585,14 +588,6 @@ public class LocalChatClient {
         }
 
         return null;
-    }
-
-    private String truncate(String value) {
-        if (value == null || value.length() <= 1_000) {
-            return value == null ? "" : value;
-        }
-
-        return value.substring(0, 1_000) + "...<truncated>";
     }
 
     private static class AiModelCallException extends RuntimeException {

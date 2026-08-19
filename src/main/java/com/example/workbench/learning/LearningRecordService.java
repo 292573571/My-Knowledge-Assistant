@@ -46,6 +46,7 @@ public class LearningRecordService {
     private static final Pattern RECORD_ENTRY = Pattern.compile(
             "(?ms)^## (?:问题|教学检查)[ \\t]*\\R+.*?(?=^## (?:问题|教学检查)[ \\t]*$|\\z)");
     private static final Pattern WORKSPACE_MARKER = Pattern.compile("(?m)^- 知识空间：(.+)$");
+    private static final Pattern WORKSPACE_MARKER_LINE = Pattern.compile("(?m)^- 知识空间：.*$\\n?", Pattern.MULTILINE);
     private static final List<String> UNRELIABLE_ANSWER_MARKERS = List.of(
             "我在当前知识库中没有找到足够信息和依据来回答这个问题",
             "当前知识库没有足够信息回答该问题",
@@ -283,7 +284,7 @@ public class LearningRecordService {
                 content = scopedContent(content, workspaceId, isPersonalWorkspace(user, workspaceId));
                 if (!hasEntry(content)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
             }
-            return new LearningRecordDetail(date, date + " 学习记录", content, Files.getLastModifiedTime(record).toInstant());
+            return new LearningRecordDetail(date, date + " 学习记录", stripWorkspaceMarkerLine(content), Files.getLastModifiedTime(record).toInstant());
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to read learning record", exception);
         }
@@ -367,7 +368,7 @@ public class LearningRecordService {
             List<LearningRecordEntry> entries = recordStore.visibleOnDate(user, workspaceId, recordDate,
                     isPersonalWorkspace(user, workspaceId));
             if (entries.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
-            String body = editedContent == null ? renderEntries(date, entries) : validateContent(editedContent);
+            String body = editedContent == null ? renderEntries(date, entries) : stripWorkspaceMarkerLine(validateContent(editedContent));
             Path note = notesDirectory.resolve(userDirectory(user))
                     .resolve(workspaceId == null ? "" : safeWorkspaceDirectory(workspaceId))
                     .resolve(date + "-learning-note.md").normalize();
@@ -399,7 +400,7 @@ public class LearningRecordService {
                 }
             }
             Files.createDirectories(note.getParent());
-            String body = withoutGeneratedTitle(date, recordContent);
+            String body = stripWorkspaceMarkerLine(withoutGeneratedTitle(date, recordContent));
             String noteContent = "# " + date + " 正式笔记\n\n" + body.strip() + "\n";
             String learningRecordContent = "# " + date + " 学习记录\n\n" + body.strip() + "\n";
             Files.writeString(note, noteContent, StandardCharsets.UTF_8);
@@ -560,7 +561,11 @@ public class LearningRecordService {
     private String renderEntries(String date, List<LearningRecordEntry> entries) {
         StringBuilder result = new StringBuilder("# ").append(date).append(" 学习记录\n");
         entries.forEach(entry -> result.append("\n").append(entry.markdown().strip()).append("\n"));
-        return result.toString();
+        return stripWorkspaceMarkerLine(result.toString());
+    }
+
+    private String stripWorkspaceMarkerLine(String content) {
+        return WORKSPACE_MARKER_LINE.matcher(content).replaceAll("").replaceAll("(?m)\\n{3,}", "\n\n");
     }
 
     private List<LearningRecordEntry> editableEntries(AppUser user, String workspaceId, LocalDate date, String content) {

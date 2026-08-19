@@ -67,6 +67,6 @@ class LocalChatClientTextSanitizationTest {
     private LocalChatClient client() {
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
         return new LocalChatClient(beanFactory.getBeanProvider(org.springframework.ai.chat.client.ChatClient.class),
-                "https://example.invalid", "test-model", "", 1, 0, 1000, 1000, "local-answer", 0, 1200);
+                "https://example.invalid", "test-model", "", 1, 0, 1000, 1000, 20000, "local-answer", 0, 1200);
     }
 }
