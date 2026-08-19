@@ -16,7 +16,7 @@ public interface ScheduledJobRepository extends JpaRepository<ScheduledJobEntity
                set lease_owner = :workerId,
                    lease_expires_at = :leaseExpiresAt,
                    last_started_at = :now,
-                   next_run_at = :now + make_interval(secs => interval_seconds)
+                   next_run_at = cast(:now as timestamptz) + make_interval(secs => interval_seconds)
              where job_key = :jobKey
                and enabled = true
                and next_run_at <= :now
