@@ -151,17 +151,17 @@ public class WorkbenchStreamController {
 
                 StringBuilder content = new StringBuilder();
                 AtomicBoolean firstTokenSent = new AtomicBoolean(false);
-                answer.tokens().doOnNext(token -> {
-                            if (!execution.isCancelled()) {
-                                content.append(token);
-                                if (firstTokenSent.compareAndSet(false, true)) {
-                                    log.info("Workbench stream first token forwarded conversationId={} latencyMs={}", scopedConversationId, System.currentTimeMillis() - startedAt);
-                                }
-                                try {
-                                    send(emitter, "token", Map.of("text", token));
-                                } catch (IOException exception) {
-                                    throw new IllegalStateException("Failed to send stream token", exception);
-                                }
+                answer.tokens()
+                        .takeWhile(token -> !execution.isCancelled() && !Thread.currentThread().isInterrupted())
+                        .doOnNext(token -> {
+                            content.append(token);
+                            if (firstTokenSent.compareAndSet(false, true)) {
+                                log.info("Workbench stream first token forwarded conversationId={} latencyMs={}", scopedConversationId, System.currentTimeMillis() - startedAt);
+                            }
+                            try {
+                                send(emitter, "token", Map.of("text", token));
+                            } catch (IOException ignored) {
+                                Thread.currentThread().interrupt();
                             }
                         })
                         .blockLast();

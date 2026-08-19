@@ -457,10 +457,14 @@ public class RagService {
                 new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources, false);
         if (sources.isEmpty() || !hasEnoughKnowledge(question, sources)) {
-            // 通用知识代码必须先完整生成并校验，避免错误标识符流到页面后无法撤回。
-            RagChatResponse response = answerWithModelFallback(
-                    conversationId, question, relevantHistory, retrievedSources, List.of());
-            return new RagStreamResponse(reactor.core.publisher.Flux.just(response.answer()), List.of());
+            String prompt = buildModelFallbackPrompt(question);
+            reactor.core.publisher.Flux<String> fallbackStream = streamWithHistory(prompt, relevantHistory, conversationId);
+            if (fallbackStream == null) {
+                fallbackStream = reactor.core.publisher.Flux.just(MODEL_FALLBACK_SAFETY_ANSWER);
+            } else {
+                fallbackStream = fallbackStream.concatWith(reactor.core.publisher.Flux.just("\n\n" + MODEL_KNOWLEDGE_DISCLAIMER));
+            }
+            return new RagStreamResponse(fallbackStream, List.of());
         }
 
         String context = time("context_build", () -> buildContext(sources));
@@ -764,13 +768,13 @@ public class RagService {
 
     private String buildModelFallbackPrompt(String question) {
         return """
-                当前知识库没有足够信息回答该问题。请基于通用知识直接回答，保持准确、简洁。
-                只输出问题的答案，不要复述这些要求，不要添加来源声明或“来源标记”等元信息。
+                请基于你的通用知识直接回答以下用户问题，保持准确、简洁。
+                只输出问题的答案，不要添加来源声明或"来源标记"等元信息。
                 对于无法确定的事实，在相关结论处直接说明无法确定，不要单独添加说明模板。
                 输出 SQL、代码或命令时，关键字、函数名、表名、字段名和其他标识符必须保持官方原始拼写，严禁把标识符的一部分翻译成中文。
                 PostgreSQL 元数据视图必须使用准确名称，例如 information_schema.tables；代码块注明正确语言。
-                必须严格遵守用户要求的查询范围；用户要求“所有”对象时，不得擅自缩小为 public schema，若需要排除系统对象应明确说明并给出对应条件。
-                回答应形成完整闭环：如果使用“包括、如下、步骤”等引导语，必须完整列出对应内容；不要在标题、冒号或列表序号后结束。
+                必须严格遵守用户要求的查询范围；用户要求"所有"对象时，不得擅自缩小为 public schema，若需要排除系统对象应明确说明并给出对应条件。
+                回答应形成完整闭环：如果使用"包括、如下、步骤"等引导语，必须完整列出对应内容；不要在标题、冒号或列表序号后结束。
                 一般问题控制在 300 到 800 个中文字符，复杂问题可以适当增加，但不要为了简短而省略关键步骤。
 
                 用户问题：

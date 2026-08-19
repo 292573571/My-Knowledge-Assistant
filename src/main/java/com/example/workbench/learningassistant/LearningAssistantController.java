@@ -107,10 +107,11 @@ public class LearningAssistantController {
             try {
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
                         token -> {
+                            if (execution.isCancelled() || Thread.currentThread().isInterrupted()) return;
                             try {
                                 send(emitter, "token", Map.of("text", token));
-                            } catch (java.io.IOException exception) {
-                                throw new IllegalStateException("Failed to send stream token", exception);
+                            } catch (java.io.IOException ignored) {
+                                Thread.currentThread().interrupt();
                             }
                         },
                         execution);
