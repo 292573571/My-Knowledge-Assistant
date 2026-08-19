@@ -15,9 +15,12 @@ public class JpaLogAppender extends AbstractAppender {
 
     private static volatile ApplicationContext applicationContext;
     private static volatile SystemLogRepository repository;
+    private static volatile boolean repositoryChecked = false;
 
     public static void setApplicationContext(ApplicationContext ctx) {
         applicationContext = ctx;
+        repositoryChecked = false;
+        repository = null;
     }
 
     private JpaLogAppender(String name, Filter filter) {
@@ -33,11 +36,14 @@ public class JpaLogAppender extends AbstractAppender {
     }
 
     private void ensureRepository() {
-        if (repository == null && applicationContext != null) {
-            try {
-                repository = applicationContext.getBean(SystemLogRepository.class);
-            } catch (Exception ignored) {
-            }
+        if (repositoryChecked) return;
+        if (applicationContext == null) return;
+        try {
+            repository = applicationContext.getBean(SystemLogRepository.class);
+            repositoryChecked = true;
+        } catch (Exception e) {
+            repository = null;
+            repositoryChecked = false;
         }
     }
 
@@ -50,6 +56,7 @@ public class JpaLogAppender extends AbstractAppender {
             if (level.equals("TRACE")) return;
             String logger = event.getLoggerName();
             if (logger != null && logger.startsWith("org.springframework.") && !level.equals("WARN") && !level.equals("ERROR")) return;
+            if (logger != null && logger.startsWith("org.apache.") && !level.equals("WARN") && !level.equals("ERROR")) return;
             String message = event.getMessage().getFormattedMessage();
             if (message != null && message.length() > 4000) {
                 message = message.substring(0, 4000);
