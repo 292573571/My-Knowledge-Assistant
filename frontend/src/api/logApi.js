@@ -15,3 +15,9 @@ export function fetchLogs({ page = 0, size = 100, level, keyword, hours = 2 } = 
   if (keyword) params.set('keyword', keyword)
   return request(`/api/logs?${params}`, {}, '加载日志失败。')
 }
+
+export async function clearLogs() {
+  const response = await fetch('/api/logs', { method: 'DELETE', headers: { ...authHeaders(), 'Accept': 'application/json' } })
+  if (!response.ok) throw new Error('清除日志失败。')
+  return response.json()
+}

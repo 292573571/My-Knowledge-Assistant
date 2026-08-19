@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
-import { fetchLogs } from '../api/logApi'
+import { fetchLogs, clearLogs } from '../api/logApi'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
@@ -83,6 +83,19 @@ function logLevelClass(level) {
   if (level === 'WARN') return 'warn'
   if (level === 'DEBUG') return 'debug'
   return ''
+}
+
+async function clearAllLogs() {
+  if (!window.confirm('确定清除所有日志？此操作不可恢复。')) return
+  try {
+    const result = await clearLogs()
+    logEntries.value = []
+    logTotal.value = 0
+    logTotalPages.value = 0
+    logPage.value = 0
+  } catch (e) {
+    logError.value = e.message || '清除日志失败'
+  }
 }
 
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
@@ -555,6 +568,7 @@ async function handleTestModel(model) {
         </label>
         <button type="button" class="retrieval-eval-secondary" :disabled="logLoading" @click="loadLogs">{{ logLoading ? '加载中...' : '刷新' }}</button>
         <button type="button" :class="['retrieval-eval-secondary', { active: logAutoRefresh }]" @click="toggleLogAutoRefresh">{{ logAutoRefresh ? '停止自动' : '自动刷新' }}</button>
+        <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="clearAllLogs">清除全部</button>
         <span class="log-count">{{ logTotal }} 条</span>
       </div>
       <div v-if="logError" class="model-config-message error">{{ logError }}</div>
@@ -564,7 +578,7 @@ async function handleTestModel(model) {
         <template v-else>
           <div class="log-line-list">
             <div v-for="entry in logEntries" :key="entry.id" :class="['log-line', logLevelClass(entry.level)]">
-              <span class="log-line-time">{{ entry.timestamp.replace('T', ' ').substring(0, 19) }}</span>
+              <span class="log-line-time">{{ entry.timestamp }}</span>
               <span class="log-line-level">{{ entry.level }}</span>
               <span class="log-line-logger">{{ entry.logger }}</span>
               <span class="log-line-text">{{ entry.message }}</span>

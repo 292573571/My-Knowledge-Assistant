@@ -5,6 +5,8 @@ import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AuthFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,6 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class LogController {
 
     private static final Logger log = LoggerFactory.getLogger(LogController.class);
+    private static final ZoneId ZONE_CN = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     private static final Map<String, List<String>> LEVEL_ABOVE = Map.of(
             "ERROR", List.of("ERROR"),
             "WARN", List.of("ERROR", "WARN"),
@@ -73,7 +78,7 @@ public class LogController {
         }
 
         List<LogEntry> entries = result.getContent().stream()
-                .map(l -> new LogEntry(l.getId(), l.getTimestamp().toString(), l.getLevel(), l.getLogger(), l.getThread(), l.getMessage()))
+                .map(l -> new LogEntry(l.getId(), FMT.format(l.getTimestamp().atZone(ZONE_CN)), l.getLevel(), l.getLogger(), l.getThread(), l.getMessage()))
                 .toList();
 
         return new LogResponse(result.getTotalElements(), page, result.getTotalPages(), entries);
@@ -81,15 +86,29 @@ public class LogController {
 
     @Scheduled(fixedRateString = "${workbench.log.cleanup-interval-ms:3600000}")
     public void cleanupOldLogs() {
-        Instant cutoff = Instant.now().minus(7, ChronoUnit.DAYS);
-        int deleted = systemLogRepository.deleteOlderThan(cutoff);
-        if (deleted > 0) {
-            log.info("Cleaned up old system logs olderThan={} deleted={}", cutoff, deleted);
+        try {
+            Instant cutoff = Instant.now().minus(7, ChronoUnit.DAYS);
+            int deleted = systemLogRepository.deleteOlderThan(cutoff);
+            if (deleted > 0) {
+                log.info("Cleaned up old system logs olderThan={} deleted={}", cutoff, deleted);
+            }
+        } catch (Exception e) {
+            log.warn("Log cleanup failed: {}", e.getMessage());
         }
     }
 
     private AppUser user(HttpServletRequest request) {
         return (AppUser) request.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+    }
+
+    @DeleteMapping
+    public Map<String, Object> clear(HttpServletRequest request) {
+        AppUser user = user(request);
+        adminAuthorizationService.requireAdmin(user);
+        long count = systemLogRepository.count();
+        systemLogRepository.deleteAll();
+        log.info("All system logs cleared count={}", count);
+        return Map.of("deleted", count);
     }
 
     public record LogEntry(long id, String timestamp, String level, String logger, String thread, String message) {}
