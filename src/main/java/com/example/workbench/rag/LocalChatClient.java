@@ -213,10 +213,15 @@ public class LocalChatClient {
     /** 解析当前请求实际使用的模型，未启用动态配置时回退到全局默认。 */
     private ResolvedModel resolveModel() {
         if (modelConfigContext == null || modelConfigService == null || modelClientFactory == null) {
+            log.info("resolveModel: using default chatClient (modelConfig dependencies not available)");
             return new ResolvedModel(chatClient, modelsToTry(), temperature, maxOutputTokens,
                     requestTimeout, fallbackRequestTimeout);
         }
-        ModelSpec spec = modelConfigService.resolve(modelConfigContext.get());
+        Long userId = modelConfigContext.get();
+        ModelSpec spec = modelConfigService.resolve(userId);
+        log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKey={}***{}",
+                userId, spec.name(), spec.model(), spec.baseUrl(),
+                spec.apiKey() != null && spec.apiKey().length() > 4 ? spec.apiKey().substring(0, 4) : "null");
         ChatClient client = modelClientFactory.clientFor(spec);
         List<String> models = new ArrayList<>();
         models.add(spec.model());

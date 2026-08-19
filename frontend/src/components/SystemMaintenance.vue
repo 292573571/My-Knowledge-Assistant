@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
+import { fetchLogs } from '../api/logApi'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
@@ -37,6 +38,52 @@ const poolForm = reactive({
   temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: '',
   enabled: true, isDefault: false
 })
+
+const logEntries = ref([])
+const logTotal = ref(0)
+const logPage = ref(0)
+const logTotalPages = ref(0)
+const logLoading = ref(false)
+const logError = ref('')
+const logLevel = ref('')
+const logKeyword = ref('')
+const logHours = ref(2)
+const logAutoRefresh = ref(false)
+let logRefreshTimer = null
+
+async function loadLogs() {
+  logLoading.value = true
+  logError.value = ''
+  try {
+    const result = await fetchLogs({ page: logPage.value, size: 100, level: logLevel.value || undefined, keyword: logKeyword.value || undefined, hours: logHours.value })
+    logEntries.value = result.entries || []
+    logTotal.value = result.total || 0
+    logTotalPages.value = result.totalPages || 0
+  } catch (e) {
+    logError.value = e.message || '加载日志失败'
+  } finally {
+    logLoading.value = false
+  }
+}
+
+function toggleLogAutoRefresh() {
+  logAutoRefresh.value = !logAutoRefresh.value
+  if (logAutoRefresh.value) {
+    logRefreshTimer = setInterval(loadLogs, 5000)
+  } else {
+    clearInterval(logRefreshTimer)
+    logRefreshTimer = null
+  }
+}
+
+watch([logLevel, logKeyword, logHours], () => { logPage.value = 0; loadLogs() })
+
+function logLevelClass(level) {
+  if (level === 'ERROR') return 'error'
+  if (level === 'WARN') return 'warn'
+  if (level === 'DEBUG') return 'debug'
+  return ''
+}
 
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
 const workspaceName = computed(() => props.workspace?.name || '当前空间')
@@ -103,6 +150,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   if (taskPollTimer) window.clearTimeout(taskPollTimer)
+  if (logRefreshTimer) clearInterval(logRefreshTimer)
 })
 
 async function loadSummary() {
@@ -318,6 +366,10 @@ async function handleTestModel(model) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v2"/><path d="M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M12 12.5v4M9 12.5h6"/></svg>
         模型管理
       </button>
+      <button type="button" :aria-pressed="activeTool === 'logs'" :class="{ active: activeTool === 'logs' }" @click="activeTool = 'logs'; loadLogs()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+        日志中心
+      </button>
     </nav>
 
     <p v-if="activeTool === 'maintenance' && error" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ error }}</p>
@@ -475,6 +527,58 @@ async function handleTestModel(model) {
 
     <RetrievalDebug v-else-if="activeTool === 'retrieval'" embedded />
 
+    <section v-else-if="activeTool === 'logs'" class="log-viewer-section">
+      <header class="log-viewer-header">
+        <div><p class="retrieval-debug-kicker">SYSTEM LOGS</p><h2>日志中心</h2><p>查看应用运行日志，排查问题。</p></div>
+      </header>
+      <div class="log-viewer-toolbar">
+        <label class="log-filter-label">级别
+          <select v-model="logLevel" class="log-filter-select">
+            <option value="">全部</option>
+            <option value="ERROR">ERROR</option>
+            <option value="WARN">WARN</option>
+            <option value="INFO">INFO</option>
+            <option value="DEBUG">DEBUG</option>
+          </select>
+        </label>
+        <label class="log-filter-label">时间
+          <select v-model="logHours" class="log-filter-select">
+            <option :value="1">最近 1 小时</option>
+            <option :value="2">最近 2 小时</option>
+            <option :value="6">最近 6 小时</option>
+            <option :value="24">最近 24 小时</option>
+            <option :value="72">最近 3 天</option>
+          </select>
+        </label>
+        <label class="log-filter-label">关键词
+          <input v-model="logKeyword" type="text" class="log-filter-input" placeholder="搜索关键词" @keydown.enter="loadLogs">
+        </label>
+        <button type="button" class="retrieval-eval-secondary" :disabled="logLoading" @click="loadLogs">{{ logLoading ? '加载中...' : '刷新' }}</button>
+        <button type="button" :class="['retrieval-eval-secondary', { active: logAutoRefresh }]" @click="toggleLogAutoRefresh">{{ logAutoRefresh ? '停止自动' : '自动刷新' }}</button>
+        <span class="log-count">{{ logTotal }} 条</span>
+      </div>
+      <div v-if="logError" class="model-config-message error">{{ logError }}</div>
+      <div class="log-viewer-body">
+        <div v-if="logLoading && !logEntries.length" class="retrieval-eval-empty">正在加载日志...</div>
+        <div v-else-if="!logEntries.length" class="retrieval-eval-empty">暂无日志。</div>
+        <template v-else>
+          <div class="log-line-list">
+            <div v-for="entry in logEntries" :key="entry.id" :class="['log-line', logLevelClass(entry.level)]">
+              <span class="log-line-time">{{ entry.timestamp.replace('T', ' ').substring(0, 19) }}</span>
+              <span class="log-line-level">{{ entry.level }}</span>
+              <span class="log-line-logger">{{ entry.logger }}</span>
+              <span class="log-line-text">{{ entry.message }}</span>
+            </div>
+          </div>
+          <div v-if="logTotalPages > 1" class="log-pagination">
+            <button type="button" class="retrieval-eval-secondary" :disabled="logPage === 0 || logLoading" @click="logPage--; loadLogs()">上一页</button>
+            <span class="log-page-info">{{ logPage + 1 }} / {{ logTotalPages }}</span>
+            <button type="button" class="retrieval-eval-secondary" :disabled="logPage >= logTotalPages - 1 || logLoading" @click="logPage++; loadLogs()">下一页</button>
+          </div>
+        </template>
+      </div>
+    </section>
+
     <ConfirmDialog v-if="pendingAction" v-bind="confirmation" :busy="Boolean(busyAction)" @confirm="confirmMaintenance" @cancel="pendingAction = ''" />
 
     <div v-if="showPoolForm" class="model-config-backdrop" @click.self="showPoolForm = false">
@@ -486,19 +590,19 @@ async function handleTestModel(model) {
         <div class="pool-edit-body">
           <div v-if="poolError" class="model-config-message error">{{ poolError }}</div>
           <div class="model-config-form-grid">
-            <label>类型 *<select v-model="poolForm.modelType">
+            <label><span>类型</span><select v-model="poolForm.modelType">
               <option value="CHAT">对话模型</option>
               <option value="EMBEDDING">嵌入模型</option>
             </select></label>
-            <label>名称 *<input v-model="poolForm.name" placeholder="例如：DeepSeek V4" maxlength="64" required></label>
-            <label>模型标识 *<input v-model="poolForm.model" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128" required></label>
-            <label class="span-2">API 地址 *<input v-model="poolForm.baseUrl" placeholder="https://api.example.com" maxlength="256" required></label>
-            <label class="span-2">API Key *<input v-model="poolForm.apiKey" type="password" placeholder="sk-..." maxlength="256" required></label>
-            <label>温度<input v-model="poolForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
-            <label>Top P<input v-model="poolForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
-            <label>最大输出 Token<input v-model="poolForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
-            <label>请求超时(ms)<input v-model="poolForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
-            <label class="span-2">备用模型 (逗号分隔)<input v-model="poolForm.fallbackModels" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
+            <label><span><span class="required">*</span>名称</span><input v-model="poolForm.name" type="text" placeholder="例如：DeepSeek V4" maxlength="64" required></label>
+            <label class="span-2"><span><span class="required">*</span>模型标识</span><input v-model="poolForm.model" type="text" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128" required></label>
+            <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model="poolForm.baseUrl" type="text" placeholder="https://api.example.com" maxlength="256" required></label>
+            <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model="poolForm.apiKey" type="password" placeholder="sk-..." maxlength="256" required></label>
+            <label><span>温度</span><input v-model="poolForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
+            <label><span>Top P</span><input v-model="poolForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
+            <label><span>最大输出 Token</span><input v-model="poolForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
+            <label><span>请求超时(ms)</span><input v-model="poolForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
+            <label class="span-2"><span>备用模型 (逗号分隔)</span><input v-model="poolForm.fallbackModels" type="text" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
             <label class="span-2 checkbox"><input v-model="poolForm.enabled" type="checkbox"> 启用模型</label>
             <label class="span-2 checkbox"><input v-model="poolForm.isDefault" type="checkbox"> 设为该类型的默认模型</label>
           </div>

@@ -25,14 +25,14 @@ public class UserModelConfigService {
     @Transactional(readOnly = true)
     public UserModelConfigResponse get(AppUser user) {
         UserModelConfig config = userModelConfigRepository.findByUserId(user.getId()).orElse(null);
-        List<AiModelResponse> pool = aiModelRepository.findAllByOrderByIdAsc().stream()
+        List<AiModelResponse> pool = aiModelRepository.findByModelType(AiModelType.CHAT).stream()
                 .filter(AiModel::isEnabled)
                 .map(AiModelResponse::from)
                 .toList();
         Long defaultModelId = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.CHAT)
                 .map(AiModel::getId).orElse(null);
-        Long defaultEmbeddingId = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.EMBEDDING)
-                .map(AiModel::getId).orElse(null);
+        AiModel defaultEmbedding = aiModelRepository
+                .findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.EMBEDDING).orElse(null);
         ModelSpec resolved = modelConfigService.resolve(user.getId());
         return new UserModelConfigResponse(
                 config == null ? UserModelMode.FOLLOW_DEFAULT : config.getMode(),
@@ -41,7 +41,9 @@ public class UserModelConfigService {
                 resolved,
                 pool,
                 defaultModelId,
-                defaultEmbeddingId
+                defaultEmbedding == null ? null : defaultEmbedding.getId(),
+                defaultEmbedding == null ? null : defaultEmbedding.getName(),
+                defaultEmbedding == null ? null : defaultEmbedding.getModel()
         );
     }
 
@@ -55,8 +57,11 @@ public class UserModelConfigService {
                 if (request.modelId() == null) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "选择模型时必须指定模型");
                 }
-                aiModelRepository.findById(request.modelId()).filter(AiModel::isEnabled)
+                AiModel selected = aiModelRepository.findById(request.modelId()).filter(AiModel::isEnabled)
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "所选模型不存在或已禁用"));
+                if (selected.getModelType() != AiModelType.CHAT) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "个人配置仅支持选择对话模型");
+                }
                 config.usePoolModel(request.modelId());
             }
             case CUSTOM -> {

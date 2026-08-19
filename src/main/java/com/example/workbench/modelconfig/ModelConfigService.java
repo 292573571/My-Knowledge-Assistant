@@ -47,21 +47,25 @@ public class ModelConfigService {
     /** 解析用户对话模型的完整配置 */
     public ModelSpec resolve(Long userId) {
         if (userId == null) {
+            log.info("resolve: userId is null, using defaultChatSpec");
             return defaultChatSpec();
         }
         UserModelConfig config = userModelConfigRepository.findByUserId(userId).orElse(null);
         if (config == null || config.getMode() == UserModelMode.FOLLOW_DEFAULT) {
+            log.info("resolve: userId={} mode=FOLLOW_DEFAULT, using defaultChatSpec", userId);
             return defaultChatSpec();
         }
         if (config.getMode() == UserModelMode.USE_POOL_MODEL) {
             AiModel model = config.getModelId() == null ? null
                     : aiModelRepository.findById(config.getModelId()).filter(AiModel::isEnabled).orElse(null);
             if (model != null) {
+                log.info("resolve: userId={} mode=USE_POOL_MODEL modelId={} name={}", userId, model.getId(), model.getName());
                 return toSpec(model);
             }
             log.warn("User selected model unavailable or disabled userId={} modelId={}", userId, config.getModelId());
             return defaultChatSpec();
         }
+        log.info("resolve: userId={} mode=CUSTOM name={} model={}", userId, config.getName(), config.getModel());
         return toSpec(config);
     }
 
@@ -70,8 +74,10 @@ public class ModelConfigService {
         AiModel adminDefault = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.CHAT)
                 .orElse(null);
         if (adminDefault != null) {
+            log.info("defaultChatSpec: using pool default id={} name={} model={} baseUrl={}", adminDefault.getId(), adminDefault.getName(), adminDefault.getModel(), adminDefault.getBaseUrl());
             return toSpec(adminDefault);
         }
+        log.info("defaultChatSpec: no pool default CHAT model, falling back to application.properties baseUrl={} model={}", defaultBaseUrl, defaultModel);
         return new ModelSpec("默认对话模型", defaultBaseUrl, defaultApiKey, defaultModel,
                 defaultTemperature, null, defaultMaxOutputTokens, defaultRequestTimeoutMs, defaultFallbackModels);
     }

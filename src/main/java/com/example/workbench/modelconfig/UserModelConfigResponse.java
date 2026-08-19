@@ -9,6 +9,8 @@ public record UserModelConfigResponse(
         ModelSpec resolved,
         List<AiModelResponse> poolModels,
         Long defaultModelId,
-        Long defaultEmbeddingId
+        Long defaultEmbeddingId,
+        String defaultEmbeddingName,
+        String defaultEmbeddingModel
 ) {
 }

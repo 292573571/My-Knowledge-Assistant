@@ -335,7 +335,7 @@ class RagServiceLearningRecordTest {
 
         RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
 
-        assertThat(response.answer()).isEqualTo("当前无法生成可靠的通用知识回答。请稍后重试，或导入相关资料后再问。");
+        assertThat(response.answer()).isEqualTo("当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。");
         verify(chatClient, times(2)).generate(Mockito.anyString());
     }
 
@@ -349,7 +349,7 @@ class RagServiceLearningRecordTest {
 
         RagChatResponse response = service.chat(new RagChatRequest("conversation-1", "今天适合学习什么？"));
 
-        assertThat(response.answer()).isEqualTo("当前无法生成可靠的通用知识回答。请稍后重试，或导入相关资料后再问。");
+        assertThat(response.answer()).isEqualTo("当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。");
         verify(chatClient, times(1)).generate(Mockito.anyString());
     }
 

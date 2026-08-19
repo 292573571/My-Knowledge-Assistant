@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchModelPool, fetchMyConfig, saveMyConfig } from '../api/modelConfigApi'
+import { fetchMyConfig, saveMyConfig } from '../api/modelConfigApi'
 
 const emit = defineEmits(['close', 'saved'])
 
@@ -10,6 +10,7 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const poolModels = ref([])
 const myConfig = ref(null)
+const embeddingInfo = ref({ name: null, model: null })
 
 const mode = ref('FOLLOW_DEFAULT')
 const selectedModelId = ref(null)
@@ -36,12 +37,16 @@ async function loadData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [pool, config] = await Promise.all([fetchModelPool(), fetchMyConfig()])
-    poolModels.value = pool || []
+    const config = await fetchMyConfig()
     myConfig.value = config
     if (config) {
+      poolModels.value = config.poolModels || []
       mode.value = config.mode || 'FOLLOW_DEFAULT'
       selectedModelId.value = config.modelId || null
+      embeddingInfo.value = {
+        name: config.defaultEmbeddingName || null,
+        model: config.defaultEmbeddingModel || null
+      }
       if (config.custom) {
         Object.assign(customForm, {
           name: config.custom.name || '',
@@ -117,7 +122,14 @@ onMounted(loadData)
           </div>
           <p v-else class="model-config-hint">尚未配置，当前使用全局默认模型。</p>
 
-          <p class="model-config-section-title">选择模式</p>
+          <div v-if="embeddingInfo.name" class="model-config-embedding-info">
+            <span class="model-config-embedding-label">嵌入模型</span>
+            <span class="model-config-embedding-value">
+              {{ embeddingInfo.name }}<template v-if="embeddingInfo.model"> · {{ embeddingInfo.model }}</template>
+            </span>
+          </div>
+
+          <p class="model-config-section-title">对话模型</p>
           <div class="model-config-mode-select">
             <label v-for="m in ['FOLLOW_DEFAULT', 'USE_POOL_MODEL', 'CUSTOM']" :key="m"
                    :class="{ active: mode === m }" class="model-config-mode-option">
@@ -130,8 +142,8 @@ onMounted(loadData)
           </div>
 
           <div v-if="mode === 'USE_POOL_MODEL'" class="model-config-pool-list">
-            <p v-if="poolModels.filter(m => m.enabled).length === 0" class="model-config-empty">模型池为空，请联系管理员添加模型。</p>
-            <label v-for="model in poolModels.filter(m => m.enabled)" :key="model.id"
+            <p v-if="poolModels.filter(m => m.enabled && m.modelType !== 'EMBEDDING').length === 0" class="model-config-empty">模型池为空，请联系管理员添加模型。</p>
+            <label v-for="model in poolModels.filter(m => m.enabled && m.modelType !== 'EMBEDDING')" :key="model.id"
                    :class="{ selected: selectedModelId === model.id }" class="model-config-pool-item">
               <input v-model="selectedModelId" type="radio" :value="model.id" name="pool-model">
               <div>
@@ -145,15 +157,15 @@ onMounted(loadData)
           <div v-if="mode === 'CUSTOM'" class="model-config-custom-form">
             <p class="model-config-section-title">自定义模型参数</p>
             <div class="model-config-form-grid">
-              <label>名称<input v-model="customForm.name" placeholder="例如：DeepSeek V4" maxlength="64"></label>
-              <label>模型标识<input v-model="customForm.model" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128"></label>
-              <label class="span-2">API 地址<input v-model="customForm.baseUrl" placeholder="https://api.example.com" maxlength="256"></label>
-              <label class="span-2">API Key<input v-model="customForm.apiKey" type="password" placeholder="sk-..." maxlength="256"></label>
-              <label>温度<input v-model="customForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
-              <label>Top P<input v-model="customForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
-              <label>最大输出 Token<input v-model="customForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
-              <label>请求超时(ms)<input v-model="customForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
-              <label class="span-2">备用模型 (逗号分隔)<input v-model="customForm.fallbackModels" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
+              <label><span>名称</span><input v-model="customForm.name" type="text" placeholder="例如：DeepSeek V4" maxlength="64"></label>
+              <label><span><span class="required">*</span>模型标识</span><input v-model="customForm.model" type="text" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128"></label>
+              <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model="customForm.baseUrl" type="text" placeholder="https://api.example.com" maxlength="256"></label>
+              <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model="customForm.apiKey" type="password" placeholder="sk-..." maxlength="256"></label>
+              <label><span>温度</span><input v-model="customForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
+              <label><span>Top P</span><input v-model="customForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
+              <label><span>最大输出 Token</span><input v-model="customForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
+              <label><span>请求超时(ms)</span><input v-model="customForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
+              <label class="span-2"><span>备用模型 (逗号分隔)</span><input v-model="customForm.fallbackModels" type="text" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
             </div>
           </div>
         </div>

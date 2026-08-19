@@ -31,7 +31,7 @@ public class RagService {
 
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final String NO_CONTEXT_ANSWER = "我在当前知识库中没有找到足够信息和依据来回答这个问题。你可以导入相关文档后再问，或者切换到普通聊天模式让我基于通用知识回答。";
-    private static final String MODEL_FALLBACK_SAFETY_ANSWER = "当前无法生成可靠的通用知识回答。请稍后重试，或导入相关资料后再问。";
+    private static final String MODEL_FALLBACK_SAFETY_ANSWER = "当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。";
     private static final Pattern REPEATED_CHARACTER = Pattern.compile("(?s).*(.)\\1{3,}.*");
     private static final Pattern REPEATED_SEQUENCE = Pattern.compile("(?s).*(.{2,4})\\1{2,}.*");
     private static final Pattern SUSPICIOUS_LATIN_TOKEN = Pattern.compile("(?i)(?<![a-z])[a-z]{8,}(?![a-z])");
@@ -567,13 +567,18 @@ public class RagService {
             List<SourceDocument> contextSources
     ) {
         if (!modelFallbackEnabled) {
-            // 关闭模型回退时严格只回答已有知识库证据。
             return new RagChatResponse(NO_CONTEXT_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
         }
 
         String prompt = buildModelFallbackPrompt(question);
         Map<String, String> options = Map.of(ConversationMemory.CONVERSATION_ID, conversationId);
-        String answer = generateWithHistory(prompt, history, options);
+        String answer;
+        try {
+            answer = generateWithHistory(prompt, history, options);
+        } catch (Exception exception) {
+            log.error("RAG model fallback call failed conversationId={} error={}", conversationId, exception.getMessage(), exception);
+            answer = null;
+        }
         if (answer == null || answer.isBlank()) {
             log.warn("RAG model fallback answer rejected reason=empty_or_unavailable action=safety_answer conversationId={}", conversationId);
             return new RagChatResponse(MODEL_FALLBACK_SAFETY_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
