@@ -63,6 +63,11 @@ public class LearningRequestCoordinator {
         repository.deleteById(eventId);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void abandonProcessing(String sessionId) {
+        repository.deleteBySessionIdAndStatus(sessionId, "PROCESSING");
+    }
+
     public LearningAssistantResponse replayAfterConflict(String sessionId, String requestId,
                                                          String eventType, String requestHash,
                                                          DataIntegrityViolationException ignored) {

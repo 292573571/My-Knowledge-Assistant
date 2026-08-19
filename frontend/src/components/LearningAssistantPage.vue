@@ -85,7 +85,13 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
+  const sessionId = activeSessionId.value
   cancelLocalStream()
+  activeRequestId += 1
+  loading.value = false
+  if (sessionId) {
+    stopLearningSession(sessionId).catch(() => {})
+  }
   inspirationObserver?.disconnect()
   if (inspirationTimer) window.clearTimeout(inspirationTimer)
   document.removeEventListener('pointermove', closeSourceOnPointerMove)

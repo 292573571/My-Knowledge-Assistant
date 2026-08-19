@@ -10,4 +10,6 @@ public interface LearningSessionEventRepository extends JpaRepository<LearningSe
 
     long deleteBySessionIdAndStatusAndProcessingExpiresAtBefore(
             String sessionId, String status, Instant expiresAt);
+
+    long deleteBySessionIdAndStatus(String sessionId, String status);
 }

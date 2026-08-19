@@ -228,8 +228,9 @@ public class LearningAssistantService {
 
     public void stop(AppUser user, String sessionId, String workspaceId) {
         WorkspaceAccessContext access = access(user, workspaceId);
-        requireSession(user, access.workspaceId(), sessionId);
+        LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
         conversationService.stop(user, access.workspaceId(), sessionId);
+        requestCoordinator.abandonProcessing(session.getSessionId());
     }
 
     private LearningAssistantSessionResponse detail(AppUser user, String workspaceId, String sessionId) {
