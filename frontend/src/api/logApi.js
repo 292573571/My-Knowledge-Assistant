@@ -6,7 +6,7 @@ async function request(url, options, errorMessage) {
   return response.json()
 }
 
-export function fetchLogs({ page = 0, size = 100, level, keyword, hours = 2 } = {}) {
+export function fetchLogs({ page = 0, size = 100, level, keyword, hours = 0 } = {}) {
   const params = new URLSearchParams()
   params.set('page', String(page))
   params.set('size', String(size))

@@ -52,7 +52,7 @@ const logLoading = ref(false)
 const logError = ref('')
 const logLevel = ref('')
 const logKeyword = ref('')
-const logHours = ref(2)
+const logHours = ref(0)
 const logAutoRefresh = ref(false)
 let logRefreshTimer = null
 
@@ -558,11 +558,13 @@ async function handleTestModel(model) {
         </label>
         <label class="log-filter-label">时间
           <select v-model="logHours" class="log-filter-select">
+            <option :value="0">全部时间</option>
             <option :value="1">最近 1 小时</option>
             <option :value="2">最近 2 小时</option>
             <option :value="6">最近 6 小时</option>
             <option :value="24">最近 24 小时</option>
             <option :value="72">最近 3 天</option>
+            <option :value="168">最近 7 天</option>
           </select>
         </label>
         <label class="log-filter-label">关键词

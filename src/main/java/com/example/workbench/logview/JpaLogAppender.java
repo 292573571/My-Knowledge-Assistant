@@ -43,7 +43,7 @@ public class JpaLogAppender extends AbstractAppender {
             repositoryChecked = true;
         } catch (Exception e) {
             repository = null;
-            repositoryChecked = true;
+            repositoryChecked = false;
         }
     }
 
@@ -56,7 +56,9 @@ public class JpaLogAppender extends AbstractAppender {
             if (level.equals("TRACE")) return;
             String logger = event.getLoggerName();
             if (logger != null && logger.startsWith("org.springframework.") && !level.equals("WARN") && !level.equals("ERROR")) return;
-            if (logger != null && logger.startsWith("org.apache.") && !level.equals("WARN") && !level.equals("ERROR")) return;
+            if (logger != null && (logger.startsWith("org.apache.")
+                    || logger.startsWith("org.hibernate.")
+                    || logger.startsWith("org.postgresql."))) return;
             String message = event.getMessage().getFormattedMessage();
             if (message != null && message.length() > 4000) {
                 message = message.substring(0, 4000);

@@ -208,6 +208,10 @@ function workspaceTypeLabel(type) {
   return { PERSONAL: '个人', TEAM: '团队', PUBLIC: '公共' }[type] || '空间'
 }
 
+function workspaceDisplayName(workspace) {
+  return workspace.type === 'PERSONAL' ? `${currentUser.value.userName}的个人空间` : workspace.name
+}
+
 async function handleWorkspaceCreated(workspace) {
   workspaceError.value = ''
   try {
@@ -329,7 +333,7 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 10 6 2.7 6-2.7M6 14l6 2.7 6-2.7"/></svg>
             <select :value="activeWorkspaceId" :disabled="switchingWorkspace" aria-label="切换知识空间" @change="switchWorkspace">
               <option v-for="workspace in workspaces" :key="workspace.id" :value="workspace.id">
-                {{ workspace.name }} · {{ workspaceTypeLabel(workspace.type) }}
+                {{ workspaceDisplayName(workspace) }} · {{ workspaceTypeLabel(workspace.type) }}
               </option>
             </select>
           </label>

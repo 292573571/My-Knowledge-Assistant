@@ -23,6 +23,15 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, Long> {
     Page<SystemLog> findByTimestampAfterOrderByTimestampDesc(
             Instant since, Pageable pageable);
 
+    Page<SystemLog> findByLevelInAndMessageContainingIgnoreCaseOrderByTimestampDesc(
+            List<String> levels, String keyword, Pageable pageable);
+
+    Page<SystemLog> findByLevelInOrderByTimestampDesc(List<String> levels, Pageable pageable);
+
+    Page<SystemLog> findByMessageContainingIgnoreCaseOrderByTimestampDesc(String keyword, Pageable pageable);
+
+    Page<SystemLog> findAllByOrderByTimestampDesc(Pageable pageable);
+
     @Modifying
     @Query("DELETE FROM SystemLog l WHERE l.timestamp < :cutoff")
     int deleteOlderThan(@Param("cutoff") Instant cutoff);

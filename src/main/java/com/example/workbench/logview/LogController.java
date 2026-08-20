@@ -50,7 +50,7 @@ public class LogController {
             @RequestParam(defaultValue = "100") int size,
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String keyword,
-            @RequestParam(defaultValue = "2") int hours,
+            @RequestParam(defaultValue = "0") int hours,
             HttpServletRequest request
     ) {
         AppUser user = user(request);
@@ -58,16 +58,24 @@ public class LogController {
 
         if (page < 0) page = 0;
         if (size < 1 || size > 500) size = 100;
-        if (hours < 1) hours = 2;
+        if (hours < 0) hours = 0;
 
-        Instant since = Instant.now().minus(hours, ChronoUnit.HOURS);
+        Instant since = hours == 0 ? null : Instant.now().minus(hours, ChronoUnit.HOURS);
         List<String> levels = level != null && !level.isBlank() ? LEVEL_ABOVE.getOrDefault(level.strip().toUpperCase(), null) : null;
         String kw = keyword != null && !keyword.isBlank() ? keyword.strip() : null;
 
         Page<SystemLog> result;
         PageRequest pageable = PageRequest.of(page, size);
 
-        if (levels != null && kw != null) {
+        if (since == null && levels != null && kw != null) {
+            result = systemLogRepository.findByLevelInAndMessageContainingIgnoreCaseOrderByTimestampDesc(levels, kw, pageable);
+        } else if (since == null && levels != null) {
+            result = systemLogRepository.findByLevelInOrderByTimestampDesc(levels, pageable);
+        } else if (since == null && kw != null) {
+            result = systemLogRepository.findByMessageContainingIgnoreCaseOrderByTimestampDesc(kw, pageable);
+        } else if (since == null) {
+            result = systemLogRepository.findAllByOrderByTimestampDesc(pageable);
+        } else if (levels != null && kw != null) {
             result = systemLogRepository.findByLevelInAndMessageContainingIgnoreCaseAndTimestampAfterOrderByTimestampDesc(levels, kw, since, pageable);
         } else if (levels != null) {
             result = systemLogRepository.findByLevelInAndTimestampAfterOrderByTimestampDesc(levels, since, pageable);

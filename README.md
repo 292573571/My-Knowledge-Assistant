@@ -19,6 +19,8 @@
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
 - Actuator、Prometheus、请求 ID、结构化日志和敏感信息脱敏。
 
+数据库日志中心通过 Log4j2 有界异步队列写入 PostgreSQL，不阻塞业务线程。队列大小可通过 `LOG_JPA_QUEUE_SIZE` 配置，默认 `8192`；队列满时优先保证业务请求和控制台/文件日志，数据库日志可能丢弃。
+
 当前默认关闭联网搜索：`workbench.rag.web-search.enabled=false`。`WebSearchService` 是搜索扩展点，需要接入真实搜索服务后再开启。
 
 ## 技术栈
