@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -32,6 +33,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -59,6 +61,7 @@ public class LocalChatClient {
     private ModelConfigContext modelConfigContext;
     private ModelConfigService modelConfigService;
     private ModelClientFactory modelClientFactory;
+    private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
 
     /**
      * 注入可选的模型调用指标记录器，单元测试直接构造客户端时可以不提供。
@@ -77,6 +80,11 @@ public class LocalChatClient {
         this.modelConfigContext = context;
         this.modelConfigService = service;
         this.modelClientFactory = factory;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiExecutor(@Qualifier("aiTaskExecutor") Executor aiExecutor) {
+        this.aiExecutor = aiExecutor;
     }
 
     public LocalChatClient(
@@ -266,6 +274,7 @@ public class LocalChatClient {
         log.info("AI model stream started provider=openai-compatible model={} conversationId={} requestTimeoutMs={} promptLength={}",
                 model, conversationId, timeout.toMillis(), prompt == null ? 0 : prompt.length());
         AtomicInteger answerLength = new AtomicInteger();
+        AtomicBoolean firstToken = new AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(false);
         long startedAt = System.nanoTime();
         return client.prompt()
@@ -276,7 +285,12 @@ public class LocalChatClient {
                 .stream()
                 .content()
                 .timeout(timeout)
-                .doOnNext(token -> answerLength.addAndGet(token == null ? 0 : token.length()))
+                .doOnNext(token -> {
+                    answerLength.addAndGet(token == null ? 0 : token.length());
+                    if (firstToken.compareAndSet(false, true) && metrics != null) {
+                        metrics.recordFirstToken(model, System.nanoTime() - startedAt);
+                    }
+                })
                 .doOnComplete(() -> log.info(
                         "AI model stream completed model={} conversationId={} answerLength={}",
                         model, conversationId, answerLength.get()))
@@ -286,6 +300,7 @@ public class LocalChatClient {
                 })
                 .doFinally(signal -> {
                     if (metrics != null) {
+                        metrics.recordStream(model, failed.get() ? "error" : "success");
                         metrics.recordModelCall(model, model.equals(chatModel) ? "primary" : "fallback",
                                 failed.get() ? "error" : "success", System.nanoTime() - startedAt, null, null);
                     }
@@ -388,7 +403,7 @@ public class LocalChatClient {
                         conversationId
                 ))
                 .call()
-                .chatResponse());
+                .chatResponse(), aiExecutor);
 
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);

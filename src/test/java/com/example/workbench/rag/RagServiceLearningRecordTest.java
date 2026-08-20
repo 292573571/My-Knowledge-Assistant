@@ -251,6 +251,29 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void skipsSynchronousSourceQualityGateForStreamingAnswers() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        RagQualityGate qualityGate = Mockito.mock(RagQualityGate.class);
+        SourceDocument source = new SourceDocument(
+                "ssl-1", "SSL 用于保护网络通信。", "网络安全", "security.pdf", "docs/security.pdf", 1
+        ).withScore(0.2);
+        when(vectorStore.similaritySearch("SSL 是什么？", 15)).thenReturn(List.of(source));
+        when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
+                .thenReturn(reactor.core.publisher.Flux.just("SSL 是网络安全协议。"));
+        RagService service = new RagService(
+                Mockito.mock(DocumentIngestionService.class), vectorStore, chatClient, new ConversationMemory(),
+                Mockito.mock(WebSearchService.class), qualityGate, true, 5, 0.45, "distance",
+                false, false, 4, true, false
+        );
+
+        RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", "SSL 是什么？"));
+
+        assertThat(response.tokens().collectList().block()).containsExactly("SSL 是网络安全协议。");
+        verify(qualityGate, never()).relevantSources(Mockito.anyString(), Mockito.anyList());
+    }
+
+    @Test
     void retriesModelFallbackWhenCodeContainsTranslatedIdentifierFragments() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);

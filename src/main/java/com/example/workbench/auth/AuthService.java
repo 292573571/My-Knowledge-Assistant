@@ -1,6 +1,8 @@
 package com.example.workbench.auth;
 
 import java.security.SecureRandom;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -83,7 +85,7 @@ public class AuthService {
             throw new InvalidCredentialsException("authentication is required");
         }
 
-        UserSession session = sessionRepository.findByToken(token)
+        UserSession session = sessionRepository.findByTokenHash(tokenHash(token))
                 .orElseThrow(() -> new InvalidCredentialsException("invalid or expired session"));
         if (session.getExpiresAt().isBefore(Instant.now())) {
             throw new InvalidCredentialsException("invalid or expired session");
@@ -97,7 +99,7 @@ public class AuthService {
     @Transactional
     public void logout(String token) {
         if (token != null && !token.isBlank()) {
-            sessionRepository.deleteByToken(token);
+            sessionRepository.deleteByTokenHash(tokenHash(token));
             log.info("User logged out");
         }
     }
@@ -113,13 +115,13 @@ public class AuthService {
         }
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
-        sessionRepository.deleteOtherSessions(user.getId(), currentToken);
+        sessionRepository.deleteOtherSessions(user.getId(), tokenHash(currentToken));
         log.info("Password changed userId={} otherSessionsRevoked=true", user.getId());
     }
 
     private AuthResponse createSession(AppUser user) {
         String token = newToken();
-        sessionRepository.save(new UserSession(user, token, Instant.now().plus(sessionDuration)));
+        sessionRepository.save(new UserSession(user, tokenHash(token), Instant.now().plus(sessionDuration)));
         log.info("User session created userId={} expiresInHours={}", user.getId(), sessionDuration.toHours());
         initializeProfile(user);
         return new AuthResponse(token, user.getAccount(), user.getEmail(), user.getPhone(), user.getUserName(), user.getPublicId(), "/api/auth/avatar",
@@ -148,6 +150,19 @@ public class AuthService {
         byte[] bytes = new byte[48];
         TOKEN_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String tokenHash(String token) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                result.append(String.format("%02x", value));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("会话令牌哈希算法不可用", exception);
+        }
     }
 
     private void initializeProfile(AppUser user) {

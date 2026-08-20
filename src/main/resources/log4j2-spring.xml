@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="WARN" monitorInterval="30">
     <Properties>
-        <Property name="LOG_PATH">logs</Property>
+        <Property name="LOG_PATH">${env:LOG_PATH:-logs}</Property>
         <Property name="APP_NAME">my-knowledge-assistant</Property>
         <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{36} - %msg%n%throwable</Property>
         <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{80} - %msg%n%throwable</Property>

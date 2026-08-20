@@ -198,7 +198,7 @@ function formatTime(value) {
         <div v-else class="workspace-member-list">
           <article v-for="member in members" :key="member.publicId">
             <span class="workspace-member-avatar">{{ member.userName.slice(0, 1) }}</span>
-            <div><strong>{{ member.userName }}</strong><small>{{ member.publicId }}</small></div>
+            <div><strong>{{ member.userName }}</strong></div>
             <span v-if="!canManageMembers || member.role === 'OWNER'" class="workspace-role-badge">{{ roleLabel(member.role) }}</span>
             <select v-else :value="member.role" :disabled="updatingMemberId === member.publicId" aria-label="修改成员角色" @change="changeRole(member, $event)">
               <option value="VIEWER">查看者</option><option value="EDITOR">编辑者</option>
@@ -213,8 +213,8 @@ function formatTime(value) {
         <p v-if="loading" class="workspace-manager-empty">正在加载...</p>
         <article v-for="event in audits" v-else :key="event.id">
           <span :class="['workspace-audit-outcome', event.outcome.toLowerCase()]">{{ outcomeLabel(event.outcome) }}</span>
-          <div><strong>{{ actionLabel(event.action) }}</strong><small>{{ event.actorPublicId }} · {{ formatTime(event.createdAt) }}</small></div>
-          <code>{{ event.reasonCode === 'NONE' ? event.resourceType : event.reasonCode }}</code>
+          <div><strong>{{ actionLabel(event.action) }}</strong><small>{{ formatTime(event.createdAt) }}</small></div>
+          <span>{{ event.reasonCode === 'NONE' ? '操作完成' : outcomeLabel(event.outcome) }}</span>
         </article>
         <p v-if="!loading && !audits.length" class="workspace-manager-empty">暂无审计事件</p>
       </div>

@@ -20,6 +20,7 @@ const checkingSession = ref(true)
 const restoringWorkspace = ref(false)
 const appReady = ref(false)
 const activeSection = ref('home')
+const assistantMounted = ref(false)
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
 const currentPassword = ref('')
@@ -241,6 +242,7 @@ function openProfile() {
 function navigateTo(section) {
   if (!navigableSections.has(section) || !canAccessSection(section, currentUser.value)) return
   const update = () => {
+    if (section === 'assistant') assistantMounted.value = true
     activeSection.value = section
     mobileNavOpen.value = false
     syncUrlState()
@@ -358,8 +360,8 @@ async function submitPasswordChange() {
       </header>
       <div v-if="mobileNavOpen" class="portal-nav-backdrop" role="presentation" @click="mobileNavOpen = false"></div>
        <HomePage v-if="activeSection === 'home'" :user="currentUser" @navigate="navigateTo" />
-       <LearningAssistantPage v-else-if="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" />
-       <LearningRecords v-else-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+        <LearningAssistantPage v-if="assistantMounted" v-show="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" :workspace-id="activeWorkspaceId" />
+       <LearningRecords v-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
       <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />

@@ -34,7 +34,7 @@ public class AuthController {
     public AuthController(AuthService authService, UserProfileService userProfileService,
                           AdminAuthorizationService adminAuthorizationService,
                           EmailVerificationService emailVerificationService,
-                          @Value("${app.auth.cookie-secure:false}") boolean secureCookie,
+                          @Value("${app.auth.cookie-secure:true}") boolean secureCookie,
                           @Value("${app.auth.session-hours:168}") long sessionHours) {
         this.authService = authService;
         this.userProfileService = userProfileService;
@@ -45,8 +45,8 @@ public class AuthController {
     }
 
     @PostMapping("/send-code")
-    public RegisterResultResponse sendCode(@Valid @RequestBody SendCodeRequest request) {
-        emailVerificationService.send(request.email());
+    public RegisterResultResponse sendCode(@Valid @RequestBody SendCodeRequest request, HttpServletRequest httpRequest) {
+        emailVerificationService.send(request.email(), httpRequest.getRemoteAddr());
         return new RegisterResultResponse("验证码已发送，请查收邮件");
     }
 

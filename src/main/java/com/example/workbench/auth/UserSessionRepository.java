@@ -8,11 +8,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface UserSessionRepository extends JpaRepository<UserSession, Long> {
 
-    Optional<UserSession> findByToken(String token);
+    Optional<UserSession> findByTokenHash(String tokenHash);
 
-    void deleteByToken(String token);
+    void deleteByTokenHash(String tokenHash);
 
     @Modifying
-    @Query("delete from UserSession session where session.user.id = :userId and session.token <> :currentToken")
-    void deleteOtherSessions(@Param("userId") Long userId, @Param("currentToken") String currentToken);
+    @Query("delete from UserSession session where session.user.id = :userId and session.tokenHash <> :currentTokenHash")
+    void deleteOtherSessions(@Param("userId") Long userId, @Param("currentTokenHash") String currentTokenHash);
 }

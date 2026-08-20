@@ -118,6 +118,13 @@ const batchStatusLabels = {
   FAILED: '处理失败'
 }
 
+const indexStatusLabels = {
+  INDEXED: '已索引',
+  PENDING: '等待索引',
+  RUNNING: '索引中',
+  FAILED: '索引失败'
+}
+
 const supportedUploadExtensions = new Set(['md', 'txt', 'html', 'htm', 'pdf', 'docx', 'png', 'jpg', 'jpeg'])
 const maxUploadBytes = 50 * 1024 * 1024
 
@@ -523,7 +530,7 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
                  <ol v-else>
                    <li v-for="batch in taskBatches[task.taskId]" :key="batch.batchIndex" :class="batch.status.toLowerCase()">
                      <span><strong>第 {{ batch.batchIndex }} 批</strong><small>{{ batch.startPage ? `第 ${batch.startPage}-${batch.endPage} 页` : '等待确定页码' }}</small></span>
-                     <span><b>{{ batchStatusLabels[batch.status] || batch.status }}</b><small>{{ batch.chunkCount }} 个分块 · 执行 {{ batch.attemptCount }} 次</small></span>
+                      <span><b>{{ batchStatusLabels[batch.status] || '处理中' }}</b><small>{{ batch.chunkCount }} 个知识片段</small></span>
                      <em v-if="batch.errorMessage">{{ batch.errorMessage }}</em>
                    </li>
                  </ol>
@@ -579,16 +586,14 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
     >
       <header class="document-card-heading">
         <button type="button" class="document-name-button" :title="`查看 ${displayFileName(document)}`" @click="openDocument(document)">{{ displayFileName(document) }}</button>
-        <span class="document-chunk-count">{{ document.chunkCount }} chunks</span>
+        <span class="document-chunk-count">{{ document.chunkCount }} 个知识片段</span>
       </header>
       <div class="document-card-status-row">
-        <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ document.indexStatus === 'INDEXED' || !document.indexStatus ? '已索引' : document.indexStatus }}</span></div>
+         <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ indexStatusLabels[document.indexStatus] || (document.indexStatus ? '处理中' : '已索引') }}</span></div>
         <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
       </div>
       <div class="document-card-details">
-        <p><span>路径</span><code>{{ document.path }}</code></p>
         <p><span>更新时间</span><time :datetime="document.ingestedAt">{{ formatTime(document.ingestedAt) }}</time></p>
-        <p><span>内容指纹</span><code>{{ document.contentHash }}</code></p>
       </div>
     </article>
 

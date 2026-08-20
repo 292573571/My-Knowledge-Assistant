@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Semaphore;
 import javax.imageio.ImageIO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,14 @@ public class TesseractOcrEngine implements OcrEngine {
     private final String languages;
     private final Duration timeout;
     private final OcrImagePreprocessor imagePreprocessor;
+    private final Semaphore permits;
+    private final long maxOutputBytes;
+    private com.example.workbench.observability.RagMetrics metrics;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setMetrics(com.example.workbench.observability.RagMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     /**
      * 创建 Tesseract 命令行 OCR 引擎。
@@ -34,18 +43,29 @@ public class TesseractOcrEngine implements OcrEngine {
             @Value("${workbench.ocr.command:tesseract}") String command,
             @Value("${workbench.ocr.languages:chi_sim+eng}") String languages,
             @Value("${workbench.ocr.timeout-seconds:120}") long timeoutSeconds,
-            OcrImagePreprocessor imagePreprocessor
+            OcrImagePreprocessor imagePreprocessor,
+            @Value("${workbench.ocr.max-concurrent:2}") int maxConcurrent,
+            @Value("${workbench.ocr.max-output-bytes:2097152}") long maxOutputBytes
     ) {
         this.command = command;
         this.languages = languages;
         this.timeout = Duration.ofSeconds(Math.max(10, timeoutSeconds));
         this.imagePreprocessor = imagePreprocessor;
+        this.permits = new Semaphore(Math.max(1, maxConcurrent));
+        this.maxOutputBytes = Math.max(1024, maxOutputBytes);
     }
 
     @Override
     public String recognize(BufferedImage image) {
+        if (image == null) throw new IllegalArgumentException("OCR 图片不能为空");
+        boolean acquired = false;
+        long startedAt = System.nanoTime();
+        String outcome = "success";
         Path directory = null;
+        Process process = null;
         try {
+            permits.acquire();
+            acquired = true;
             directory = Files.createTempDirectory("knowledge-ocr-");
             Path input = directory.resolve("input.png");
             Path outputBase = directory.resolve("result");
@@ -53,15 +73,19 @@ public class TesseractOcrEngine implements OcrEngine {
             if (!ImageIO.write(imagePreprocessor.suppressLightWatermarks(image), "png", input.toFile())) {
                 throw new IllegalArgumentException("OCR 图片格式转换失败");
             }
-            Process process = new ProcessBuilder(command, input.toString(), outputBase.toString(),
+            process = new ProcessBuilder(command, input.toString(), outputBase.toString(),
                     "-l", languages, "--psm", "3")
                     .redirectErrorStream(true)
                     .redirectOutput(processLog.toFile())
                     .start();
             boolean finished = process.waitFor(timeout.toSeconds(), TimeUnit.SECONDS);
             if (!finished) {
+                process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
                 throw new IllegalStateException("OCR 处理超时");
+            }
+            if (Files.exists(processLog) && Files.size(processLog) > maxOutputBytes) {
+                throw new IllegalStateException("OCR 输出超过大小限制");
             }
             String output = Files.exists(processLog)
                     ? Files.readString(processLog, StandardCharsets.UTF_8).strip()
@@ -70,14 +94,28 @@ public class TesseractOcrEngine implements OcrEngine {
                 throw new IllegalStateException(output.isBlank() ? "OCR 服务执行失败" : "OCR 服务执行失败：" + output);
             }
             Path textFile = Path.of(outputBase + ".txt");
+            if (Files.exists(textFile) && Files.size(textFile) > maxOutputBytes) {
+                throw new IllegalStateException("OCR 文本超过大小限制");
+            }
             return Files.exists(textFile) ? Files.readString(textFile, StandardCharsets.UTF_8).strip() : "";
         } catch (InterruptedException exception) {
+            outcome = "interrupted";
+            if (process != null) {
+                process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+            }
             Thread.currentThread().interrupt();
             throw new IllegalStateException("OCR 处理被中断", exception);
         } catch (IOException exception) {
+            outcome = "error";
             throw new IllegalStateException("OCR 服务不可用，请确认已安装 Tesseract 及中文语言包", exception);
+        } catch (RuntimeException exception) {
+            outcome = "error";
+            throw exception;
         } finally {
             deleteTemporaryDirectory(directory);
+            if (acquired) permits.release();
+            if (metrics != null) metrics.recordOcr(outcome, System.nanoTime() - startedAt);
         }
     }
 

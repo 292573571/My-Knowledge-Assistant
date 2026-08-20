@@ -10,6 +10,7 @@ import com.example.workbench.tools.WebSearchService;
 import com.example.workbench.workspace.DocumentVisibility;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,6 +90,7 @@ public class RagService {
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private RagMetrics metrics;
+    private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
 
     /**
      * 注入可选的 RAG 指标记录器，单元测试直接构造服务时可以不提供。
@@ -98,6 +100,11 @@ public class RagService {
     @Autowired(required = false)
     public void setMetrics(RagMetrics metrics) {
         this.metrics = metrics;
+    }
+
+    @Autowired(required = false)
+    public void setAiExecutor(@org.springframework.beans.factory.annotation.Qualifier("aiTaskExecutor") Executor aiExecutor) {
+        this.aiExecutor = aiExecutor;
     }
 
     @Autowired
@@ -918,14 +925,14 @@ public class RagService {
                     () -> similaritySearch(query, candidateLimit, ownerUserId, workspaceId));
             recordRetrievalCount("dense", results.size());
             return results;
-        });
+        }, aiExecutor);
         CompletableFuture<List<SourceDocument>> sparse = hybridEnabled && sparseRetriever != null
                 ? CompletableFuture.supplyAsync(() -> {
                     List<SourceDocument> results = time("keyword_retrieval",
                             () -> safeSparseSearch(query, candidateLimit, ownerUserId, workspaceId));
                     recordRetrievalCount("sparse", results.size());
                     return results;
-                })
+                }, aiExecutor)
                 : CompletableFuture.completedFuture(List.of());
         return dense.thenCombine(sparse, (denseResults, sparseResults) ->
                 new QueryRetrievalResult(query, denseResults, sparseResults));
@@ -1123,7 +1130,7 @@ public class RagService {
                 .filter(this::passesThreshold)
                 .filter(source -> hasStrongRetrievalSignal(question, source))
                 .toList())));
-        boolean shouldLlmGate = alwaysGate || !thresholdSources.isEmpty();
+        boolean shouldLlmGate = alwaysGate;
         List<SourceDocument> relevantSources = shouldLlmGate
                 ? time("quality_validation", () -> qualityGate.relevantSources(question, thresholdSources))
                 : thresholdSources;

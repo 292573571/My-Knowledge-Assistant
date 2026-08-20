@@ -6,12 +6,16 @@ import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.config.HttpRequestLoggingFilter;
 import com.example.workbench.modelconfig.ModelConfigContext;
+import com.example.workbench.observability.StreamMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.Executor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -36,6 +40,8 @@ public class LearningAssistantController {
     private final ConversationExecutionRegistry executionRegistry;
     private final ConversationService conversationService;
     private final ModelConfigContext modelConfigContext;
+    private Executor streamExecutor = Runnable::run;
+    private StreamMetrics streamMetrics;
 
     public LearningAssistantController(LearningAssistantService service,
                                        ConversationExecutionRegistry executionRegistry,
@@ -45,6 +51,16 @@ public class LearningAssistantController {
         this.executionRegistry = executionRegistry;
         this.conversationService = conversationService;
         this.modelConfigContext = modelConfigContext;
+    }
+
+    @Autowired(required = false)
+    public void setStreamExecutor(@Qualifier("streamTaskExecutor") Executor streamExecutor) {
+        this.streamExecutor = streamExecutor;
+    }
+
+    @Autowired(required = false)
+    public void setStreamMetrics(StreamMetrics streamMetrics) {
+        this.streamMetrics = streamMetrics;
     }
 
     @PostMapping
@@ -98,6 +114,7 @@ public class LearningAssistantController {
         Object requestIdAttribute = httpRequest.getAttribute(HttpRequestLoggingFilter.REQUEST_ID_ATTRIBUTE);
         String requestId = requestIdAttribute == null ? "" : requestIdAttribute.toString();
         ConversationExecutionRegistry.Execution execution = executionRegistry.begin(scope);
+        if (streamMetrics != null) streamMetrics.started();
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
         emitter.onTimeout(() -> executionRegistry.cancel(scope));
         emitter.onError(error -> executionRegistry.cancel(scope));
@@ -131,10 +148,11 @@ public class LearningAssistantController {
                 }
                 emitter.completeWithError(exception);
             } finally {
+                if (streamMetrics != null) streamMetrics.finished();
                 executionRegistry.finish(scope, execution);
                 modelConfigContext.clear();
             }
-        });
+        }, streamExecutor);
         return emitter;
     }
 

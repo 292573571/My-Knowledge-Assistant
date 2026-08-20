@@ -39,19 +39,6 @@ function getPageLabel(source) {
   return source.pageNumber ? `第 ${source.pageNumber} 页` : ''
 }
 
-function getScoreLabel(source) {
-  if (source.score == null) return '匹配分数 -'
-
-  const score = Number(source.score)
-  if (Number.isNaN(score)) return '匹配分数 -'
-
-  return `匹配分数：${score.toFixed(2)}`
-}
-
-function getPath(source) {
-  return source.path || source.url || source.file || '-'
-}
-
 function showSourceTooltip(source, event) {
   hoveredSource.value = source
   moveSourceTooltip(event)
@@ -91,12 +78,10 @@ function hideSourceTooltip() {
         <div class="source-card-toggle">
           <div class="source-card-header">
             <strong>{{ getFileName(source) }}</strong>
-            <span>{{ getScoreLabel(source) }}</span>
           </div>
           <small v-if="getPageLabel(source)" class="source-heading-path">{{ getPageLabel(source) }}</small>
           <small v-else-if="getHeadingPath(source)" class="source-heading-path">{{ getHeadingPath(source) }}</small>
           <small v-else class="source-heading-path">未返回标题路径</small>
-          <small>{{ getPageLabel(source) ? `${getPageLabel(source)} · ` : '' }}chunk #{{ source.chunkIndex ?? '-' }}</small>
         </div>
       </article>
 
@@ -109,23 +94,15 @@ function hideSourceTooltip() {
           <strong>{{ getFileName(hoveredSource) }}</strong>
           <dl>
             <div>
-              <dt>path</dt>
-              <dd>{{ getPath(hoveredSource) }}</dd>
+               <dt>位置</dt>
+               <dd>{{ getHeadingPath(hoveredSource) || '-' }}</dd>
             </div>
             <div>
-              <dt>heading</dt>
-              <dd>{{ getHeadingPath(hoveredSource) || '-' }}</dd>
-            </div>
-            <div>
-              <dt>page</dt>
-              <dd>{{ getPageLabel(hoveredSource) || '-' }}</dd>
-            </div>
-            <div>
-              <dt>chunk</dt>
-              <dd>#{{ hoveredSource.chunkIndex ?? '-' }} · score {{ hoveredSource.score ?? '-' }}</dd>
+               <dt>页码</dt>
+               <dd>{{ getPageLabel(hoveredSource) || '-' }}</dd>
             </div>
           </dl>
-          <p>{{ hoveredSource.snippet || hoveredSource.excerpt || hoveredSource.content || '后端未返回 chunk 内容预览' }}</p>
+           <p>{{ hoveredSource.snippet || hoveredSource.excerpt || hoveredSource.content || '暂无内容预览' }}</p>
         </aside>
       </Teleport>
 

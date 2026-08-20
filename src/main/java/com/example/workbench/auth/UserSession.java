@@ -27,9 +27,9 @@ public class UserSession {
     @Comment("所属用户主键")
     private AppUser user;
 
-    @Column(name = "token", nullable = false, unique = true, length = 96)
+    @Column(name = "token_hash", nullable = false, unique = true, length = 64)
     @Comment("会话令牌")
-    private String token;
+    private String tokenHash;
 
     @Column(name = "expires_at", nullable = false)
     @Comment("会话过期时间")
@@ -38,9 +38,9 @@ public class UserSession {
     protected UserSession() {
     }
 
-    public UserSession(AppUser user, String token, Instant expiresAt) {
+    public UserSession(AppUser user, String tokenHash, Instant expiresAt) {
         this.user = user;
-        this.token = token;
+        this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
     }
 
@@ -48,8 +48,8 @@ public class UserSession {
         return user;
     }
 
-    public String getToken() {
-        return token;
+    public String getTokenHash() {
+        return tokenHash;
     }
 
     public Instant getExpiresAt() {

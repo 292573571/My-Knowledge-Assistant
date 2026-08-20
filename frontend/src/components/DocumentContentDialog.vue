@@ -23,7 +23,7 @@ useDialogFocus(dialogRef, () => emit('close'))
     <div class="document-reader-backdrop" @click.self="$emit('close')">
        <section ref="dialogRef" class="document-reader" role="dialog" aria-modal="true" aria-labelledby="document-reader-title">
         <header>
-          <div><p>解析文本预览</p><h2 id="document-reader-title">{{ document.fileName }}</h2><span>{{ document.path }}</span><small v-if="document.sourceAvailable === false" class="source-missing">源文件已缺失，当前展示从知识库索引恢复的解析文本。</small><small v-else-if="isPdf">这里展示用于知识库检索的解析文本，不是 PDF 原始版面。</small></div>
+          <div><p>解析文本预览</p><h2 id="document-reader-title">{{ document.fileName }}</h2><small v-if="document.sourceAvailable === false" class="source-missing">源文件已缺失，当前展示从知识库索引恢复的解析文本。</small><small v-else-if="isPdf">这里展示用于知识库检索的解析文本，不是 PDF 原始版面。</small></div>
           <button type="button" aria-label="关闭文件内容" @click="$emit('close')">×</button>
         </header>
         <div v-if="loading" class="document-reader-state">正在读取文件内容...</div>

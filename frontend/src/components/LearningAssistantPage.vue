@@ -68,6 +68,7 @@ const inspirationPool = [
   '给我一个 Spring AI 的最小实践任务',
   '找出当前知识空间里最值得复习的主题'
 ]
+const props = defineProps({ workspaceId: { type: String, default: '' } })
 let inspirationObserver = null
 let inspirationTimer = null
 let activeRequestId = 0
@@ -85,13 +86,11 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
-  const sessionId = activeSessionId.value
   cancelLocalStream()
+  const sessionId = activeSessionId.value
+  if (sessionId) void stopLearningSession(sessionId, props.workspaceId)
   activeRequestId += 1
   loading.value = false
-  if (sessionId) {
-    stopLearningSession(sessionId).catch(() => {})
-  }
   inspirationObserver?.disconnect()
   if (inspirationTimer) window.clearTimeout(inspirationTimer)
   document.removeEventListener('pointermove', closeSourceOnPointerMove)

@@ -98,6 +98,35 @@ public class RagMetrics {
         }
     }
 
+    public void recordFirstToken(String model, long durationNanos) {
+        Timer.builder("rag.model.first.token.duration")
+                .description("模型流式首 token 延迟")
+                .tag("model", safeModel(model))
+                .register(registry)
+                .record(durationNanos, TimeUnit.NANOSECONDS);
+    }
+
+    public void recordStream(String model, String outcome) {
+        registry.counter("rag.model.stream.total", "model", safeModel(model), "outcome", outcome).increment();
+    }
+
+    public void recordOcr(String outcome, long durationNanos) {
+        Timer.builder("ocr.duration")
+                .description("OCR 处理耗时")
+                .tag("outcome", outcome)
+                .register(registry)
+                .record(durationNanos, TimeUnit.NANOSECONDS);
+        registry.counter("ocr.total", "outcome", outcome).increment();
+    }
+
+    public void recordChromaHealth(String outcome, long durationNanos) {
+        Timer.builder("chroma.health.duration")
+                .description("Chroma 健康检查耗时")
+                .tag("outcome", outcome)
+                .register(registry)
+                .record(durationNanos, TimeUnit.NANOSECONDS);
+    }
+
     /**
      * 记录备用模型或本地回答兜底事件。
      *

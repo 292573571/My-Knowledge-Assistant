@@ -118,8 +118,8 @@ export function submitLearningPractice(sessionId, payload) {
   }, '实践提交失败。')
 }
 
-export function stopLearningSession(sessionId) {
-  return request(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/stop${workspaceQuery()}`, {
+export function stopLearningSession(sessionId, workspaceId = getActiveWorkspaceId()) {
+  return request(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/stop?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
     method: 'POST'
   }, '停止学习请求失败。')
 }

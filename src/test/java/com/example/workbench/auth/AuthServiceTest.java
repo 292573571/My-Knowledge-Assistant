@@ -67,6 +67,25 @@ class AuthServiceTest {
     }
 
     @Test
+    void createsSessionWithHashedToken() {
+        AppUserRepository users = Mockito.mock(AppUserRepository.class);
+        UserSessionRepository sessions = Mockito.mock(UserSessionRepository.class);
+        EmailVerificationService verification = Mockito.mock(EmailVerificationService.class);
+        String passwordHash = new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+                .encode("correct-horse-battery");
+        AppUser user = new AppUser("alice@example.com", "Alice", passwordHash);
+        when(users.findByAccount("alice@example.com")).thenReturn(Optional.of(user));
+        when(sessions.save(any(UserSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AuthService service = service(users, sessions, verification);
+
+        service.login(new LoginRequest("alice@example.com", "correct-horse-battery"));
+
+        ArgumentCaptor<UserSession> sessionCaptor = ArgumentCaptor.forClass(UserSession.class);
+        Mockito.verify(sessions).save(sessionCaptor.capture());
+        assertThat(sessionCaptor.getValue().getTokenHash()).hasSize(64).matches("[0-9a-f]+");
+    }
+
+    @Test
     void rejectsNonEmailAccountForRegularLogin() {
         AppUserRepository users = Mockito.mock(AppUserRepository.class);
         UserSessionRepository sessions = Mockito.mock(UserSessionRepository.class);
@@ -103,6 +122,18 @@ class AuthServiceTest {
         service.changePassword(user, "current-token", new ChangePasswordRequest("old-password", "new-password", "new-password"));
 
         assertThat(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().matches("new-password", user.getPasswordHash())).isTrue();
-        Mockito.verify(sessions).deleteOtherSessions(user.getId(), "current-token");
+        Mockito.verify(sessions).deleteOtherSessions(user.getId(), tokenHash("current-token"));
+    }
+
+    private String tokenHash(String token) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte value : digest) result.append(String.format("%02x", value));
+            return result.toString();
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new AssertionError(exception);
+        }
     }
 }

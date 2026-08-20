@@ -118,7 +118,7 @@ function ruleSummary(item) {
 
 function candidateLocation(candidate) {
   return [candidate.fileName, candidate.pageNumber ? `第 ${candidate.pageNumber} 页` : '',
-    candidate.headingPath, Number.isInteger(candidate.chunkIndex) ? `分块 ${candidate.chunkIndex}` : ''].filter(Boolean).join(' · ')
+    candidate.headingPath].filter(Boolean).join(' · ')
 }
 
 function casePayload() {
@@ -323,8 +323,8 @@ onMounted(loadEvalCases)
          <div class="retrieval-eval-case-list-heading"><span>评测题</span><span>规则与判定</span><span>操作</span></div>
          <article v-for="item in filteredEvalCases" :key="item.id" :class="['retrieval-eval-case-card', { selected: selectedCaseIds.includes(item.id) }]">
            <div class="retrieval-eval-case-main">
-             <input v-model="selectedCaseIds" type="checkbox" :aria-label="`选择 ${item.caseId || `Case #${item.id}`}`" :value="item.id">
-             <div class="retrieval-eval-question"><div class="retrieval-eval-case-title"><strong>{{ item.caseId || `Case #${item.id}` }}</strong><span class="retrieval-eval-tag">{{ item.type || '未设类型' }}</span></div><p :title="item.question">{{ item.question }}</p><div class="retrieval-eval-case-meta"><span>{{ item.suite || 'REGRESSION' }}</span><b>/</b><span>{{ item.layer || 'GENERATION' }}</span><span v-if="item.mode" class="mode">{{ item.mode }}</span></div></div>
+              <input v-model="selectedCaseIds" type="checkbox" :aria-label="`选择${item.caseId ? ` ${item.caseId}` : '这道题'}`" :value="item.id">
+              <div class="retrieval-eval-question"><div class="retrieval-eval-case-title"><strong>{{ item.caseId || '评测题' }}</strong><span class="retrieval-eval-tag">{{ item.type || '未设类型' }}</span></div><p :title="item.question">{{ item.question }}</p><div class="retrieval-eval-case-meta"><span>{{ item.suite || '回归评测' }}</span><b>/</b><span>{{ item.layer || '生成质量' }}</span><span v-if="item.mode" class="mode">{{ item.mode }}</span></div></div>
            </div>
            <div class="retrieval-eval-case-rules"><strong>评测规则</strong><p :title="ruleSummary(item)">{{ ruleSummary(item) }}</p><div class="retrieval-eval-booleans"><span :class="['retrieval-eval-boolean', item.expectNoAnswer ? 'yes' : 'no']">无回答 {{ item.expectNoAnswer ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.requireLocalEvidence ? 'yes' : 'no']">本地证据 {{ item.requireLocalEvidence ? '是' : '否' }}</span><span :class="['retrieval-eval-boolean', item.allowModelFallback ? 'yes' : 'no']">模型兜底 {{ item.allowModelFallback ? '是' : '否' }}</span></div></div>
            <div class="retrieval-eval-card-actions"><button type="button" @click="beginEditCase(item)">编辑</button><button type="button" class="danger" :disabled="caseDeletingId === item.id" @click="removeEvalCase(item)">{{ caseDeletingId === item.id ? '删除中...' : '删除' }}</button></div>
@@ -372,7 +372,7 @@ onMounted(loadEvalCases)
     <section v-if="evalSummary" class="retrieval-eval-summary retrieval-eval-results-view" aria-live="polite">
       <header>
         <div><p>QUALITY BASELINE</p><h2>评测结果</h2></div>
-        <div class="retrieval-eval-results-actions"><span>{{ evalSummary.enhanced ? '增强检索' : '标准检索' }} · 运行 ID：{{ evalSummary.runId || '-' }}</span><button type="button" class="retrieval-eval-secondary" @click="selectedRunId ? returnToHistory() : returnToCases()">{{ selectedRunId ? '返回记录' : '返回题库' }}</button></div>
+        <div class="retrieval-eval-results-actions"><span>{{ evalSummary.enhanced ? '增强检索' : '标准检索' }}</span><button type="button" class="retrieval-eval-secondary" @click="selectedRunId ? returnToHistory() : returnToCases()">{{ selectedRunId ? '返回记录' : '返回题库' }}</button></div>
       </header>
       <div class="retrieval-eval-metrics">
         <div><span>总体通过率</span><strong>{{ percentage(evalSummary.passRate) }}</strong><small>{{ evalSummary.passed || 0 }} / {{ evalSummary.total || 0 }}</small></div>
@@ -394,10 +394,10 @@ onMounted(loadEvalCases)
       </div>
       <div class="retrieval-eval-cases">
         <article v-for="item in evalSummary.results || []" :key="item.id" :class="{ failed: !item.passed }">
-          <span>{{ item.passed ? '通过' : '失败' }}</span><strong>{{ item.id }} · {{ item.suite || 'REGRESSION' }} / {{ item.layer || 'GENERATION' }}</strong><p>{{ item.question }}</p><small>{{ item.reason || '-' }}<template v-if="item.rankingMetricsApplicable"> · R@5 {{ percentage(item.recallAt5) }} · P@5 {{ percentage(item.precisionAt5) }} · RR {{ Number(item.reciprocalRank).toFixed(3) }}</template></small>
+           <span>{{ item.passed ? '通过' : '失败' }}</span><strong>{{ item.suite || '回归评测' }} / {{ item.layer || '生成质量' }}</strong><p>{{ item.question }}</p><small>{{ item.reason || '-' }}<template v-if="item.rankingMetricsApplicable"> · 检索命中率 {{ percentage(item.recallAt5) }} · 结果准确率 {{ percentage(item.precisionAt5) }} · 首个相关结果排名 {{ Number(item.reciprocalRank).toFixed(3) }}</template></small>
           <details v-if="item.retrievalDebug?.length" class="retrieval-eval-diagnostics">
             <summary>查看 {{ item.retrievalDebug.length }} 个检索候选</summary>
-            <div><article v-for="(candidate, index) in item.retrievalDebug" :key="`${candidate.fileName}-${candidate.chunkIndex}-${index}`"><strong>{{ candidateLocation(candidate) }}</strong><small>{{ candidate.retrievalChannel || 'DENSE' }} · 原始得分 {{ Number(candidate.score).toFixed(4) }} · 融合排名 {{ candidate.finalRank ?? '-' }} · {{ candidate.usedInContext ? '已用于回答' : '未用于回答' }}</small><small v-if="candidate.fusionScore != null">Dense {{ candidate.denseRank ?? '-' }} / {{ candidate.denseScore == null ? '-' : Number(candidate.denseScore).toFixed(4) }} · Sparse {{ candidate.sparseRank ?? '-' }} / {{ candidate.sparseScore == null ? '-' : Number(candidate.sparseScore).toFixed(4) }} · RRF {{ Number(candidate.fusionScore).toFixed(6) }}</small><p>{{ candidate.preview }}</p></article></div>
+             <div><article v-for="(candidate, index) in item.retrievalDebug" :key="`${candidate.fileName}-${candidate.chunkIndex}-${index}`"><strong>{{ candidateLocation(candidate) }}</strong><small>{{ candidate.usedInContext ? '已用于回答' : '未用于回答' }}</small><p>{{ candidate.preview }}</p></article></div>
           </details>
         </article>
       </div>

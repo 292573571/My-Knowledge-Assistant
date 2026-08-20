@@ -84,7 +84,14 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `ADMIN_ACCOUNTS` | 空 | 启动时把已有账号迁移为 `ADMIN` |
-| `AUTH_COOKIE_SECURE` | `false` | HTTPS 环境设为 `true` |
+| `AUTH_COOKIE_SECURE` | `true` | 本地 HTTP 开发环境临时设为 `false`，生产环境必须保持 `true` |
+| `MAIL_IP_WINDOW_MINUTES` | `60` | 邮箱验证码 IP 限流窗口 |
+| `MAIL_CODE_MAX_ATTEMPTS` | `5` | 单个验证码最大失败次数 |
+| `MAIL_MAX_IP_SENDS` | `10` | 单个 IP 在限流窗口内最多发送次数 |
+| `FILE_ALLOWED_DIRECTORIES` | `data,docs` | 文件工具允许读取的目录，生产环境应使用明确绝对路径 |
+| `FILE_MAX_READ_BYTES` | `10485760` | 文件工具单次读取上限 |
+| `OCR_MAX_CONCURRENT` | `2` | OCR 同时运行任务数 |
+| `OCR_MAX_OUTPUT_BYTES` | `2097152` | 单次 OCR 输出上限 |
 | `AVATAR_DIRECTORY` | `data/avatars` | 头像目录 |
 | `SMTP_HOST` | 空 | 邮箱 SMTP 服务器，例如 QQ 邮箱 `smtp.qq.com` |
 | `SMTP_PORT` | `465` | SMTP 端口 |
@@ -103,7 +110,7 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 
 完整默认项见 `src/main/resources/application.properties`。
 
-邮箱验证码使用 SMTP 发送，未配置 `SMTP_HOST` 时会回退为「开发模式」：验证码只打印到后端日志，不真正发邮件。使用 QQ 邮箱时的配置示例：
+邮箱验证码使用 SMTP 发送。未配置 `SMTP_HOST` 时不会发送邮件，也不会把验证码写入日志；本地验证流程应配置开发 SMTP 或使用测试替身。验证码哈希和发送记录保存在 PostgreSQL 中，并按邮箱、IP 和失败次数限流。使用 QQ 邮箱时的配置示例：
 
 ```bash
 export SMTP_HOST='smtp.qq.com'

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,6 +27,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -73,6 +76,7 @@ public class TeachingAgentService {
     private final ModelConfigService modelConfigService;
     private final ModelClientFactory modelClientFactory;
     private final TeachingQualityGate qualityGate = new TeachingQualityGate();
+    private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
 
     public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
                                  TeachingCheckService checkService, LearningRecordService learningRecordService,
@@ -89,6 +93,11 @@ public class TeachingAgentService {
         this.modelConfigContext = modelConfigContext;
         this.modelConfigService = modelConfigService;
         this.modelClientFactory = modelClientFactory;
+    }
+
+    @Autowired(required = false)
+    public void setAiExecutor(@Qualifier("aiTaskExecutor") Executor aiExecutor) {
+        this.aiExecutor = aiExecutor;
     }
 
     private ChatClient resolveClient() {
@@ -256,7 +265,7 @@ public class TeachingAgentService {
                     .system(CHECK_SYSTEM_PROMPT)
                     .user(prompt)
                     .call()
-                    .content());
+                    .content(), aiExecutor);
             String raw = future.get(15, TimeUnit.SECONDS);
             requireRunning(cancelled);
             JsonNode root = objectMapper.readTree(stripCodeFence(raw));

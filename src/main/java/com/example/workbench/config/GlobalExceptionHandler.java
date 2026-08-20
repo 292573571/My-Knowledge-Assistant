@@ -6,9 +6,14 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.example.workbench.auth.InvalidCredentialsException;
+import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidationException(MethodArgumentNotValidException exception) {
@@ -33,5 +38,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(new ApiErrorResponse(exception.getMessage()));
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiErrorResponse> handleResponseStatusException(ResponseStatusException exception) {
+        String message = exception.getReason() == null ? "请求无法处理" : exception.getReason();
+        return ResponseEntity.status(exception.getStatusCode()).body(new ApiErrorResponse(message));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> handleUnexpectedException(Exception exception) {
+        log.error("未处理的请求异常 errorType={} message={}", exception.getClass().getSimpleName(), exception.getMessage(), exception);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiErrorResponse("服务暂时不可用，请稍后重试"));
     }
 }

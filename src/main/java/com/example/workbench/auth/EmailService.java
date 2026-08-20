@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Component
 public class EmailService {
@@ -27,14 +29,12 @@ public class EmailService {
 
     public void sendVerificationCode(String to, String code) {
         if (host == null || host.isBlank()) {
-            log.info("邮箱验证码（开发模式，未配置 SMTP）email={} code={}", to, code);
-            return;
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "邮箱服务尚未配置");
         }
 
         JavaMailSender sender = mailSenderProvider.getIfAvailable();
         if (sender == null) {
-            log.warn("邮件发送器不可用，验证码仅记录日志 email={} code={}", to, code);
-            return;
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "邮箱服务暂不可用");
         }
 
         SimpleMailMessage message = new SimpleMailMessage();

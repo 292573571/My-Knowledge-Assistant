@@ -218,7 +218,7 @@ async function run(actionKey, action, successTitle) {
     await loadSummary()
   } catch (exception) {
     notifyError(formatApiError(exception))
-    result.value = exception.requestId ? { title: '操作未完成', requestId: exception.requestId, failed: true } : null
+    result.value = { title: '操作未完成', failed: true }
   } finally {
     busyAction.value = ''
   }
@@ -394,10 +394,9 @@ async function handleTestModel(model) {
     <section v-if="activeTool === 'maintenance' && result" :class="['maintenance-message', { error: result.failed }]" role="status">
       <strong>{{ result.title }}</strong>
       <span v-if="result.taskId">任务已进入后台队列，本页会自动更新状态和进度。</span>
-      <span v-if="result.imported !== undefined">导入 {{ result.imported }} · 跳过 {{ result.skipped }} · 失败 {{ result.failed }} · {{ result.chunks }} chunks</span>
-      <span v-else-if="result.scannedFiles !== undefined">扫描 {{ result.scannedFiles }} · 新增 {{ result.addedFiles }} · 更新 {{ result.updatedFiles }} · 删除 {{ result.deletedFiles }}</span>
-      <span v-else-if="result.clearedDocuments !== undefined">清理 {{ result.clearedDocuments }} 个旧文档 · 重建 {{ result.files }} 个文件 · {{ result.chunks }} chunks</span>
-      <small v-if="result.requestId">requestId: {{ result.requestId }}</small>
+       <span v-if="result.imported !== undefined">导入 {{ result.imported }} 份 · 跳过 {{ result.skipped }} 份 · 失败 {{ result.failed }} 份 · 生成 {{ result.chunks }} 个知识片段</span>
+       <span v-else-if="result.scannedFiles !== undefined">扫描 {{ result.scannedFiles }} 份 · 新增 {{ result.addedFiles }} 份 · 更新 {{ result.updatedFiles }} 份 · 删除 {{ result.deletedFiles }} 份</span>
+       <span v-else-if="result.clearedDocuments !== undefined">清理 {{ result.clearedDocuments }} 个旧文档 · 重建 {{ result.files }} 个文件 · 生成 {{ result.chunks }} 个知识片段</span>
     </section>
 
     <div v-if="activeTool === 'maintenance'" class="maintenance-sections">
