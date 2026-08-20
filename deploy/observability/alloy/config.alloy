@@ -1,0 +1,57 @@
+local.file_match "shihai_runtime" {
+  path_targets = [{
+    __path__    = "/opt/shihai/logs/my-knowledge-assistant.json.log",
+    service     = "shihai",
+    environment = sys.env("APP_ENVIRONMENT"),
+    instance    = sys.env("INSTANCE_ID"),
+  }]
+}
+
+loki.source.file "shihai_runtime" {
+  targets    = local.file_match.shihai_runtime.targets
+  forward_to = [loki.process.shihai_runtime.receiver]
+}
+
+loki.process "shihai_runtime" {
+  stage.json {
+    expressions = {
+      level       = "level",
+      logger      = "logger",
+      timestamp   = "timeMillis",
+      request_id  = "contextMap.requestId",
+      trace_id    = "contextMap.traceId",
+      user_id     = "contextMap.userId",
+      workspace_id = "contextMap.workspaceId",
+      instance_id = "contextMap.instanceId",
+      environment = "contextMap.environment",
+      message     = "message",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level       = "",
+      environment = "",
+      instance_id = "",
+    }
+  }
+
+  stage.structured_metadata {
+    values = {
+      request_id   = "",
+      trace_id     = "",
+      user_id      = "",
+      workspace_id = "",
+      logger       = "",
+      message      = "",
+    }
+  }
+
+  forward_to = [loki.write.shihai.receiver]
+}
+
+loki.write "shihai" {
+  endpoint {
+    url = sys.env("LOKI_URL")
+  }
+}

@@ -37,6 +37,18 @@
             <DefaultRolloverStrategy max="14"/>
         </RollingFile>
 
+        <RollingFile
+                name="JsonFile"
+                fileName="${LOG_PATH}/${APP_NAME}.json.log"
+                filePattern="${LOG_PATH}/archive/${APP_NAME}-%d{yyyy-MM-dd}-%i.json.log.gz">
+            <JsonLayout compact="true" eventEol="true" properties="true" stacktraceAsString="true" charset="UTF-8"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="14"/>
+        </RollingFile>
+
         <Routing name="ApiRouting">
             <Routes pattern="$${ctx:apiLogFile}">
                 <Route>
@@ -68,6 +80,7 @@
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
             <AppenderRef ref="ApiRouting"/>
+            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Logger>
 
@@ -75,6 +88,7 @@
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
+            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Logger>
 
@@ -86,6 +100,7 @@
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
+            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Root>
     </Loggers>

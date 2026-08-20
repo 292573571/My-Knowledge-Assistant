@@ -514,6 +514,8 @@ Actuator 默认绑定 `127.0.0.1:8081`，暴露：
 
 日志会记录请求 ID、接口耗时、任务阶段、模型调用和错误摘要，并自动脱敏密码、Token、Authorization 等字段。不要把真实 API Key、数据库密码或生产数据提交到仓库。
 
+生产运行日志可按 `deploy/observability/README.md` 接入 Grafana Alloy、Loki 和 Grafana。应用会额外写入 JSON 运行日志供 Alloy 采集；审计日志继续以 PostgreSQL 为权威存储，不发送到 Loki。
+
 ## 搜索和 Agent 扩展
 
 项目保留 `WebSearchService`、工具调用事件和任务状态接口，便于继续学习 Agent。当前联网搜索默认关闭，`WebSearchService` 不是已接入的商业搜索服务。建议在现有只读接口基础上先实现知识库维护 Agent，再逐步加入需要确认的同步、重试和删除操作。
