@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
-import { fetchLogs, clearLogs } from '../api/logApi'
+import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api/logApi'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
@@ -14,7 +14,8 @@ function notifyError(msg) { toast.value?.error(msg) }
 function notifySuccess(msg) { toast.value?.success(msg) }
 
 const props = defineProps({
-  workspace: { type: Object, default: null }
+  workspace: { type: Object, default: null },
+  currentUser: { type: Object, default: null }
 })
 
 const documents = ref([])
@@ -45,6 +46,8 @@ const poolForm = reactive({
 })
 
 const logEntries = ref([])
+const auditEntries = ref([])
+const auditLoading = ref(false)
 const logTotal = ref(0)
 const logPage = ref(0)
 const logTotalPages = ref(0)
@@ -69,6 +72,32 @@ async function loadLogs() {
   } finally {
     logLoading.value = false
   }
+}
+
+async function loadAuditEvents() {
+  auditLoading.value = true
+  try {
+    auditEntries.value = await fetchAuditEvents()
+  } catch (e) {
+    notifyError(e.message || '加载审计日志失败')
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+async function purgeAllAuditEvents() {
+  if (!window.confirm('确定删除全部审计日志？此操作仅限超级管理员，且不可恢复。')) return
+  try {
+    const result = await purgeAuditEvents()
+    auditEntries.value = []
+    notifySuccess(`已删除 ${result.deleted || 0} 条审计日志`)
+  } catch (e) {
+    notifyError(e.message || '删除审计日志失败')
+  }
+}
+
+function auditTitle(entry) {
+  return `previousHash=${entry.previousHash}\neventHash=${entry.eventHash}`
 }
 
 function toggleLogAutoRefresh() {
@@ -110,7 +139,7 @@ function logContextTitle(entry) {
 }
 
 async function clearAllLogs() {
-  if (!window.confirm('确定清除所有日志？此操作不可恢复。')) return
+  if (!window.confirm('确定清理全部普通运行日志？审计日志不受影响。')) return
   try {
     const result = await clearLogs()
     logEntries.value = []
@@ -407,6 +436,10 @@ async function handleTestModel(model) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
         日志中心
       </button>
+      <button type="button" :aria-pressed="activeTool === 'audit'" :class="{ active: activeTool === 'audit' }" @click="activeTool = 'audit'; loadAuditEvents()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.5 7 10 4.1-1.5 7-5.3 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        审计日志
+      </button>
     </nav>
 
     <p v-if="activeTool === 'maintenance' && error" class="maintenance-message error" role="alert"><strong>操作失败</strong>{{ error }}</p>
@@ -591,7 +624,7 @@ async function handleTestModel(model) {
         </label>
         <button type="button" class="retrieval-eval-secondary" :disabled="logLoading" @click="loadLogs">{{ logLoading ? '加载中...' : '刷新' }}</button>
         <button type="button" :class="['retrieval-eval-secondary', { active: logAutoRefresh }]" @click="toggleLogAutoRefresh">{{ logAutoRefresh ? '停止自动' : '自动刷新' }}</button>
-        <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="clearAllLogs">清除全部</button>
+        <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="clearAllLogs">清理运行日志</button>
         <span class="log-count">{{ logTotal }} 条</span>
       </div>
 
@@ -614,6 +647,30 @@ async function handleTestModel(model) {
             <button type="button" class="retrieval-eval-secondary" :disabled="logPage >= logTotalPages - 1 || logLoading" @click="logPage++; loadLogs()">下一页</button>
           </div>
         </template>
+      </div>
+    </section>
+
+    <section v-else-if="activeTool === 'audit'" class="log-viewer-section">
+      <header class="log-viewer-header">
+        <div><p class="retrieval-debug-kicker">IMMUTABLE AUDIT TRAIL</p><h2>审计日志</h2><p>记录登录、权限、成员、文档和模型配置变更。普通管理员只读，删除仅限超级管理员。</p></div>
+      </header>
+      <div class="log-viewer-toolbar">
+        <button type="button" class="retrieval-eval-secondary" :disabled="auditLoading" @click="loadAuditEvents">{{ auditLoading ? '加载中...' : '刷新' }}</button>
+        <button v-if="currentUser?.systemRole === 'SUPER_ADMIN'" type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="purgeAllAuditEvents">删除全部审计日志</button>
+        <span class="log-count">{{ auditEntries.length }} 条 · 普通管理员只读</span>
+      </div>
+      <div class="log-viewer-body">
+        <div v-if="auditLoading && !auditEntries.length" class="retrieval-eval-empty">正在加载审计日志...</div>
+        <div v-else-if="!auditEntries.length" class="retrieval-eval-empty">暂无审计日志。</div>
+        <div v-else class="log-line-list">
+          <div v-for="entry in auditEntries" :key="entry.id" class="log-line" :title="auditTitle(entry)">
+            <span class="log-line-time">{{ entry.createdAt }}</span>
+            <span class="log-line-level">{{ entry.outcome }}</span>
+            <span class="log-line-logger">{{ entry.action }}</span>
+            <span class="log-line-text">{{ entry.resourceType }} / {{ entry.resourceId }} · 操作人 {{ entry.actorPublicId }}</span>
+            <span class="log-line-context">链 {{ entry.eventHash?.slice(0, 12) }}</span>
+          </div>
+        </div>
       </div>
     </section>
 

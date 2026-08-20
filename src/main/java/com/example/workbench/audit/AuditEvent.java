@@ -10,6 +10,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import org.hibernate.annotations.Comment;
 
 @Entity
@@ -63,11 +66,25 @@ public class AuditEvent {
     @Comment("事件发生时间")
     private Instant createdAt;
 
+    @Column(name = "previous_hash", nullable = false, updatable = false, length = 64)
+    @Comment("前一条审计事件哈希")
+    private String previousHash;
+
+    @Column(name = "event_hash", nullable = false, updatable = false, unique = true, length = 64)
+    @Comment("当前审计事件哈希")
+    private String eventHash;
+
     protected AuditEvent() {
     }
 
     public AuditEvent(String actorPublicId, String workspaceId, AuditAction action, String resourceType,
                       String resourceId, AuditOutcome outcome, String reasonCode, String requestId) {
+        this(actorPublicId, workspaceId, action, resourceType, resourceId, outcome, reasonCode, requestId, "GENESIS");
+    }
+
+    public AuditEvent(String actorPublicId, String workspaceId, AuditAction action, String resourceType,
+                      String resourceId, AuditOutcome outcome, String reasonCode, String requestId,
+                      String previousHash) {
         this.actorPublicId = safe(actorPublicId, "unknown", 64);
         this.workspaceId = safe(workspaceId, "unknown", 36);
         this.action = action;
@@ -77,11 +94,29 @@ public class AuditEvent {
         this.reasonCode = safe(reasonCode, "NONE", 80);
         this.requestId = safe(requestId, "unknown", 64);
         this.createdAt = Instant.now();
+        this.previousHash = safe(previousHash, "GENESIS", 64);
+        this.eventHash = hash(this.previousHash, this.actorPublicId, this.workspaceId, this.action,
+                this.resourceType, this.resourceId, this.outcome, this.reasonCode, this.requestId, this.createdAt);
     }
 
     private String safe(String value, String fallback, int maxLength) {
         String normalized = value == null || value.isBlank() ? fallback : value;
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
+    }
+
+    private String hash(String previous, String actor, String workspace, AuditAction eventAction,
+                        String type, String resource, AuditOutcome eventOutcome, String reason, String request,
+                        Instant created) {
+        try {
+            String value = String.join("|", previous, actor, workspace, eventAction.name(), type, resource,
+                    eventOutcome.name(), reason, request, created.toString());
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(64);
+            for (byte item : digest) result.append(String.format("%02x", item));
+            return result.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("审计日志哈希算法不可用", exception);
+        }
     }
 
     public Long getId() { return id; }
@@ -94,4 +129,6 @@ public class AuditEvent {
     public String getReasonCode() { return reasonCode; }
     public String getRequestId() { return requestId; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getPreviousHash() { return previousHash; }
+    public String getEventHash() { return eventHash; }
 }

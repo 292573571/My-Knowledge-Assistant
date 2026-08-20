@@ -12,6 +12,8 @@ public record AuditEventResponse(
         AuditOutcome outcome,
         String reasonCode,
         String requestId,
-        Instant createdAt
+        Instant createdAt,
+        String previousHash,
+        String eventHash
 ) {
 }

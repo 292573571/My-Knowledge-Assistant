@@ -6,4 +6,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AuditEventRepository extends JpaRepository<AuditEvent, Long> {
 
     List<AuditEvent> findTop200ByWorkspaceIdOrderByCreatedAtDesc(String workspaceId);
+
+    List<AuditEvent> findTop500ByOrderByCreatedAtDesc();
+
+    AuditEvent findTopByOrderByIdDesc();
 }

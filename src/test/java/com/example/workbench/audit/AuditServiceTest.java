@@ -17,7 +17,8 @@ class AuditServiceTest {
     @Test
     void recordsOnlyStructuredMetadata() {
         AuditEventRepository repository = Mockito.mock(AuditEventRepository.class);
-        AuditService service = new AuditService(repository);
+        AuditService service = new AuditService(repository, Mockito.mock(AuditPurgeEventRepository.class),
+                Mockito.mock(jakarta.persistence.EntityManager.class));
         AppUser actor = Mockito.mock(AppUser.class);
         when(actor.getPublicId()).thenReturn("usr_actor");
 
@@ -36,7 +37,8 @@ class AuditServiceTest {
 
     @Test
     void convertsAuthorizationFailuresToStableCodesWithoutExceptionMessages() {
-        AuditService service = new AuditService(Mockito.mock(AuditEventRepository.class));
+        AuditService service = new AuditService(Mockito.mock(AuditEventRepository.class),
+                Mockito.mock(AuditPurgeEventRepository.class), Mockito.mock(jakarta.persistence.EntityManager.class));
         RuntimeException exception = new ResponseStatusException(HttpStatus.FORBIDDEN,
                 "sensitive account or document detail must not be stored");
 
@@ -49,7 +51,8 @@ class AuditServiceTest {
     @Test
     void auditResponsesExposePublicIdentityInsteadOfAccountOrDatabaseId() {
         AuditEventRepository repository = Mockito.mock(AuditEventRepository.class);
-        AuditService service = new AuditService(repository);
+        AuditService service = new AuditService(repository, Mockito.mock(AuditPurgeEventRepository.class),
+                Mockito.mock(jakarta.persistence.EntityManager.class));
         AuditEvent event = new AuditEvent("usr_public", "team-1", AuditAction.WORKSPACE_MEMBER_ADD,
                 "USER", "usr_member", AuditOutcome.SUCCESS, "NONE", "req-2");
         when(repository.findTop200ByWorkspaceIdOrderByCreatedAtDesc("team-1")).thenReturn(List.of(event));
@@ -72,5 +75,18 @@ class AuditServiceTest {
         assertThat(event.getResourceId()).hasSize(128);
         assertThat(event.getReasonCode()).hasSize(80);
         assertThat(event.getRequestId()).hasSize(64);
+    }
+
+    @Test
+    void createsAnAppendOnlyHashChainValue() {
+        AuditEvent first = new AuditEvent("usr_a", "system", AuditAction.LOGIN_SUCCESS,
+                "AUTH", "usr_a", AuditOutcome.SUCCESS, "NONE", "req-1", "GENESIS");
+        AuditEvent second = new AuditEvent("usr_b", "system", AuditAction.LOGOUT,
+                "AUTH", "usr_b", AuditOutcome.SUCCESS, "NONE", "req-2", first.getEventHash());
+
+        assertThat(first.getPreviousHash()).isEqualTo("GENESIS");
+        assertThat(first.getEventHash()).hasSize(64).matches("[0-9a-f]+");
+        assertThat(second.getPreviousHash()).isEqualTo(first.getEventHash());
+        assertThat(second.getEventHash()).isNotEqualTo(first.getEventHash());
     }
 }
