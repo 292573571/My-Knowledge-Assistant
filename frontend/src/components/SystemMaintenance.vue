@@ -90,6 +90,25 @@ function logLevelClass(level) {
   return ''
 }
 
+function logContextLabel(entry) {
+  const values = [entry.requestId, entry.traceId, entry.userId, entry.workspaceId, entry.instanceId, entry.environment, entry.exceptionType]
+    .filter(Boolean)
+  return values.length ? `${values.length} 个上下文字段` : ''
+}
+
+function logContextTitle(entry) {
+  return [
+    ['requestId', entry.requestId],
+    ['traceId', entry.traceId],
+    ['userId', entry.userId],
+    ['workspaceId', entry.workspaceId],
+    ['instanceId', entry.instanceId],
+    ['environment', entry.environment],
+    ['exceptionType', entry.exceptionType],
+    ['stackTrace', entry.stackTrace]
+  ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`).join('\n')
+}
+
 async function clearAllLogs() {
   if (!window.confirm('确定清除所有日志？此操作不可恢复。')) return
   try {
@@ -586,6 +605,7 @@ async function handleTestModel(model) {
               <span class="log-line-level">{{ entry.level }}</span>
               <span class="log-line-logger">{{ entry.logger }}</span>
               <span class="log-line-text">{{ entry.message }}</span>
+              <span class="log-line-context" :title="logContextTitle(entry)">{{ logContextLabel(entry) }}</span>
             </div>
           </div>
           <div v-if="logTotalPages > 1" class="log-pagination">

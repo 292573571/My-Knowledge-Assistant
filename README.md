@@ -21,6 +21,8 @@
 
 数据库日志中心通过 Log4j2 有界异步队列写入 PostgreSQL，不阻塞业务线程。队列大小可通过 `LOG_JPA_QUEUE_SIZE` 配置，默认 `8192`；队列满时优先保证业务请求和控制台/文件日志，数据库日志可能丢弃。
 
+日志结构化上下文可通过 `INSTANCE_ID` 和 `APP_ENVIRONMENT` 标识实例与环境，默认分别为 `unknown` 和 `development`；请求会自动记录 `requestId`、`traceId`、用户 ID、知识空间 ID，以及异常类型和堆栈。
+
 当前默认关闭联网搜索：`workbench.rag.web-search.enabled=false`。`WebSearchService` 是搜索扩展点，需要接入真实搜索服务后再开启。
 
 ## 技术栈

@@ -26,12 +26,17 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         long startedAt = System.currentTimeMillis();
         String requestId = requestId();
+        String traceId = traceId(request);
         String path = request.getRequestURI();
 
+        ThreadContext.clearAll();
+        LoggingContext.putDeploymentContext();
         ThreadContext.put("requestId", requestId);
+        ThreadContext.put("traceId", traceId);
         ThreadContext.put("apiLogFile", LocalDate.now() + "/" + apiLogFileName(request));
         ThreadContext.put("apiLogArchiveFile", LocalDate.now() + "/archive/" + apiArchiveFileName(request));
         response.setHeader("X-Request-Id", requestId);
+        response.setHeader("X-Trace-Id", traceId);
         request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
 
         log.info(
@@ -90,6 +95,11 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
 
     private String requestId() {
         return UUID.randomUUID().toString();
+    }
+
+    private String traceId(HttpServletRequest request) {
+        String value = request.getHeader("X-Trace-Id");
+        return value == null || value.isBlank() ? UUID.randomUUID().toString() : value.strip();
     }
 
     private String apiLogFileName(HttpServletRequest request) {

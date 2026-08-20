@@ -35,6 +35,7 @@ public class AsyncConfig {
         executor.setQueueCapacity(queue);
         executor.setThreadNamePrefix(prefix + "-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setTaskDecorator(new MdcTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(false);
         executor.initialize();
         return executor;

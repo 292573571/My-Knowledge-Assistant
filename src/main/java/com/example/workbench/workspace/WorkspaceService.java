@@ -6,6 +6,7 @@ import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.auth.SystemRole;
 import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.config.LoggingContext;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -67,6 +68,7 @@ public class WorkspaceService {
         String workspaceId = requestedWorkspaceId == null || requestedWorkspaceId.isBlank()
                 ? "personal-" + user.getId()
                 : requestedWorkspaceId.strip();
+        LoggingContext.put(LoggingContext.WORKSPACE_ID, workspaceId);
         WorkspaceMember membership = memberRepository.findByWorkspaceIdAndUserId(workspaceId, user.getId()).orElse(null);
         if (membership == null) {
             Workspace workspace = workspaceRepository.findById(workspaceId)

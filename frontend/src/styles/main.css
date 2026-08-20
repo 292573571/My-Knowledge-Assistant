@@ -4620,6 +4620,16 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .log-line-text {
   color: #b8c0cc; white-space: pre-wrap; word-break: break-all; flex: 1;
 }
+
+.log-line-context {
+  flex: 0 0 auto;
+  max-width: 130px;
+  overflow: hidden;
+  color: #9ba9b4;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .log-line.error .log-line-text { color: #ff6b6b; }
 .log-line.warn .log-line-text { color: #f0c040; }
 .log-line.debug .log-line-text { color: #6a7a8a; }

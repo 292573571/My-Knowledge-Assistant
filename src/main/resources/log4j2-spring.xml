@@ -3,8 +3,8 @@
     <Properties>
         <Property name="LOG_PATH">${env:LOG_PATH:-logs}</Property>
         <Property name="APP_NAME">my-knowledge-assistant</Property>
-        <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{36} - %msg%n%throwable</Property>
-        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} %logger{80} - %msg%n%throwable</Property>
+        <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{36} - %msg%n%throwable</Property>
+        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{80} - %msg%n%throwable</Property>
     </Properties>
 
     <Appenders>

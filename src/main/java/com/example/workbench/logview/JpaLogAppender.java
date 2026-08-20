@@ -1,6 +1,9 @@
 package com.example.workbench.logview;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.Instant;
+import com.example.workbench.config.LoggingContext;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.Filter;
 import org.apache.logging.log4j.core.LogEvent;
@@ -67,8 +70,31 @@ public class JpaLogAppender extends AbstractAppender {
             String thread = event.getThreadName();
             if (thread != null && thread.length() > 80) thread = thread.substring(0, 80);
             if (logger != null && logger.length() > 200) logger = logger.substring(0, 200);
-            repository.save(new SystemLog(ts, level, logger != null ? logger : "", thread != null ? thread : "", message != null ? message : ""));
+            Throwable thrown = event.getThrown();
+            String exceptionType = null;
+            String stackTrace = null;
+            if (thrown != null) {
+                exceptionType = thrown.getClass().getName();
+                StringWriter writer = new StringWriter();
+                thrown.printStackTrace(new PrintWriter(writer));
+                stackTrace = writer.toString();
+                if (stackTrace.length() > 32000) stackTrace = stackTrace.substring(0, 32000);
+            }
+            repository.save(new SystemLog(ts, level, logger != null ? logger : "", thread != null ? thread : "", message != null ? message : "",
+                    context(event, LoggingContext.REQUEST_ID), context(event, LoggingContext.TRACE_ID),
+                    context(event, LoggingContext.USER_ID), context(event, LoggingContext.WORKSPACE_ID),
+                    context(event, LoggingContext.INSTANCE_ID), context(event, LoggingContext.ENVIRONMENT),
+                    exceptionType, stackTrace));
         } catch (Exception ignored) {
         }
+    }
+
+    private String context(LogEvent event, String key) {
+        String value = event.getContextData().getValue(key);
+        if ((value == null || value.isBlank())
+                && (LoggingContext.INSTANCE_ID.equals(key) || LoggingContext.ENVIRONMENT.equals(key))) {
+            value = LoggingContext.deploymentValue(key);
+        }
+        return value == null || value.isBlank() ? null : value;
     }
 }

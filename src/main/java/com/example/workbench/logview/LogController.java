@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import org.springframework.data.jpa.domain.Specification;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -51,6 +52,13 @@ public class LogController {
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int hours,
+            @RequestParam(required = false) String requestId,
+            @RequestParam(required = false) String traceId,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String workspaceId,
+            @RequestParam(required = false) String instanceId,
+            @RequestParam(required = false) String environment,
+            @RequestParam(required = false) String exceptionType,
             HttpServletRequest request
     ) {
         AppUser user = user(request);
@@ -64,32 +72,35 @@ public class LogController {
         List<String> levels = level != null && !level.isBlank() ? LEVEL_ABOVE.getOrDefault(level.strip().toUpperCase(), null) : null;
         String kw = keyword != null && !keyword.isBlank() ? keyword.strip() : null;
 
-        Page<SystemLog> result;
         PageRequest pageable = PageRequest.of(page, size);
-
-        if (since == null && levels != null && kw != null) {
-            result = systemLogRepository.findByLevelInAndMessageContainingIgnoreCaseOrderByTimestampDesc(levels, kw, pageable);
-        } else if (since == null && levels != null) {
-            result = systemLogRepository.findByLevelInOrderByTimestampDesc(levels, pageable);
-        } else if (since == null && kw != null) {
-            result = systemLogRepository.findByMessageContainingIgnoreCaseOrderByTimestampDesc(kw, pageable);
-        } else if (since == null) {
-            result = systemLogRepository.findAllByOrderByTimestampDesc(pageable);
-        } else if (levels != null && kw != null) {
-            result = systemLogRepository.findByLevelInAndMessageContainingIgnoreCaseAndTimestampAfterOrderByTimestampDesc(levels, kw, since, pageable);
-        } else if (levels != null) {
-            result = systemLogRepository.findByLevelInAndTimestampAfterOrderByTimestampDesc(levels, since, pageable);
-        } else if (kw != null) {
-            result = systemLogRepository.findByMessageContainingIgnoreCaseAndTimestampAfterOrderByTimestampDesc(kw, since, pageable);
-        } else {
-            result = systemLogRepository.findByTimestampAfterOrderByTimestampDesc(since, pageable);
-        }
+        Specification<SystemLog> specification = Specification.where(null);
+        if (levels != null) specification = specification.and((root, query, builder) -> root.get("level").in(levels));
+        if (kw != null) specification = specification.and((root, query, builder) ->
+                builder.like(builder.lower(root.get("message")), "%" + kw.toLowerCase() + "%"));
+        if (since != null) specification = specification.and((root, query, builder) ->
+                builder.greaterThan(root.get("timestamp"), since));
+        specification = exact(specification, "requestId", requestId);
+        specification = exact(specification, "traceId", traceId);
+        specification = exact(specification, "userId", userId);
+        specification = exact(specification, "workspaceId", workspaceId);
+        specification = exact(specification, "instanceId", instanceId);
+        specification = exact(specification, "environment", environment);
+        specification = exact(specification, "exceptionType", exceptionType);
+        Page<SystemLog> result = systemLogRepository.findAll(specification, pageable);
 
         List<LogEntry> entries = result.getContent().stream()
-                .map(l -> new LogEntry(l.getId(), FMT.format(l.getTimestamp().atZone(ZONE_CN)), l.getLevel(), l.getLogger(), l.getThread(), l.getMessage()))
+                .map(l -> new LogEntry(l.getId(), FMT.format(l.getTimestamp().atZone(ZONE_CN)), l.getLevel(), l.getLogger(), l.getThread(),
+                        l.getMessage(), l.getRequestId(), l.getTraceId(), l.getUserId(), l.getWorkspaceId(), l.getInstanceId(),
+                        l.getEnvironment(), l.getExceptionType(), l.getStackTrace()))
                 .toList();
 
         return new LogResponse(result.getTotalElements(), page, result.getTotalPages(), entries);
+    }
+
+    private Specification<SystemLog> exact(Specification<SystemLog> specification, String field, String value) {
+        if (value == null || value.isBlank()) return specification;
+        String normalized = value.strip();
+        return specification.and((root, query, builder) -> builder.equal(root.get(field), normalized));
     }
 
     @Scheduled(fixedRateString = "${workbench.log.cleanup-interval-ms:3600000}")
@@ -119,6 +130,8 @@ public class LogController {
         return Map.of("deleted", count);
     }
 
-    public record LogEntry(long id, String timestamp, String level, String logger, String thread, String message) {}
+    public record LogEntry(long id, String timestamp, String level, String logger, String thread, String message,
+                           String requestId, String traceId, String userId, String workspaceId, String instanceId,
+                           String environment, String exceptionType, String stackTrace) {}
     public record LogResponse(long total, int page, int totalPages, List<LogEntry> entries) {}
 }

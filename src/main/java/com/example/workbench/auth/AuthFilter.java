@@ -2,6 +2,7 @@ package com.example.workbench.auth;
 
 import com.example.workbench.config.ApiErrorResponse;
 import com.example.workbench.modelconfig.ModelConfigContext;
+import com.example.workbench.config.LoggingContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -46,6 +47,7 @@ public class AuthFilter extends OncePerRequestFilter {
             AppUser user = authService.authenticate(token);
             request.setAttribute(AUTHENTICATED_USER_ATTRIBUTE, user);
             request.setAttribute(AUTH_TOKEN_ATTRIBUTE, token);
+            LoggingContext.put(LoggingContext.USER_ID, user.getId());
             modelConfigContext.set(user.getId());
             filterChain.doFilter(request, response);
         } catch (InvalidCredentialsException exception) {
