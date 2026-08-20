@@ -20,6 +20,7 @@ loki.process "shihai_runtime" {
       timestamp   = "timeMillis",
       request_id  = "contextMap.requestId",
       trace_id    = "contextMap.traceId",
+      span_id     = "contextMap.spanId",
       user_id     = "contextMap.userId",
       workspace_id = "contextMap.workspaceId",
       instance_id = "contextMap.instanceId",
@@ -40,6 +41,7 @@ loki.process "shihai_runtime" {
     values = {
       request_id   = "",
       trace_id     = "",
+      span_id      = "",
       user_id      = "",
       workspace_id = "",
       logger       = "",
@@ -53,5 +55,44 @@ loki.process "shihai_runtime" {
 loki.write "shihai" {
   endpoint {
     url = sys.env("LOKI_URL")
+  }
+}
+
+otelcol.receiver.otlp "shihai" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces  = [otelcol.processor.batch.shihai.input]
+    metrics = [otelcol.processor.batch.shihai.input]
+  }
+}
+
+otelcol.processor.batch "shihai" {
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.prometheus.shihai.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = sys.env("TEMPO_OTLP_ENDPOINT")
+    tls {
+      insecure = true
+    }
+  }
+}
+
+otelcol.exporter.prometheus "shihai" {
+  forward_to = [prometheus.remote_write.shihai.receiver]
+}
+
+prometheus.remote_write "shihai" {
+  endpoint {
+    url = sys.env("PROMETHEUS_REMOTE_WRITE_URL")
   }
 }

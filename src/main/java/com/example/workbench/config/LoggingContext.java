@@ -7,6 +7,7 @@ public final class LoggingContext {
 
     public static final String REQUEST_ID = "requestId";
     public static final String TRACE_ID = "traceId";
+    public static final String SPAN_ID = "spanId";
     public static final String USER_ID = "userId";
     public static final String WORKSPACE_ID = "workspaceId";
     public static final String INSTANCE_ID = "instanceId";
@@ -24,7 +25,8 @@ public final class LoggingContext {
         } else {
             String text = value.toString();
             int maxLength = switch (key) {
-                case REQUEST_ID, TRACE_ID, INSTANCE_ID -> 128;
+                case REQUEST_ID, TRACE_ID -> 128;
+                case SPAN_ID, INSTANCE_ID -> 128;
                 case USER_ID -> 64;
                 case WORKSPACE_ID -> 120;
                 case ENVIRONMENT -> 32;

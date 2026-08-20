@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.UUID;
+import io.opentelemetry.api.trace.Span;
 import org.apache.logging.log4j.ThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,12 +28,14 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
         long startedAt = System.currentTimeMillis();
         String requestId = requestId();
         String traceId = traceId(request);
+        String spanId = spanId();
         String path = request.getRequestURI();
 
         ThreadContext.clearAll();
         LoggingContext.putDeploymentContext();
         ThreadContext.put("requestId", requestId);
         ThreadContext.put("traceId", traceId);
+        LoggingContext.put(LoggingContext.SPAN_ID, spanId);
         ThreadContext.put("apiLogFile", LocalDate.now() + "/" + apiLogFileName(request));
         ThreadContext.put("apiLogArchiveFile", LocalDate.now() + "/archive/" + apiArchiveFileName(request));
         response.setHeader("X-Request-Id", requestId);
@@ -98,8 +101,20 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
     }
 
     private String traceId(HttpServletRequest request) {
+        Span span = Span.current();
+        if (span.getSpanContext().isValid()) {
+            return span.getSpanContext().getTraceId();
+        }
         String value = request.getHeader("X-Trace-Id");
-        return value == null || value.isBlank() ? UUID.randomUUID().toString() : value.strip();
+        if (value != null && value.strip().matches("[0-9a-fA-F]{32}")) {
+            return value.strip().toLowerCase();
+        }
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String spanId() {
+        Span span = Span.current();
+        return span.getSpanContext().isValid() ? span.getSpanContext().getSpanId() : "none";
     }
 
     private String apiLogFileName(HttpServletRequest request) {

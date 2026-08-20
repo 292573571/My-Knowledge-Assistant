@@ -16,6 +16,8 @@ ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/var/lib/alloy
 ReadOnlyPaths=/opt/shihai/logs
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

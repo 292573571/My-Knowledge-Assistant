@@ -516,6 +516,8 @@ Actuator 默认绑定 `127.0.0.1:8081`，暴露：
 
 生产运行日志可按 `deploy/observability/README.md` 接入 Grafana Alloy、Loki 和 Grafana。应用会额外写入 JSON 运行日志供 Alloy 采集；审计日志继续以 PostgreSQL 为权威存储，不发送到 Loki。
 
+生产可进一步启用 OpenTelemetry Java Agent：Trace 经 Alloy OTLP 写入 Tempo，Prometheus 抓取 `/actuator/prometheus`，Grafana 预配置 Loki、Tempo 和 Prometheus 数据源。HTTP 响应头、MDC、JSON 日志和 Tempo 使用同一个 `traceId`，可从 Trace 跳转到完整请求日志链路。
+
 ## 搜索和 Agent 扩展
 
 项目保留 `WebSearchService`、工具调用事件和任务状态接口，便于继续学习 Agent。当前联网搜索默认关闭，`WebSearchService` 不是已接入的商业搜索服务。建议在现有只读接口基础上先实现知识库维护 Agent，再逐步加入需要确认的同步、重试和删除操作。
