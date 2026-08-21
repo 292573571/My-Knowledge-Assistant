@@ -1,6 +1,6 @@
 # My Knowledge Assistant
 
-一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答、评测和基础可观测性。
+一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答和评测。
 
 当前版本已经适合作为 RAG 应用和 Agent 学习底座，但联网搜索仍是扩展点，不应当按完整搜索产品理解。
 
@@ -17,7 +17,7 @@
 - PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
-- Actuator、Prometheus、请求 ID、结构化日志和敏感信息脱敏。
+- Actuator、请求 ID、结构化日志和敏感信息脱敏。
 
 数据库日志中心通过 Log4j2 有界异步队列写入 PostgreSQL，不阻塞业务线程。队列大小可通过 `LOG_JPA_QUEUE_SIZE` 配置，默认 `8192`；队列满时优先保证业务请求和控制台/文件日志，数据库日志可能丢弃。
 
@@ -32,7 +32,7 @@
 ## 技术栈
 
 - 后端：Java 17、Spring Boot 3.4.5、Spring AI 1.0.0、Spring Data JPA。
-- 数据库：PostgreSQL、Flyway、Hibernate Schema Update。
+- 数据库：PostgreSQL、Flyway、Hibernate Schema Validate。
 - 向量库：Chroma，Chroma 不可用时保留内存回退能力。
 - 文档处理：PDFBox、Apache POI、Jsoup、Tesseract OCR。
 - 前端：Vue、Vite、Yarn、Markdown-it、highlight.js、DOMPurify。
@@ -482,7 +482,7 @@ yarn build
 
 ## 数据库、日志和监控
 
-当前配置同时启用 Flyway 基线和 `spring.jpa.hibernate.ddl-auto=update`。部分结构由迁移脚本提供，JPA 实体仍会在启动时更新结构；生产环境上线前应明确迁移边界，并评估关闭 `ddl-auto=update`。
+当前配置使用 Flyway 基线和 `spring.jpa.hibernate.ddl-auto=validate`。数据库结构必须由 Flyway 迁移脚本提供，JPA 只在启动时校验结构，不会自动修改生产数据库。生产环境升级前应先备份数据库，并确认新增迁移已成功执行。
 
 学习资产相关迁移包括：
 
@@ -504,19 +504,16 @@ logs/                 Log4j2 日志
 target/               Maven 构建产物
 ```
 
-Actuator 默认绑定 `127.0.0.1:8081`，暴露：
+Actuator 默认绑定 `127.0.0.1:8081`，仅暴露健康和信息端点：
 
 ```text
 /actuator/health
 /actuator/info
-/actuator/prometheus
 ```
 
 日志会记录请求 ID、接口耗时、任务阶段、模型调用和错误摘要，并自动脱敏密码、Token、Authorization 等字段。不要把真实 API Key、数据库密码或生产数据提交到仓库。
 
-生产运行日志可按 `deploy/observability/README.md` 接入 Grafana Alloy、Loki 和 Grafana。应用会额外写入 JSON 运行日志供 Alloy 采集；审计日志继续以 PostgreSQL 为权威存储，不发送到 Loki。
-
-生产可进一步启用 OpenTelemetry Java Agent：Trace 经 Alloy OTLP 写入 Tempo，Prometheus 抓取 `/actuator/prometheus`，Grafana 预配置 Loki、Tempo 和 Prometheus 数据源。HTTP 响应头、MDC、JSON 日志和 Tempo 使用同一个 `traceId`，可从 Trace 跳转到完整请求日志链路。
+单服务器不部署独立日志平台。普通运行日志写入 PostgreSQL `system_log` 和本地滚动文本文件，由维护页面查询、过滤和清理；审计日志继续写入独立的 `audit_events` 和 `audit_purge_events`。
 
 ## 搜索和 Agent 扩展
 

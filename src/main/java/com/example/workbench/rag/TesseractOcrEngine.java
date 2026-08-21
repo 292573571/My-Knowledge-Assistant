@@ -24,13 +24,6 @@ public class TesseractOcrEngine implements OcrEngine {
     private final OcrImagePreprocessor imagePreprocessor;
     private final Semaphore permits;
     private final long maxOutputBytes;
-    private com.example.workbench.observability.RagMetrics metrics;
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setMetrics(com.example.workbench.observability.RagMetrics metrics) {
-        this.metrics = metrics;
-    }
-
     /**
      * 创建 Tesseract 命令行 OCR 引擎。
      *
@@ -59,8 +52,6 @@ public class TesseractOcrEngine implements OcrEngine {
     public String recognize(BufferedImage image) {
         if (image == null) throw new IllegalArgumentException("OCR 图片不能为空");
         boolean acquired = false;
-        long startedAt = System.nanoTime();
-        String outcome = "success";
         Path directory = null;
         Process process = null;
         try {
@@ -99,7 +90,6 @@ public class TesseractOcrEngine implements OcrEngine {
             }
             return Files.exists(textFile) ? Files.readString(textFile, StandardCharsets.UTF_8).strip() : "";
         } catch (InterruptedException exception) {
-            outcome = "interrupted";
             if (process != null) {
                 process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
@@ -107,15 +97,12 @@ public class TesseractOcrEngine implements OcrEngine {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("OCR 处理被中断", exception);
         } catch (IOException exception) {
-            outcome = "error";
             throw new IllegalStateException("OCR 服务不可用，请确认已安装 Tesseract 及中文语言包", exception);
         } catch (RuntimeException exception) {
-            outcome = "error";
             throw exception;
         } finally {
             deleteTemporaryDirectory(directory);
             if (acquired) permits.release();
-            if (metrics != null) metrics.recordOcr(outcome, System.nanoTime() - startedAt);
         }
     }
 

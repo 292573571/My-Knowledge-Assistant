@@ -6,7 +6,6 @@ import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.config.HttpRequestLoggingFilter;
 import com.example.workbench.modelconfig.ModelConfigContext;
-import com.example.workbench.observability.StreamMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -41,7 +40,6 @@ public class LearningAssistantController {
     private final ConversationService conversationService;
     private final ModelConfigContext modelConfigContext;
     private Executor streamExecutor = Runnable::run;
-    private StreamMetrics streamMetrics;
 
     public LearningAssistantController(LearningAssistantService service,
                                        ConversationExecutionRegistry executionRegistry,
@@ -56,11 +54,6 @@ public class LearningAssistantController {
     @Autowired(required = false)
     public void setStreamExecutor(@Qualifier("streamTaskExecutor") Executor streamExecutor) {
         this.streamExecutor = streamExecutor;
-    }
-
-    @Autowired(required = false)
-    public void setStreamMetrics(StreamMetrics streamMetrics) {
-        this.streamMetrics = streamMetrics;
     }
 
     @PostMapping
@@ -114,7 +107,6 @@ public class LearningAssistantController {
         Object requestIdAttribute = httpRequest.getAttribute(HttpRequestLoggingFilter.REQUEST_ID_ATTRIBUTE);
         String requestId = requestIdAttribute == null ? "" : requestIdAttribute.toString();
         ConversationExecutionRegistry.Execution execution = executionRegistry.begin(scope);
-        if (streamMetrics != null) streamMetrics.started();
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
         emitter.onTimeout(() -> executionRegistry.cancel(scope));
         emitter.onError(error -> executionRegistry.cancel(scope));
@@ -148,7 +140,6 @@ public class LearningAssistantController {
                 }
                 emitter.completeWithError(exception);
             } finally {
-                if (streamMetrics != null) streamMetrics.finished();
                 executionRegistry.finish(scope, execution);
                 modelConfigContext.clear();
             }

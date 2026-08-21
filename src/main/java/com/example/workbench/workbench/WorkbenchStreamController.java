@@ -14,7 +14,6 @@ import com.example.workbench.rag.RagStreamResponse;
 import com.example.workbench.rag.RagQualityAuditService;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
-import com.example.workbench.observability.StreamMetrics;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -53,7 +52,6 @@ public class WorkbenchStreamController {
     private final WorkspaceService workspaceService;
     private final ModelConfigContext modelConfigContext;
     private Executor streamExecutor = Runnable::run;
-    private StreamMetrics streamMetrics;
 
     public WorkbenchStreamController(
             RagService ragService,
@@ -82,11 +80,6 @@ public class WorkbenchStreamController {
         this.streamExecutor = streamExecutor;
     }
 
-    @Autowired(required = false)
-    public void setStreamMetrics(StreamMetrics streamMetrics) {
-        this.streamMetrics = streamMetrics;
-    }
-
     @PostMapping
     public WorkbenchChatResponse chat(@Valid @RequestBody WorkbenchChatRequest request, HttpServletRequest httpRequest) {
         return workbenchChatService.chat(user(httpRequest), request);
@@ -113,7 +106,6 @@ public class WorkbenchStreamController {
         String scopedConversationId = conversationService.executionScope(user, workspace.workspaceId(), normalizedConversationId);
         // 与普通聊天使用同一取消注册表，保证停止/删除语义在两条路径一致。
         ConversationExecutionRegistry.Execution execution = executionRegistry.begin(scopedConversationId);
-        if (streamMetrics != null) streamMetrics.started();
 
         CompletableFuture.runAsync(() -> {
             long startedAt = System.currentTimeMillis();
@@ -203,7 +195,6 @@ public class WorkbenchStreamController {
                 }
                 emitter.completeWithError(error);
             } finally {
-                if (streamMetrics != null) streamMetrics.finished();
                 if (execution.isCancelled()) {
                     // 取消时清除短期上下文，删除或停止后不应保留在内存中。
                     conversationMemory.remove(scopedConversationId);

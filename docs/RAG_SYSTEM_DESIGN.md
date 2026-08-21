@@ -424,8 +424,7 @@ eval/multiformat/questions.json
 
 ### 主要缺口
 
-- 尚未把阶段指标接入 Micrometer/Prometheus。
-- 尚无跨 HTTP、Embedding、Chroma 和模型调用的 OpenTelemetry Trace。
+- 当前采用应用内日志和维护页面排障，不接入独立指标与 Trace 平台。
 - 未记录完整 Token 预算、模型费用和 P95/P99 延迟。
 - Chroma 到内存回退只有日志，没有独立告警。
 - 规则重排前后排名没有结构化持久化。
@@ -461,7 +460,7 @@ eval/multiformat/questions.json
 
 ### 第 9～10 分钟：质量和下一步
 
-系统已有多格式评测、检索诊断、任务失败日志和质量门禁。下一步企业化重点是接入 Micrometer/OpenTelemetry、统一 Chroma 与内存回退的分数语义、建立 Token/成本指标，并引入全文检索与 RRF，降低编号、OCR 和表格查询仅靠向量召回的风险。
+系统已有多格式评测、检索诊断、任务失败日志和质量门禁。下一步重点是统一 Chroma 与内存回退的分数语义，并引入全文检索与 RRF，降低编号、OCR 和表格查询仅靠向量召回的风险。
 
 ## 11. 验收问答
 

@@ -3,7 +3,6 @@ package com.example.workbench.rag;
 import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AppUserRepository;
-import com.example.workbench.observability.RagMetrics;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import java.nio.file.Files;
@@ -32,7 +31,6 @@ public class DocumentTaskService {
     private final WorkspaceService workspaceService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final String workerId = UUID.randomUUID().toString();
-    private RagMetrics metrics;
     private DocumentTaskBatchRepository batchRepository;
     private DocumentTaskBatchArtifactStore batchArtifactStore;
 
@@ -41,11 +39,6 @@ public class DocumentTaskService {
      *
      * @param metrics RAG 指标记录器
      */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setMetrics(RagMetrics metrics) {
-        this.metrics = metrics;
-    }
-
     /**
      * 注入长文档批次记录仓库。
      *
@@ -264,7 +257,6 @@ public class DocumentTaskService {
             task.succeed(documentId);
             repository.saveAndFlush(task);
             deleteBatchArtifacts(taskId);
-            recordTaskTransition(task);
             log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
         } catch (Exception exception) {
             task = repository.findById(taskId).orElseThrow();
@@ -273,7 +265,6 @@ public class DocumentTaskService {
             task.fail(publicErrorMessage(exception), isRetryable(exception));
             repository.saveAndFlush(task);
             if (task.getStatus() == DocumentTaskStatus.FAILED) deleteBatchArtifacts(taskId);
-            recordTaskTransition(task);
             // 后台线程没有 HTTP 异常处理器兜底，必须保留完整异常链才能区分 OCR、Embedding 和 Chroma 故障。
             log.warn("Document task failed taskId={} type={} fileName={} failedStage={} status={} attempt={}",
                     taskId, task.getType(), task.getFileName(), failedStage, task.getStatus(),
@@ -536,9 +527,4 @@ public class DocumentTaskService {
         }
     }
 
-    private void recordTaskTransition(DocumentTaskEntity task) {
-        if (metrics != null) {
-            metrics.recordDocumentTask(task.getType().name(), task.getStatus().name());
-        }
-    }
 }

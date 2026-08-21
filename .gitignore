@@ -24,8 +24,6 @@ deploy/*
 !deploy/release-local.sh
 !deploy/deploy-shihai
 !deploy/migrate-zhihai-to-shihai.sh
-!deploy/observability/
-!deploy/observability/**
 scripts/
 docker-compose.yml
 

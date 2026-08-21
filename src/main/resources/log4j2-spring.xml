@@ -3,8 +3,8 @@
     <Properties>
         <Property name="LOG_PATH">${env:LOG_PATH:-logs}</Property>
         <Property name="APP_NAME">my-knowledge-assistant</Property>
-        <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} spanId=%X{spanId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{36} - %msg%n%throwable</Property>
-        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} spanId=%X{spanId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{80} - %msg%n%throwable</Property>
+        <Property name="CONSOLE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{36} - %msg%n%throwable</Property>
+        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] requestId=%X{requestId} traceId=%X{traceId} userId=%X{userId} workspaceId=%X{workspaceId} instanceId=%X{instanceId} environment=%X{environment} %logger{80} - %msg%n%throwable</Property>
     </Properties>
 
     <Appenders>
@@ -37,35 +37,6 @@
             <DefaultRolloverStrategy max="14"/>
         </RollingFile>
 
-        <RollingFile
-                name="JsonFile"
-                fileName="${LOG_PATH}/${APP_NAME}.json.log"
-                filePattern="${LOG_PATH}/archive/${APP_NAME}-%d{yyyy-MM-dd}-%i.json.log.gz">
-            <JsonLayout compact="true" eventEol="true" properties="true" stacktraceAsString="true" charset="UTF-8"/>
-            <Policies>
-                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
-                <SizeBasedTriggeringPolicy size="20 MB"/>
-            </Policies>
-            <DefaultRolloverStrategy max="14"/>
-        </RollingFile>
-
-        <Routing name="ApiRouting">
-            <Routes pattern="$${ctx:apiLogFile}">
-                <Route>
-                    <RollingFile
-                            name="ApiFile-${ctx:apiLogFile}"
-                            fileName="${LOG_PATH}/${ctx:apiLogFile}"
-                            filePattern="${LOG_PATH}/${ctx:apiLogArchiveFile}">
-                        <PatternLayout pattern="${FILE_PATTERN}" charset="UTF-8"/>
-                        <Policies>
-                            <SizeBasedTriggeringPolicy size="10 MB"/>
-                        </Policies>
-                        <DefaultRolloverStrategy max="10"/>
-                    </RollingFile>
-                </Route>
-            </Routes>
-        </Routing>
-
         <Jpa name="Jpa" ignoreExceptions="true"/>
 
         <Async name="JpaAsync" bufferSize="${env:LOG_JPA_QUEUE_SIZE:-8192}" blocking="false"
@@ -79,8 +50,6 @@
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
-            <AppenderRef ref="ApiRouting"/>
-            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Logger>
 
@@ -88,7 +57,6 @@
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
-            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Logger>
 
@@ -100,7 +68,6 @@
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
-            <AppenderRef ref="JsonFile"/>
             <AppenderRef ref="JpaAsync"/>
         </Root>
     </Loggers>
