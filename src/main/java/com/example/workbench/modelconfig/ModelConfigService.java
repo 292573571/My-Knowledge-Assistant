@@ -46,27 +46,26 @@ public class ModelConfigService {
 
     /** 解析用户对话模型的完整配置 */
     public ModelSpec resolve(Long userId) {
-        if (userId == null) {
-            log.info("resolve: userId is null, using defaultChatSpec");
-            return defaultChatSpec();
+        return resolve(userId, null);
+    }
+
+    public ModelSpec resolve(Long userId, Long selectedModelId) {
+        return resolve(userId, selectedModelId, null);
+    }
+
+    public ModelSpec resolve(Long userId, Long selectedModelId, String userPublicId) {
+        if (selectedModelId != null) {
+            AiModel selected = aiModelRepository.findById(selectedModelId)
+                    .filter(AiModel::isEnabled)
+                    .filter(model -> model.getModelType() == AiModelType.CHAT)
+                    .filter(model -> model.getOwnerPublicId() == null
+                            || (userPublicId != null && userPublicId.equals(model.getOwnerPublicId())))
+                    .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                            org.springframework.http.HttpStatus.BAD_REQUEST, "所选对话模型不存在或已禁用"));
+            return toSpec(selected);
         }
-        UserModelConfig config = userModelConfigRepository.findByUserId(userId).orElse(null);
-        if (config == null || config.getMode() == UserModelMode.FOLLOW_DEFAULT) {
-            log.info("resolve: userId={} mode=FOLLOW_DEFAULT, using defaultChatSpec", userId);
-            return defaultChatSpec();
-        }
-        if (config.getMode() == UserModelMode.USE_POOL_MODEL) {
-            AiModel model = config.getModelId() == null ? null
-                    : aiModelRepository.findById(config.getModelId()).filter(AiModel::isEnabled).orElse(null);
-            if (model != null) {
-                log.info("resolve: userId={} mode=USE_POOL_MODEL modelId={} name={}", userId, model.getId(), model.getName());
-                return toSpec(model);
-            }
-            log.warn("User selected model unavailable or disabled userId={} modelId={}", userId, config.getModelId());
-            return defaultChatSpec();
-        }
-        log.info("resolve: userId={} mode=CUSTOM name={} model={}", userId, config.getName(), config.getModel());
-        return toSpec(config);
+        log.info("resolve: userId={} no per-user default, using defaultChatSpec", userId);
+        return defaultChatSpec();
     }
 
     /** 返回模型池中启用的默认对话模型，无则回退配置默认值 */

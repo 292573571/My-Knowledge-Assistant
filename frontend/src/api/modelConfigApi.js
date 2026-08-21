@@ -13,6 +13,42 @@ export function createPoolModel(data) {
   }, '模型添加失败。')
 }
 
+export function fetchPersonalModels() {
+  return request('/api/model-config/me/pool', {}, '个人模型加载失败。')
+}
+
+export function createPersonalModel(data) {
+  return request('/api/model-config/me/pool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }, '个人模型添加失败。')
+}
+
+export function deletePersonalModel(id) {
+  return request(`/api/model-config/me/pool/${id}`, { method: 'DELETE' }, '个人模型删除失败。')
+}
+
+export function testPersonalModel(id) {
+  return request(`/api/model-config/me/pool/${id}/test`, { method: 'POST' }, '个人模型连接测试失败。')
+}
+
+export function testPersonalModelConfig(data) {
+  return request('/api/model-config/me/pool/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }, '个人模型连接测试失败。')
+}
+
+export function updatePersonalModel(id, data) {
+  return request(`/api/model-config/me/pool/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }, '个人模型更新失败。')
+}
+
 export function updatePoolModel(id, data) {
   return request(`/api/model-config/pool/${id}`, {
     method: 'PUT',

@@ -38,7 +38,42 @@ public class ModelConfigController {
 
     @GetMapping("/pool")
     public List<AiModelResponse> pool(HttpServletRequest request) {
-        return aiModelService.list();
+        return aiModelService.list(user(request));
+    }
+
+    @GetMapping("/me/pool")
+    public List<AiModelResponse> personalPool(HttpServletRequest request) {
+        return aiModelService.listPersonal(user(request));
+    }
+
+    @PostMapping("/me/pool")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AiModelResponse createPersonal(@Valid @RequestBody AiModelRequest body, HttpServletRequest request) {
+        return aiModelService.createPersonal(user(request), body);
+    }
+
+    @PutMapping("/me/pool/{id}")
+    public AiModelResponse updatePersonal(@PathVariable Long id, @Valid @RequestBody AiModelRequest body,
+                                          HttpServletRequest request) {
+        return aiModelService.updatePersonal(user(request), id, body);
+    }
+
+    @PostMapping("/me/pool/test")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void testPersonalConfig(@Valid @RequestBody AiModelRequest body, HttpServletRequest request) {
+        aiModelService.testPersonalConfig(user(request), body);
+    }
+
+    @DeleteMapping("/me/pool/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePersonal(@PathVariable Long id, HttpServletRequest request) {
+        aiModelService.deletePersonal(user(request), id);
+    }
+
+    @PostMapping("/me/pool/{id}/test")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void testPersonal(@PathVariable Long id, HttpServletRequest request) {
+        aiModelService.testConnect(user(request), id);
     }
 
     @PostMapping("/pool")

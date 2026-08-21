@@ -3409,7 +3409,7 @@ textarea:focus-visible,
 .learning-input-bar .send-button { background: #1d5939; }
 .learning-input-bar .chat-input button.secondary { background: #9d4b39; }
 .chat-input-controls { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
-.chat-mode-menu { position: relative; }
+.chat-mode-menu, .chat-model-menu { position: relative; }
 .chat-action-button { display: inline-flex; height: 32px; align-items: center; gap: 6px; border: 1px solid #cbd4c5; border-radius: 9px; padding: 0 9px; color: #385d43; background: #f9f8f2; font-size: 11px; font-weight: 750; }
 .chat-action-button:hover, .chat-action-button[aria-expanded="true"] { border-color: #6f9b78; color: #1d5939; background: #edf5eb; }
 .chat-action-button:disabled { cursor: not-allowed; opacity: .55; }
@@ -3420,6 +3420,21 @@ textarea:focus-visible,
 .chat-mode-popover button:hover, .chat-mode-popover button.active { color: #1d5939; background: #edf5eb; }
 .chat-mode-popover button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .chat-mode-popover button b { margin-left: auto; color: #1d5939; }
+.chat-model-popover { position: absolute; z-index: 20; bottom: calc(100% + 10px); left: 0; width: min(330px, 78vw); max-height: min(430px, 60vh); overflow-y: auto; border: 1px solid #cbd4c5; border-radius: 14px; padding: 7px; background: #fffef9; box-shadow: 0 18px 38px rgba(40, 63, 44, .18); }
+.chat-model-search { display: flex; height: 34px; align-items: center; gap: 7px; margin-bottom: 6px; border-bottom: 1px solid #e2e7dc; padding: 0 7px 6px; color: #879184; }
+.chat-model-search svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.7; }
+.chat-model-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: #314438; background: transparent; font: inherit; font-size: 12px; }
+.chat-model-popover button { display: flex; width: 100%; min-height: 48px; align-items: center; gap: 8px; border: 0; border-radius: 9px; padding: 6px 9px; color: #526457; background: transparent; text-align: left; }
+.chat-model-popover button:hover, .chat-model-popover button.active { color: #1d5939; background: #edf5eb; }
+.chat-model-popover button > b { margin-left: auto; color: #2d6c45; }
+.chat-model-manage { min-height: 40px !important; margin-top: 6px; border-top: 1px solid #e2e7dc !important; border-radius: 0 0 8px 8px !important; padding-top: 10px !important; color: #314438 !important; font-weight: 750; }
+.chat-model-manage:hover { color: #1d5939 !important; background: #f3f7ef !important; }
+.chat-model-manage svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.chat-model-option-main { display: grid; min-width: 0; gap: 3px; }
+.chat-model-option-main strong { overflow: hidden; color: inherit; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.chat-model-option-main small { overflow: hidden; color: #879184; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.chat-model-option-main i { color: #6f9b78; font-style: normal; }
+.chat-model-empty { margin: 12px 8px; color: #879184; font-size: 11px; text-align: center; }
 .chat-input-controls > span { color: #879184; font-size: 10px; font-weight: 400; }
 
 .learning-stage-sidebar { border-left-color: #dedfd3; background: #f0eee6; }
@@ -3510,6 +3525,8 @@ textarea:focus-visible,
   .chat-input-controls { gap: 6px; }
   .chat-input-controls > span { display: none; }
   .chat-input-controls input { width: 100px; }
+  .chat-model-search input { width: 100%; }
+  .chat-model-popover { width: min(300px, calc(100vw - 34px)); }
   .chat-action-button { padding-inline: 7px; }
   .chat-action-button span { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .learning-source-tooltip { top: auto !important; right: 12px; bottom: 86px; left: 12px !important; width: auto; }
@@ -4446,6 +4463,8 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 }
 .model-config-message.error { color: var(--site-danger); background: #fceeed; border: 1px solid #f5d5ce; }
 .model-config-message.success { color: #267052; background: #eefaf4; border: 1px solid #bde5d1; }
+.model-config-retry-btn { margin-left: auto; border: 1px solid currentColor; border-radius: 7px; padding: 5px 9px; color: inherit; background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }
+.model-config-retry-btn:hover { background: rgba(255, 255, 255, .55); }
 
 .model-config-current {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4498,6 +4517,12 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .model-config-tag.default { background: #eafaf1; color: #167252; }
 .model-config-tag.disabled { background: #fceeed; color: var(--site-danger); }
 .model-config-empty { color: var(--site-muted); font-size: 13px; padding: 8px 0; }
+.personal-model-list { display: grid; gap: 10px; max-height: 230px; overflow-y: auto; margin: 0 0 22px; }
+.personal-model-list .maintenance-model-row { margin-bottom: 0; padding: 12px 14px; }
+.personal-model-list .maintenance-model-info { min-width: 0; }
+.personal-model-list .maintenance-model-info strong,
+.personal-model-list .maintenance-model-identifier { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.personal-model-list .maintenance-model-actions { flex-wrap: wrap; justify-content: flex-end; }
 
 .model-config-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0 4px; }
 .model-config-form-grid .span-2 { grid-column: 1 / -1; }
@@ -4508,7 +4533,8 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .model-config-form-grid input[type="text"],
 .model-config-form-grid input:not([type]),
 .model-config-form-grid input[type="password"],
-.model-config-form-grid input[type="number"] {
+.model-config-form-grid input[type="number"],
+.model-config-form-grid input[type="url"] {
   padding: 10px 12px; border: 1px solid #cbd4c5; border-radius: 9px;
   font: inherit; font-size: 13px; color: var(--site-ink-soft); background: #f9f8f2; width: 100%; box-sizing: border-box;
   letter-spacing: normal; transition: border-color .18s, box-shadow .18s;
@@ -4562,6 +4588,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .maintenance-model-btn.primary:hover { background: var(--site-green-dark); }
 .maintenance-model-btn.danger { border-color: #f5d5ce; color: var(--site-danger); background: var(--site-card); }
 .maintenance-model-btn.danger:hover { border-color: var(--site-danger); background: #fceeed; }
+.maintenance-model-btn:disabled { cursor: not-allowed; opacity: .55; }
 
 /* ---- Pool Edit Dialog (shared with model-config-dialog) ---- */
 .pool-edit-body { padding: 20px 28px 4px; }

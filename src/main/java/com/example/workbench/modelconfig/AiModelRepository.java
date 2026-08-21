@@ -8,6 +8,8 @@ public interface AiModelRepository extends JpaRepository<AiModel, Long> {
 
     List<AiModel> findAllByOrderByIdAsc();
 
+    List<AiModel> findByOwnerPublicId(String ownerPublicId);
+
     Optional<AiModel> findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType modelType);
 
     Optional<AiModel> findFirstByIsDefaultTrueAndModelType(AiModelType modelType);

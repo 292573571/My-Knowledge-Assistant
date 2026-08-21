@@ -102,7 +102,7 @@ public class LearningAssistantService {
         LearningIntent intent = resolveIntent(request);
         LearningMode mode = resolveMode(request, intent);
         LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
-        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name());
+        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name(), String.valueOf(request.modelId()));
         return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
             requireRunning(execution);
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
@@ -145,7 +145,7 @@ public class LearningAssistantService {
         LearningIntent intent = resolveIntent(request);
         LearningMode mode = resolveMode(request, intent);
         LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
-        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name());
+        String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name(), String.valueOf(request.modelId()));
         return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
             requireRunning(execution);
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
@@ -182,7 +182,7 @@ public class LearningAssistantService {
         WorkspaceAccessContext access = access(user, request.workspaceId());
         LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
         return idempotent(session, request.clientRequestId(), "CHECK",
-                hash(request.checkId(), request.answer()), () -> {
+                hash(request.checkId(), request.answer(), String.valueOf(request.modelId())), () -> {
                     TeachingCheckResponse result = checkService.submit(user, access,
                             new SubmitTeachingCheckRequest(request.workspaceId(), sessionId,
                                     request.checkId(), request.answer()));
@@ -202,7 +202,7 @@ public class LearningAssistantService {
         WorkspaceAccessContext access = access(user, request.workspaceId());
         LearningSessionEntity session = requireSession(user, access.workspaceId(), sessionId);
         return idempotent(session, request.clientRequestId(), "PRACTICE",
-                hash(request.practiceId(), request.answer()), () -> {
+                hash(request.practiceId(), request.answer(), String.valueOf(request.modelId())), () -> {
                     TeachingPracticeResponse result = checkService.submitPractice(user, access,
                             new SubmitTeachingPracticeRequest(request.workspaceId(), sessionId,
                                     request.practiceId(), request.answer()));

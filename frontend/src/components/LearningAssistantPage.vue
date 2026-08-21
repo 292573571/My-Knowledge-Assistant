@@ -16,7 +16,9 @@ import {
   submitLearningPractice
 } from '../api/learningAssistantApi'
 import { createUuid } from '../utils/uuid'
+import { fetchMyConfig } from '../api/modelConfigApi'
 
+const emit = defineEmits(['manage-models'])
 const sessions = ref([])
 const activeSessionId = ref('')
 const messages = ref([])
@@ -32,6 +34,9 @@ const loadingSessions = ref(false)
 const creatingSession = ref(false)
 const deletingSessionId = ref('')
 const pendingDeleteSession = ref(null)
+const selectedModelId = ref(null)
+const modelOptions = ref([])
+const currentModel = ref(null)
 const error = ref('')
 const messagesEl = ref(null)
 
@@ -70,7 +75,11 @@ const inspirationPool = [
   '给我一个 Spring AI 的最小实践任务',
   '找出当前知识空间里最值得复习的主题'
 ]
-const props = defineProps({ workspaceId: { type: String, default: '' } })
+const props = defineProps({
+  workspaceId: { type: String, default: '' },
+  currentUser: { type: Object, default: null },
+  modelConfigVersion: { type: Number, default: 0 }
+})
 let inspirationObserver = null
 let inspirationTimer = null
 let activeRequestId = 0
@@ -78,6 +87,7 @@ let sessionOperationId = 0
 
 onMounted(() => {
   loadSessions()
+  loadModelOptions()
   loadMoreInspirations()
   document.addEventListener('pointermove', closeSourceOnPointerMove)
   if ('IntersectionObserver' in window) {
@@ -99,10 +109,22 @@ onBeforeUnmount(() => {
 })
 watch(activeSessionId, () => scrollLatest())
 watch(() => messages.value.length, () => scrollLatest())
+watch(() => props.modelConfigVersion, () => loadModelOptions())
 onUpdated(observeInspirationSentinel)
 
 function observeInspirationSentinel() {
   if (inspirationObserver && inspirationSentinel.value) inspirationObserver.observe(inspirationSentinel.value)
+}
+
+async function loadModelOptions() {
+  try {
+    const config = await fetchMyConfig()
+    modelOptions.value = (config.poolModels || []).filter(model => model.enabled && model.modelType === 'CHAT')
+    currentModel.value = config.resolved || null
+  } catch (exception) {
+    modelOptions.value = []
+    currentModel.value = null
+  }
 }
 
 function loadMoreInspirations() {
@@ -232,10 +254,11 @@ async function send(content) {
   messages.value.push(assistant)
   try {
     const response = await streamMessage(activeSessionId.value, {
-      message: text,
-      mode: mode.value,
-      userLevel: userLevel.value,
-      clientRequestId: createUuid()
+       message: text,
+       mode: mode.value,
+       userLevel: userLevel.value,
+       modelId: selectedModelId.value,
+       clientRequestId: createUuid()
     }, assistant)
     if (requestId !== activeRequestId) return
     assistant.content = assistant.content || response.answer || '本次请求没有返回正文。'
@@ -329,7 +352,7 @@ async function submitCheck() {
   loading.value = true
   error.value = ''
   try {
-    const response = await submitLearningCheck(activeSessionId.value, { checkId: pendingCheck.value.checkId, answer: checkAnswer.value.trim(), clientRequestId: createUuid() })
+    const response = await submitLearningCheck(activeSessionId.value, { checkId: pendingCheck.value.checkId, answer: checkAnswer.value.trim(), modelId: selectedModelId.value, clientRequestId: createUuid() })
     appendResult(response)
     pendingCheck.value = null
     pendingPractice.value = response.practice || null
@@ -346,7 +369,7 @@ async function submitPractice() {
   loading.value = true
   error.value = ''
   try {
-    const response = await submitLearningPractice(activeSessionId.value, { practiceId: pendingPractice.value.practiceId, answer: practiceAnswer.value.trim(), clientRequestId: createUuid() })
+    const response = await submitLearningPractice(activeSessionId.value, { practiceId: pendingPractice.value.practiceId, answer: practiceAnswer.value.trim(), modelId: selectedModelId.value, clientRequestId: createUuid() })
     appendResult(response)
     pendingPractice.value = response.practice?.status === 'PENDING' ? response.practice : null
     practiceAnswer.value = ''
@@ -368,6 +391,10 @@ function scrollLatest() {
 
 function modeChanged(nextMode) {
   mode.value = nextMode
+}
+
+function modelChanged(nextModelId) {
+  selectedModelId.value = nextModelId
 }
 
 function sourceLabel(source) {
@@ -466,7 +493,7 @@ function closeSourceOnPointerMove(event) {
         <div v-if="error && messages.length" class="learning-assistant-error" role="alert"><span>{{ error }}</span></div>
          <footer class="learning-input-bar">
            <button type="button" class="session-mobile-trigger" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><span></span><span></span><span></span></button>
-           <ChatInput :disabled="loading" :stoppable="streamingRequest" :mode="mode" :mode-labels="modeLabels" @send="send" @stop="stop" @update:mode="modeChanged" />
+           <ChatInput :disabled="loading" :stoppable="streamingRequest" :mode="mode" :mode-labels="modeLabels" :model-id="selectedModelId" :model-options="modelOptions" :current-model="currentModel" :can-manage-models="Boolean(currentUser)" @send="send" @stop="stop" @update:mode="modeChanged" @update:model-id="modelChanged" @manage-models="emit('manage-models')" />
          </footer>
       </section>
         <aside v-if="isLearningMode" class="learning-stage-sidebar">

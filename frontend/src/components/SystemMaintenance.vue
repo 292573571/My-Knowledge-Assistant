@@ -384,7 +384,7 @@ function openAddPoolModel() {
 function openEditPoolModel(model) {
   editingPoolModel.value = model
   Object.assign(poolForm, {
-    name: model.name || '', baseUrl: model.baseUrl || '', apiKey: model.apiKey || '',
+    name: model.name || '', baseUrl: model.baseUrl || '', apiKey: '',
     model: model.model || '', modelType: model.modelType || 'CHAT',
     temperature: model.temperature != null ? String(model.temperature) : '',
     topP: model.topP != null ? String(model.topP) : '',
@@ -495,7 +495,7 @@ async function handleTestModel(model) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M7.5 10.5h6M10.5 7.5v6"/></svg>
         检索诊断
       </button>
-      <button type="button" :aria-pressed="activeTool === 'model-pool'" :class="{ active: activeTool === 'model-pool' }" @click="activeTool = 'model-pool'">
+       <button v-if="currentUser?.systemRole === 'SUPER_ADMIN'" type="button" :aria-pressed="activeTool === 'model-pool'" :class="{ active: activeTool === 'model-pool' }" @click="activeTool = 'model-pool'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v2"/><path d="M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M12 12.5v4M9 12.5h6"/></svg>
         模型管理
       </button>
@@ -618,7 +618,7 @@ async function handleTestModel(model) {
       </section>
     </div>
 
-    <div v-if="activeTool === 'model-pool'" class="maintenance-model-pool">
+     <div v-if="activeTool === 'model-pool' && currentUser?.systemRole === 'SUPER_ADMIN'" class="maintenance-model-pool">
       <section class="maintenance-section">
         <header class="maintenance-section-heading">
           <div>
@@ -646,7 +646,7 @@ async function handleTestModel(model) {
           </div>
           <div class="maintenance-model-actions">
             <button class="maintenance-model-btn" @click="openEditPoolModel(model)">编辑</button>
-            <button v-if="!model.isDefault && model.enabled" class="maintenance-model-btn primary" @click="handleSetDefault(model)">设默认</button>
+             <button v-if="currentUser?.systemRole === 'SUPER_ADMIN' && !model.isDefault && model.enabled" class="maintenance-model-btn primary" @click="handleSetDefault(model)">设默认</button>
             <button class="maintenance-model-btn" :disabled="testingModelId === model.id" @click="handleTestModel(model)">{{ testingModelId === model.id ? '测试中...' : '测试' }}</button>
              <button class="maintenance-model-btn danger" :disabled="poolSaving" @click="openDeletePoolConfirm(model)">删除</button>
           </div>
@@ -752,15 +752,15 @@ async function handleTestModel(model) {
             </select></label>
             <label><span><span class="required">*</span>名称</span><input v-model="poolForm.name" type="text" placeholder="例如：DeepSeek V4" maxlength="64" required></label>
             <label class="span-2"><span><span class="required">*</span>模型标识</span><input v-model="poolForm.model" type="text" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128" required></label>
-            <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model="poolForm.baseUrl" type="text" placeholder="https://api.example.com" maxlength="256" required></label>
-            <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model="poolForm.apiKey" type="password" placeholder="sk-..." maxlength="256" required></label>
+             <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model="poolForm.baseUrl" type="url" placeholder="https://api.example.com" maxlength="256" required></label>
+             <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model="poolForm.apiKey" type="password" :placeholder="editingPoolModel ? '请重新填写 API Key' : 'sk-...'" maxlength="256" required></label>
             <label><span>温度</span><input v-model="poolForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
             <label><span>Top P</span><input v-model="poolForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
             <label><span>最大输出 Token</span><input v-model="poolForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
             <label><span>请求超时(ms)</span><input v-model="poolForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
             <label class="span-2"><span>备用模型 (逗号分隔)</span><input v-model="poolForm.fallbackModels" type="text" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
             <label class="span-2 checkbox"><input v-model="poolForm.enabled" type="checkbox"> 启用模型</label>
-            <label class="span-2 checkbox"><input v-model="poolForm.isDefault" type="checkbox"> 设为该类型的默认模型</label>
+             <label v-if="currentUser?.systemRole === 'SUPER_ADMIN'" class="span-2 checkbox"><input v-model="poolForm.isDefault" type="checkbox"> 设为该类型的默认模型</label>
           </div>
         </div>
         <div class="pool-edit-footer">

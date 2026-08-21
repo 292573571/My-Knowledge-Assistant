@@ -25,8 +25,12 @@ public class UserModelConfigService {
     @Transactional(readOnly = true)
     public UserModelConfigResponse get(AppUser user) {
         UserModelConfig config = userModelConfigRepository.findByUserId(user.getId()).orElse(null);
+        boolean superAdmin = user.getSystemRole() == com.example.workbench.auth.SystemRole.SUPER_ADMIN
+                || "admin".equalsIgnoreCase(user.getAccount());
         List<AiModelResponse> pool = aiModelRepository.findByModelType(AiModelType.CHAT).stream()
                 .filter(AiModel::isEnabled)
+                .filter(model -> superAdmin || model.getOwnerPublicId() == null
+                        || user.getPublicId().equals(model.getOwnerPublicId()))
                 .map(AiModelResponse::from)
                 .toList();
         Long defaultModelId = aiModelRepository.findFirstByIsDefaultTrueAndModelTypeAndEnabledTrue(AiModelType.CHAT)
@@ -61,6 +65,10 @@ public class UserModelConfigService {
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "所选模型不存在或已禁用"));
                 if (selected.getModelType() != AiModelType.CHAT) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "个人配置仅支持选择对话模型");
+                }
+                if (selected.getOwnerPublicId() != null
+                        && !selected.getOwnerPublicId().equals(user.getPublicId())) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能选择其他用户的个人模型");
                 }
                 config.usePoolModel(request.modelId());
             }

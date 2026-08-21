@@ -70,6 +70,10 @@ public class AiModel {
     @Comment("是否启用")
     private boolean enabled = true;
 
+    @Column(name = "owner_public_id", length = 32)
+    @Comment("创建者对外公开标识；为空表示系统模型，仅超级管理员可管理")
+    private String ownerPublicId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Comment("创建时间")
     private Instant createdAt = Instant.now();
@@ -101,6 +105,7 @@ public class AiModel {
     public String getFallbackModels() { return fallbackModels; }
     public boolean isDefault() { return isDefault; }
     public boolean isEnabled() { return enabled; }
+    public String getOwnerPublicId() { return ownerPublicId; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
@@ -128,5 +133,9 @@ public class AiModel {
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
         this.updatedAt = Instant.now();
+    }
+
+    public void setOwnerPublicId(String ownerPublicId) {
+        this.ownerPublicId = ownerPublicId;
     }
 }

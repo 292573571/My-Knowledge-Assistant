@@ -85,9 +85,15 @@ public class LearningAssistantController {
 
     @PostMapping("/{sessionId}/messages")
     public LearningAssistantResponse message(@PathVariable String sessionId,
-                                             @Valid @RequestBody LearningAssistantMessageRequest request,
-                                             HttpServletRequest httpRequest) {
-        return service.message(user(httpRequest), sessionId, request);
+                                              @Valid @RequestBody LearningAssistantMessageRequest request,
+                                              HttpServletRequest httpRequest) {
+        AppUser currentUser = user(httpRequest);
+            modelConfigContext.set(currentUser.getId(), currentUser.getPublicId(), request.modelId());
+        try {
+            return service.message(currentUser, sessionId, request);
+        } finally {
+            modelConfigContext.clear();
+        }
     }
 
     @PostMapping(path = "/{sessionId}/messages/stream", consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -112,7 +118,7 @@ public class LearningAssistantController {
         emitter.onError(error -> executionRegistry.cancel(scope));
         emitter.onCompletion(() -> executionRegistry.cancel(scope));
         CompletableFuture.runAsync(() -> {
-            modelConfigContext.set(user.getId());
+            modelConfigContext.set(user.getId(), user.getPublicId(), request.modelId());
             try {
                 send(emitter, "session", Map.of("sessionId", sessionId));
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
@@ -151,14 +157,26 @@ public class LearningAssistantController {
     public LearningAssistantResponse check(@PathVariable String sessionId,
                                            @Valid @RequestBody LearningAssistantCheckRequest request,
                                            HttpServletRequest httpRequest) {
-        return service.check(user(httpRequest), sessionId, request);
+        AppUser currentUser = user(httpRequest);
+        modelConfigContext.set(currentUser.getId(), currentUser.getPublicId(), request.modelId());
+        try {
+            return service.check(currentUser, sessionId, request);
+        } finally {
+            modelConfigContext.clear();
+        }
     }
 
     @PostMapping("/{sessionId}/practice")
     public LearningAssistantResponse practice(@PathVariable String sessionId,
                                               @Valid @RequestBody LearningAssistantPracticeRequest request,
                                               HttpServletRequest httpRequest) {
-        return service.practice(user(httpRequest), sessionId, request);
+        AppUser currentUser = user(httpRequest);
+        modelConfigContext.set(currentUser.getId(), currentUser.getPublicId(), request.modelId());
+        try {
+            return service.practice(currentUser, sessionId, request);
+        } finally {
+            modelConfigContext.clear();
+        }
     }
 
     @PostMapping("/{sessionId}/stop")

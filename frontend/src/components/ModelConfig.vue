@@ -1,98 +1,67 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchMyConfig, saveMyConfig } from '../api/modelConfigApi'
+import { onMounted, reactive, ref } from 'vue'
+import { createPersonalModel, deletePersonalModel, fetchPersonalModels, testPersonalModel, testPersonalModelConfig, updatePersonalModel } from '../api/modelConfigApi'
+import ConfirmDialog from './ConfirmDialog.vue'
 import ToastContainer from './ToastContainer.vue'
 
 const emit = defineEmits(['close', 'saved'])
+const props = defineProps({ currentUser: { type: Object, required: true } })
 
 const toast = ref(null)
-const loading = ref(false)
 const saving = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
-const poolModels = ref([])
-const myConfig = ref(null)
-const embeddingInfo = ref({ name: null, model: null })
-
-const mode = ref('FOLLOW_DEFAULT')
-const selectedModelId = ref(null)
+const loading = ref(true)
+const loadError = ref('')
+const personalModels = ref([])
+const editingModelId = ref(null)
+const pendingDelete = ref(null)
+const testingModelId = ref(null)
+const testingForm = ref(false)
 const customForm = reactive({
   name: '', baseUrl: '', apiKey: '', model: '',
   temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: ''
 })
 
-const modeLabel = (m) => ({ FOLLOW_DEFAULT: '跟随默认', USE_POOL_MODEL: '使用池模型', CUSTOM: '自定义' }[m] || m)
-const modeDesc = (m) => ({
-  FOLLOW_DEFAULT: '使用管理员设置的全局默认模型',
-  USE_POOL_MODEL: '从模型池中选择一个已启用的模型',
-  CUSTOM: '填写自定义 API 地址和模型'
-}[m] || '')
+function resetForm() {
+  Object.assign(customForm, { name: '', baseUrl: '', apiKey: '', model: '', temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: '' })
+  editingModelId.value = null
+}
 
-const resolvedSpec = computed(() => myConfig.value?.resolved)
-const resolvedDisplay = computed(() => {
-  const spec = resolvedSpec.value
-  if (!spec) return '—'
-  return `${spec.name || spec.model || '—'}  ·  ${spec.model || '—'}`
-})
+function editModel(model) {
+  editingModelId.value = model.id
+  Object.assign(customForm, {
+    name: model.name || '', baseUrl: '', apiKey: '', model: model.model || '',
+    temperature: model.temperature == null ? '' : String(model.temperature),
+    topP: model.topP == null ? '' : String(model.topP),
+    maxOutputTokens: model.maxOutputTokens == null ? '' : String(model.maxOutputTokens),
+    requestTimeoutMs: model.requestTimeoutMs == null ? '' : String(model.requestTimeoutMs),
+    fallbackModels: model.fallbackModels || ''
+  })
+}
 
-async function loadData() {
+async function loadModels() {
   loading.value = true
-  errorMessage.value = ''
-  try {
-    const config = await fetchMyConfig()
-    myConfig.value = config
-    if (config) {
-      poolModels.value = config.poolModels || []
-      mode.value = config.mode || 'FOLLOW_DEFAULT'
-      selectedModelId.value = config.modelId || null
-      embeddingInfo.value = {
-        name: config.defaultEmbeddingName || null,
-        model: config.defaultEmbeddingModel || null
-      }
-      if (config.custom) {
-        Object.assign(customForm, {
-          name: config.custom.name || '',
-          baseUrl: config.custom.baseUrl || '',
-          apiKey: config.custom.apiKey || '',
-          model: config.custom.model || '',
-          temperature: config.custom.temperature != null ? String(config.custom.temperature) : '',
-          topP: config.custom.topP != null ? String(config.custom.topP) : '',
-          maxOutputTokens: config.custom.maxOutputTokens != null ? String(config.custom.maxOutputTokens) : '',
-          requestTimeoutMs: config.custom.requestTimeoutMs != null ? String(config.custom.requestTimeoutMs) : '',
-          fallbackModels: config.custom.fallbackModels || ''
-        })
-      }
-    }
-  } catch (error) {
-    toast.value?.error(error.message || '加载失败。')
-  } finally {
-    loading.value = false
+  loadError.value = ''
+  try { personalModels.value = await fetchPersonalModels() || [] }
+  catch (error) {
+    loadError.value = error.message || '个人模型加载失败。'
+    toast.value?.error(loadError.value)
   }
+  finally { loading.value = false }
 }
 
 async function handleSave() {
   saving.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  const editing = Boolean(editingModelId.value)
   try {
-    const body = { mode: mode.value }
-    if (mode.value === 'USE_POOL_MODEL') body.modelId = selectedModelId.value || null
-    if (mode.value === 'CUSTOM') {
-      body.name = customForm.name || null
-      body.baseUrl = customForm.baseUrl || null
-      body.apiKey = customForm.apiKey || null
-      body.model = customForm.model || null
-      body.temperature = customForm.temperature ? Number(customForm.temperature) : null
-      body.topP = customForm.topP ? Number(customForm.topP) : null
-      body.maxOutputTokens = customForm.maxOutputTokens ? Number(customForm.maxOutputTokens) : null
-      body.requestTimeoutMs = customForm.requestTimeoutMs ? Number(customForm.requestTimeoutMs) : null
-      body.fallbackModels = customForm.fallbackModels || null
-    }
-    const result = await saveMyConfig(body)
-    myConfig.value = result
-    toast.value?.success('已保存。')
+    const data = formData()
+    const saved = editingModelId.value
+      ? await updatePersonalModel(editingModelId.value, data)
+      : await createPersonalModel(data)
+    if (editing) personalModels.value = personalModels.value.map(model => model.id === saved.id ? saved : model)
+    else personalModels.value.push(saved)
+    resetForm()
+    toast.value?.success(editing ? '模型已更新。' : '模型已添加。')
     emit('saved')
-    setTimeout(() => emit('close'), 800)
   } catch (error) {
     toast.value?.error(error.message || '保存失败。')
   } finally {
@@ -100,83 +69,123 @@ async function handleSave() {
   }
 }
 
-onMounted(loadData)
+function formData() {
+  return {
+    name: customForm.name || customForm.model,
+    baseUrl: customForm.baseUrl,
+    apiKey: customForm.apiKey,
+    model: customForm.model,
+    modelType: 'CHAT',
+    temperature: customForm.temperature ? Number(customForm.temperature) : null,
+    topP: customForm.topP ? Number(customForm.topP) : null,
+    maxOutputTokens: customForm.maxOutputTokens ? Number(customForm.maxOutputTokens) : null,
+    requestTimeoutMs: customForm.requestTimeoutMs ? Number(customForm.requestTimeoutMs) : null,
+    fallbackModels: customForm.fallbackModels || null,
+    enabled: true,
+    isDefault: false
+  }
+}
+
+async function handleTestForm() {
+  if (!customForm.baseUrl || !customForm.apiKey || !customForm.model) {
+    toast.value?.error('请先填写 API 地址、API Key 和模型标识。')
+    return
+  }
+  testingForm.value = true
+  try {
+    await testPersonalModelConfig(formData())
+    toast.value?.success('当前模型配置连接测试通过。')
+  } catch (error) {
+    toast.value?.error(error.message || '连接测试失败。')
+  } finally {
+    testingForm.value = false
+  }
+}
+
+async function confirmDelete() {
+  const model = pendingDelete.value
+  pendingDelete.value = null
+  if (!model) return
+  try {
+    await deletePersonalModel(model.id)
+    personalModels.value = personalModels.value.filter(item => item.id !== model.id)
+    if (editingModelId.value === model.id) resetForm()
+    emit('saved')
+    toast.value?.success('模型已删除。')
+  } catch (error) { toast.value?.error(error.message || '模型删除失败。') }
+}
+
+async function handleTestModel(model) {
+  testingModelId.value = model.id
+  try {
+    await testPersonalModel(model.id)
+    toast.value?.success(`「${model.name}」连接测试通过。`)
+  } catch (error) {
+    toast.value?.error(error.message || '连接测试失败。')
+  } finally {
+    testingModelId.value = null
+  }
+}
+
+onMounted(loadModels)
+
 </script>
 
 <template>
   <div class="model-config-backdrop" @click.self="emit('close')">
     <div class="model-config-dialog" @keydown.esc="emit('close')">
       <header class="model-config-dialog-header">
-        <h2>模型配置</h2>
+         <h2>我的对话模型</h2>
         <button class="model-config-close-btn" aria-label="关闭" @click="emit('close')">&times;</button>
       </header>
 
-      <div v-if="loading" class="model-config-state">加载中...</div>
-      <template v-else>
-        <div class="model-config-body">
-          <div class="model-config-current" v-if="resolvedSpec">
-            <span class="model-config-current-label">当前生效</span>
-            <strong>{{ resolvedDisplay }}</strong>
-            <span v-if="myConfig" class="model-config-mode-badge">{{ modeLabel(myConfig.mode) }}</span>
-          </div>
-          <p v-else class="model-config-hint">尚未配置，当前使用全局默认模型。</p>
-
-          <div v-if="embeddingInfo.name" class="model-config-embedding-info">
-            <span class="model-config-embedding-label">嵌入模型</span>
-            <span class="model-config-embedding-value">
-              {{ embeddingInfo.name }}<template v-if="embeddingInfo.model"> · {{ embeddingInfo.model }}</template>
-            </span>
-          </div>
-
-          <p class="model-config-section-title">对话模型</p>
-          <div class="model-config-mode-select">
-            <label v-for="m in ['FOLLOW_DEFAULT', 'USE_POOL_MODEL', 'CUSTOM']" :key="m"
-                   :class="{ active: mode === m }" class="model-config-mode-option">
-              <input v-model="mode" type="radio" :value="m" name="model-mode">
-              <div>
-                <span>{{ modeLabel(m) }}</span>
-                <span class="model-config-mode-desc">{{ modeDesc(m) }}</span>
+         <form class="model-config-body" @submit.prevent="handleSave">
+            <p class="model-config-hint">这里管理你自己的模型。选择哪个模型，就使用哪个模型回答。</p>
+            <div class="personal-model-list">
+              <p v-if="loading" class="model-config-empty">正在加载你的模型...</p>
+              <div v-else-if="loadError" class="model-config-message error">
+                <span>{{ loadError }}</span>
+                <button type="button" class="model-config-retry-btn" @click="loadModels">重新加载</button>
               </div>
-            </label>
-          </div>
-
-          <div v-if="mode === 'USE_POOL_MODEL'" class="model-config-pool-list">
-            <p v-if="poolModels.filter(m => m.enabled && m.modelType !== 'EMBEDDING').length === 0" class="model-config-empty">模型池为空，请联系管理员添加模型。</p>
-            <label v-for="model in poolModels.filter(m => m.enabled && m.modelType !== 'EMBEDDING')" :key="model.id"
-                   :class="{ selected: selectedModelId === model.id }" class="model-config-pool-item">
-              <input v-model="selectedModelId" type="radio" :value="model.id" name="pool-model">
-              <div>
-                <strong>{{ model.name }}</strong>
-                <span class="model-config-model-id">{{ model.model }}</span>
-                <span v-if="model.isDefault" class="model-config-tag default">默认</span>
-              </div>
-            </label>
-          </div>
-
-          <div v-if="mode === 'CUSTOM'" class="model-config-custom-form">
-            <p class="model-config-section-title">自定义模型参数</p>
-            <div class="model-config-form-grid">
-              <label><span>名称</span><input v-model="customForm.name" type="text" placeholder="例如：DeepSeek V4" maxlength="64"></label>
-              <label><span><span class="required">*</span>模型标识</span><input v-model="customForm.model" type="text" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128"></label>
-              <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model="customForm.baseUrl" type="text" placeholder="https://api.example.com" maxlength="256"></label>
-              <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model="customForm.apiKey" type="password" placeholder="sk-..." maxlength="256"></label>
-              <label><span>温度</span><input v-model="customForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
-              <label><span>Top P</span><input v-model="customForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
-              <label><span>最大输出 Token</span><input v-model="customForm.maxOutputTokens" type="number" placeholder="留空使用默认"></label>
-              <label><span>请求超时(ms)</span><input v-model="customForm.requestTimeoutMs" type="number" placeholder="留空使用默认"></label>
-              <label class="span-2"><span>备用模型 (逗号分隔)</span><input v-model="customForm.fallbackModels" type="text" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
+              <p v-else-if="!personalModels.length" class="model-config-empty">还没有个人模型，填写下面的表单添加一个。</p>
+              <article v-for="model in personalModels" :key="model.id" class="maintenance-model-row">
+                <div class="maintenance-model-info">
+                  <strong>{{ model.name }}</strong>
+                  <span class="maintenance-model-identifier">{{ model.model }}</span>
+                  <span class="maintenance-model-tag chat">对话</span>
+                  <span v-if="!model.enabled" class="maintenance-model-tag disabled">已停用</span>
+                </div>
+                <div class="maintenance-model-actions">
+                  <button type="button" class="maintenance-model-btn" @click="editModel(model)">编辑</button>
+                  <button type="button" class="maintenance-model-btn" :disabled="testingModelId === model.id" @click="handleTestModel(model)">{{ testingModelId === model.id ? '测试中...' : '测试' }}</button>
+                  <button type="button" class="maintenance-model-btn danger" @click="pendingDelete = model">删除</button>
+                </div>
+              </article>
             </div>
-          </div>
-        </div>
-
-        <div class="model-config-dialog-actions">
-          <button class="model-config-footer-btn secondary" @click="emit('close')">取消</button>
-          <button class="model-config-footer-btn primary" :disabled="saving" :aria-busy="saving" @click="handleSave">
-            {{ saving ? '保存中...' : '保存配置' }}
-          </button>
-        </div>
-      </template>
+           <p class="model-config-section-title">{{ editingModelId ? '编辑模型' : '添加模型' }}</p>
+           <div class="model-config-custom-form">
+             <div class="model-config-form-grid">
+               <label><span>名称</span><input v-model.trim="customForm.name" type="text" placeholder="例如：DeepSeek V4" maxlength="64"></label>
+               <label><span><span class="required">*</span>模型标识</span><input v-model.trim="customForm.model" type="text" placeholder="例如：deepseek-ai/DeepSeek-V4-Flash" maxlength="128" required></label>
+               <label class="span-2"><span><span class="required">*</span>API 地址</span><input v-model.trim="customForm.baseUrl" type="url" :placeholder="editingModelId ? '请重新填写 API 地址' : 'https://api.example.com'" maxlength="256" required></label>
+               <label class="span-2"><span><span class="required">*</span>API Key</span><input v-model.trim="customForm.apiKey" type="password" :placeholder="editingModelId ? '请重新填写 API Key' : 'sk-...'" maxlength="256" required></label>
+               <label><span>温度</span><input v-model="customForm.temperature" type="number" step="0.1" min="0" max="2" placeholder="留空使用默认"></label>
+               <label><span>Top P</span><input v-model="customForm.topP" type="number" step="0.01" min="0" max="1" placeholder="留空使用默认"></label>
+               <label><span>最大输出 Token</span><input v-model="customForm.maxOutputTokens" type="number" min="256" placeholder="留空使用默认"></label>
+               <label><span>请求超时(ms)</span><input v-model="customForm.requestTimeoutMs" type="number" min="1" placeholder="留空使用默认"></label>
+               <label class="span-2"><span>备用模型 (逗号分隔)</span><input v-model.trim="customForm.fallbackModels" type="text" placeholder="例如：gpt-4o,claude-3" maxlength="256"></label>
+             </div>
+            </div>
+            <div class="model-config-dialog-actions">
+              <button class="maintenance-model-btn" type="button" :disabled="saving || testingForm" @click="handleTestForm">{{ testingForm ? '测试中...' : '测试连通性' }}</button>
+              <button class="model-config-footer-btn secondary" type="button" @click="emit('close')">取消</button>
+             <button class="model-config-footer-btn primary" type="submit" :disabled="saving" :aria-busy="saving">
+                {{ saving ? '保存中...' : editingModelId ? '保存修改' : '添加模型' }}
+             </button>
+           </div>
+         </form>
     </div>
-    <ToastContainer ref="toast" />
+     <ToastContainer ref="toast" />
+     <ConfirmDialog v-if="pendingDelete" title="删除个人模型？" :message="`将删除「${pendingDelete.name}」，删除后无法恢复。`" confirm-text="删除模型" danger @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </div>
 </template>

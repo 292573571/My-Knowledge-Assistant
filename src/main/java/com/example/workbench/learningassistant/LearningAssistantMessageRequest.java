@@ -8,6 +8,7 @@ public record LearningAssistantMessageRequest(
         @NotBlank(message = "workspaceId 不能为空") @Size(max = 120, message = "workspaceId 不能超过 120 个字符") String workspaceId,
         @NotBlank(message = "message 不能为空") @Size(max = 4000, message = "message 不能超过 4000 个字符") String message,
         LearningMode mode,
+        Long modelId,
         LearningIntent intent,
         TeachingUserLevel userLevel,
         @NotBlank(message = "clientRequestId 不能为空") @Size(max = 100, message = "clientRequestId 不能超过 100 个字符") String clientRequestId

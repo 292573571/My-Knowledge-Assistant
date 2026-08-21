@@ -29,6 +29,7 @@ const confirmPassword = ref('')
 const passwordError = ref('')
 const passwordSuccess = ref('')
 const modelConfigOpen = ref(false)
+const modelConfigVersion = ref(0)
 const changingPassword = ref(false)
 const avatarSrc = ref('')
 const logoutConfirmOpen = ref(false)
@@ -346,8 +347,7 @@ async function submitPasswordChange() {
             <strong class="portal-user-name">{{ currentUser.userName }}</strong>
              <div v-if="accountMenuOpen" id="portal-account-dropdown" class="portal-account-dropdown">
               <div class="portal-account-profile"><img v-if="avatarSrc" :src="avatarSrc" width="34" height="34" loading="lazy" alt=""><span v-else>{{ currentUser.userName.slice(0, 1) }}</span><strong>{{ currentUser.userName }}</strong></div>
-              <button type="button" @click="modelConfigOpen = true; accountMenuOpen = false">模型配置</button>
-              <button type="button" @click="openProfile">个人资料</button>
+               <button type="button" @click="openProfile">个人资料</button>
               <button type="button" @click="passwordFormOpen = !passwordFormOpen">修改密码</button>
            <form v-if="passwordFormOpen" class="portal-password-form" aria-live="polite" @submit.prevent="submitPasswordChange">
              <input v-model="currentPassword" type="password" autocomplete="current-password" placeholder="当前密码" required aria-label="当前密码">
@@ -364,7 +364,7 @@ async function submitPasswordChange() {
       </header>
       <div v-if="mobileNavOpen" class="portal-nav-backdrop" role="presentation" @click="mobileNavOpen = false"></div>
        <HomePage v-if="activeSection === 'home'" :user="currentUser" @navigate="navigateTo" />
-        <LearningAssistantPage v-if="assistantMounted" v-show="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" :workspace-id="activeWorkspaceId" />
+         <LearningAssistantPage v-if="assistantMounted" v-show="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" :workspace-id="activeWorkspaceId" :current-user="currentUser" :model-config-version="modelConfigVersion" @manage-models="modelConfigOpen = true" />
        <LearningRecords v-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
@@ -372,7 +372,7 @@ async function submitPasswordChange() {
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
-      <ModelConfig v-if="modelConfigOpen" @close="modelConfigOpen = false" />
+        <ModelConfig v-if="modelConfigOpen" :current-user="currentUser" @close="modelConfigOpen = false" @saved="modelConfigVersion += 1" />
     </div>
   </template>
 </template>

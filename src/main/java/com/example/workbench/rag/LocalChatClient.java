@@ -216,7 +216,7 @@ public class LocalChatClient {
                     requestTimeout, fallbackRequestTimeout);
         }
         Long userId = modelConfigContext.get();
-        ModelSpec spec = modelConfigService.resolve(userId);
+        ModelSpec spec = modelConfigService.resolve(userId, modelConfigContext.getSelectedModelId(), modelConfigContext.getPublicId());
         log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKey={}***",
                 userId, spec.name(), spec.model(), spec.baseUrl(),
                 spec.apiKey() != null && spec.apiKey().length() > 4 ? spec.apiKey().substring(0, 4) : "null");
