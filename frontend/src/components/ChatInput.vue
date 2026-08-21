@@ -149,27 +149,8 @@ onBeforeUnmount(() => {
     ></textarea>
     <div class="send-row">
       <div class="chat-input-controls">
-         <div class="chat-model-menu">
-            <button ref="modelButton" type="button" class="chat-action-button chat-model-button" :disabled="disabled" :aria-expanded="modelMenuOpen" aria-haspopup="menu" aria-label="选择对话模型" @click.stop="modelMenuOpen = !modelMenuOpen">
-             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 12h5M8 15h8" /></svg>
-             <span>{{ modelLabel }}</span>
-             <svg class="chat-action-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg>
-           </button>
-           <div v-if="modelMenuOpen" class="chat-model-popover" role="menu" aria-label="对话模型">
-             <label class="chat-model-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg><input v-model="modelQuery" type="search" placeholder="搜索模型" aria-label="搜索模型"></label>
-              <button type="button" role="menuitemradio" :aria-checked="currentModelSelected" :class="{ active: currentModelSelected }" @click="chooseModel(null)">
-                <span class="chat-model-option-main"><strong>{{ currentModel?.name || '当前配置' }}</strong><small>{{ currentModel?.model || '跟随当前配置' }}</small></span><b v-if="currentModelSelected" aria-hidden="true">✓</b>
-              </button>
-              <p v-if="!filteredVisibleModels.length && !modelQuery" class="chat-model-empty">暂无其他可用模型</p>
-              <p v-if="!filteredVisibleModels.length && modelQuery" class="chat-model-empty">没有匹配的启用模型</p>
-             <button v-for="model in filteredVisibleModels" :key="model.id" type="button" role="menuitemradio" :aria-checked="String(modelId) === String(model.id)" :class="{ active: String(modelId) === String(model.id) }" @click="chooseModel(model.id)">
-               <span class="chat-model-option-main"><strong>{{ model.name }}</strong><small>{{ model.model }}<i v-if="model.isDefault"> · 默认</i></small></span><b v-if="String(modelId) === String(model.id)" aria-hidden="true">✓</b>
-             </button>
-             <button v-if="canManageModels" type="button" class="chat-model-manage" @click="manageModels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h10M18 17h2" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="16" cy="17" r="2" /></svg><span>管理模型</span></button>
-           </div>
-         </div>
-         <div class="chat-mode-menu">
-          <button ref="modeButton" type="button" class="chat-action-button" :disabled="disabled" :aria-expanded="modeMenuOpen" aria-haspopup="menu" aria-label="选择学习模式" @click.stop="modeMenuOpen = !modeMenuOpen">
+           <div class="chat-mode-menu">
+           <button ref="modeButton" type="button" class="chat-action-button" :disabled="disabled" :aria-expanded="modeMenuOpen" aria-haspopup="menu" aria-label="选择学习模式" @click.stop="modeMenuOpen = !modeMenuOpen">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="modeIcons[mode] || modeIcons.AUTO" /></svg>
             <span>{{ modeLabel }}</span>
             <svg class="chat-action-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg>
@@ -178,8 +159,27 @@ onBeforeUnmount(() => {
             <button v-for="(label, value) in modeLabels" :key="value" type="button" role="menuitemradio" :aria-checked="mode === value" :class="{ active: mode === value }" @click="chooseMode(value)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="modeIcons[value] || modeIcons.AUTO" /></svg><span>{{ label }}</span><b v-if="mode === value" aria-hidden="true">✓</b>
             </button>
-          </div>
-        </div>
+           </div>
+         </div>
+         <div class="chat-model-menu">
+           <button ref="modelButton" type="button" class="chat-action-button chat-model-button" :disabled="disabled" :aria-expanded="modelMenuOpen" aria-haspopup="menu" aria-label="选择对话模型" @click.stop="modelMenuOpen = !modelMenuOpen">
+             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 12h5M8 15h8" /></svg>
+             <span>{{ modelLabel }}</span>
+             <svg class="chat-action-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg>
+           </button>
+           <div v-if="modelMenuOpen" class="chat-model-popover" role="menu" aria-label="对话模型">
+             <label class="chat-model-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg><input v-model="modelQuery" type="search" placeholder="搜索模型" aria-label="搜索模型"></label>
+             <button type="button" role="menuitemradio" :aria-checked="currentModelSelected" :class="{ active: currentModelSelected }" @click="chooseModel(null)">
+               <span class="chat-model-option-main"><strong>{{ currentModel?.name || '当前配置' }}</strong><small>{{ currentModel?.model || '跟随当前配置' }}</small></span><b v-if="currentModelSelected" aria-hidden="true">✓</b>
+             </button>
+             <p v-if="!filteredVisibleModels.length && !modelQuery" class="chat-model-empty">暂无其他可用模型</p>
+             <p v-if="!filteredVisibleModels.length && modelQuery" class="chat-model-empty">没有匹配的启用模型</p>
+             <button v-for="model in filteredVisibleModels" :key="model.id" type="button" role="menuitemradio" :aria-checked="String(modelId) === String(model.id)" :class="{ active: String(modelId) === String(model.id) }" @click="chooseModel(model.id)">
+               <span class="chat-model-option-main"><strong>{{ model.name }}</strong><small>{{ model.model }}<i v-if="model.isDefault"> · 默认</i></small></span><b v-if="String(modelId) === String(model.id)" aria-hidden="true">✓</b>
+             </button>
+             <button v-if="canManageModels" type="button" class="chat-model-manage" @click="manageModels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h10M18 17h2" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="16" cy="17" r="2" /></svg><span>管理模型</span></button>
+           </div>
+         </div>
         <span>Enter 发送 · Shift + Enter 换行</span>
       </div>
       <div>

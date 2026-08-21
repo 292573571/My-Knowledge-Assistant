@@ -1211,7 +1211,7 @@ textarea:focus-visible,
 
 .confirm-dialog-backdrop {
   position: fixed;
-  z-index: 400;
+  z-index: 1200;
   inset: 0;
   display: grid;
   place-items: center;
