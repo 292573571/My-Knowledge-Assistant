@@ -5,9 +5,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import com.example.workbench.memory.ChatMessage;
 import java.util.regex.Matcher;
@@ -20,7 +17,6 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class EvalCaseService {
 
-    private static final Path QUESTIONS_PATH = Path.of("eval", "questions.jsonl");
     private static final int SEED_CASE_LIMIT = 32;
     private static final Pattern FLOW_CASE_ID = Pattern.compile("flow-(\\d+)", Pattern.CASE_INSENSITIVE);
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() { };
@@ -96,7 +92,7 @@ public class EvalCaseService {
             return;
         }
         try {
-            Files.readAllLines(QUESTIONS_PATH, StandardCharsets.UTF_8).stream()
+            EvalQuestionSource.readLines().stream()
                     .filter(line -> !line.isBlank())
                     .limit(SEED_CASE_LIMIT)
                     .map(line -> readTemplate(line, user))

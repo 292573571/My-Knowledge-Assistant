@@ -24,7 +24,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class EvalRunner {
 
-    private static final Path QUESTIONS_PATH = Path.of("eval", "questions.jsonl");
     // 命令行评测同时输出文件报告，便于 CI 保存可追溯的运行产物。
     private static final Path RESULTS_PATH = Path.of("eval", "results", "latest.json");
     private static final Path REPORT_PATH = Path.of("eval", "reports", "latest.md");
@@ -142,7 +141,7 @@ public class EvalRunner {
     }
 
     private List<EvalCase> readCases() throws IOException {
-        return Files.readAllLines(QUESTIONS_PATH, StandardCharsets.UTF_8).stream()
+        return EvalQuestionSource.readLines().stream()
                 .filter(line -> !line.isBlank())
                 .map(this::readCase)
                 .toList();
