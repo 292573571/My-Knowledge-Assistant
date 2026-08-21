@@ -31,14 +31,6 @@ public class RagService {
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final String NO_CONTEXT_ANSWER = "我在当前知识库中没有找到足够信息和依据来回答这个问题。你可以导入相关文档后再问，或者切换到普通聊天模式让我基于通用知识回答。";
     private static final String MODEL_FALLBACK_SAFETY_ANSWER = "当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。";
-    private static final Pattern REPEATED_CHARACTER = Pattern.compile("(?s).*(.)\\1{3,}.*");
-    private static final Pattern REPEATED_SEQUENCE = Pattern.compile("(?s).*(.{2,4})\\1{2,}.*");
-    private static final Pattern SUSPICIOUS_LATIN_TOKEN = Pattern.compile("(?i)(?<![a-z])[a-z]{8,}(?![a-z])");
-    private static final Pattern MIXED_LANGUAGE_IDENTIFIER = Pattern.compile(
-            "(?U)(?:[A-Za-z][A-Za-z0-9]*_[\\p{IsHan}]+(?:_[A-Za-z][A-Za-z0-9]*)?|[\\p{IsHan}]+_[A-Za-z][A-Za-z0-9_]*)");
-    private static final Pattern HAN_CHARACTER = Pattern.compile("\\p{IsHan}");
-    private static final Pattern SQL_STATEMENT = Pattern.compile(
-            "(?is).*\\b(?:select|insert|update|delete|create|alter|drop|with)\\b.*");
     private static final Pattern EXPLICIT_TECHNICAL_ACRONYM = Pattern.compile("(?<![A-Za-z0-9])[A-Z][A-Z0-9.+#-]{1,}(?![A-Za-z0-9])");
     private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
@@ -85,6 +77,7 @@ public class RagService {
     private final boolean adjacentEnabled;
     private final DocumentTaskRepository documentTaskRepository;
     private final DocumentDisplayNameResolver displayNameResolver;
+    private final RagAnswerGuardrail answerGuardrail = new RagAnswerGuardrail();
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
@@ -234,6 +227,7 @@ public class RagService {
     }
 
     private RagChatResponse chatInternal(AppUser user, RagChatRequest request, RagChatOptions options, boolean includeDebug) {
+        try {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
         String question = request.message();
@@ -356,6 +350,11 @@ public class RagService {
                 System.currentTimeMillis() - startedAt
         );
         return new RagChatResponse(answer, ragSources, retrievalDebug(includeDebug, question, retrievedSources, sources));
+        } finally {
+            // 防止在线程池复用场景下 ThreadLocal 跨请求泄漏（内存泄漏 + ownerUserId 越权读取风险）。
+            retrievalTrace.remove();
+            retrievalScope.remove();
+        }
     }
 
     private boolean hasSameRecentUserQuestion(List<ChatMessage> history, String question) {
@@ -389,6 +388,7 @@ public class RagService {
     }
 
     public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId, String workspaceId) {
+        try {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("message cannot be empty");
         }
@@ -401,12 +401,17 @@ public class RagService {
                 queries,
                 retrievalDebugEntries(question.strip(), candidates, usedSources)
         );
+        } finally {
+            retrievalTrace.remove();
+            retrievalScope.remove();
+        }
     }
 
     /**
      * 为只读 Agent 检索当前授权空间的知识片段，并复用聊天链路的过滤和引用名称解析。
      */
     public List<RagSource> retrieveForAgent(String question, String ownerUserId, String workspaceId, int limit) {
+        try {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("query cannot be empty");
         }
@@ -418,6 +423,10 @@ public class RagService {
         return toRagSources(filterByThreshold(question.strip(), candidates, false)).stream()
                 .limit(safeLimit)
                 .toList();
+        } finally {
+            retrievalTrace.remove();
+            retrievalScope.remove();
+        }
     }
 
     public RagStreamResponse stream(RagChatRequest request) {
@@ -578,14 +587,14 @@ public class RagService {
             log.warn("RAG model fallback answer rejected reason=empty_or_unavailable action=safety_answer conversationId={}", conversationId);
             return new RagChatResponse(MODEL_FALLBACK_SAFETY_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
         }
-        if (!isUsableModelFallbackAnswer(question, answer)) {
+        if (!answerGuardrail.isUsableModelFallbackAnswer(question, answer)) {
             // 模型请求成功但内容异常时，再尝试一次；这与网络错误重试是不同的保护层。
             log.warn("RAG model fallback answer rejected reason=invalid_content action=retry_once conversationId={}", conversationId);
             answer = generateWithHistory(
                     prompt + "\n\n上一次回答未通过代码正确性校验。请重新生成完整答案：代码围栏必须闭合；SQL 中不得出现翻译成中文的关键字、系统视图名、表名或字段名；不要输出乱码、无意义字符或重复内容。",
                     history, options);
         }
-        if (!isUsableModelFallbackAnswer(question, answer)) {
+        if (!answerGuardrail.isUsableModelFallbackAnswer(question, answer)) {
             log.warn("RAG model fallback answer rejected reason=invalid_content action=safety_answer conversationId={}", conversationId);
             answer = MODEL_FALLBACK_SAFETY_ANSWER;
         } else {
@@ -595,130 +604,12 @@ public class RagService {
         return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
     }
 
-    private boolean isUsableModelFallbackAnswer(String question, String answer) {
-        if (answer == null || answer.strip().length() < 12) {
-            return false;
-        }
 
-        String normalized = answer.strip();
-        if (normalized.indexOf('\uFFFD') >= 0 || normalized.chars().anyMatch(this::isUnsupportedControlCharacter)) {
-            return false;
-        }
-        if (REPEATED_CHARACTER.matcher(normalized).matches() || REPEATED_SEQUENCE.matcher(normalized).matches()) {
-            return false;
-        }
-        if (containsInvalidCodeIdentifier(question, normalized)) {
-            return false;
-        }
-        if (asksForAllPostgresTables(question)
-                && Pattern.compile("(?is)table_schema\\s*=\\s*['\"]public['\"]").matcher(normalized).find()) {
-            return false;
-        }
 
-        var matcher = SUSPICIOUS_LATIN_TOKEN.matcher(normalized);
-        while (matcher.find()) {
-            if (isLikelyGibberishToken(matcher.group().toLowerCase())) {
-                return false;
-            }
-        }
-        return true;
-    }
 
-    private boolean asksForAllPostgresTables(String question) {
-        if (question == null) {
-            return false;
-        }
-        String normalized = question.toLowerCase(Locale.ROOT);
-        return (normalized.contains("postgresql") || normalized.contains("pgsql") || normalized.contains("postgres"))
-                && (normalized.contains("所有表") || normalized.contains("全部表"));
-    }
 
-    private boolean isUnsupportedControlCharacter(int character) {
-        return Character.isISOControl(character) && character != '\n' && character != '\r' && character != '\t';
-    }
 
-    private boolean containsInvalidCodeIdentifier(String question, String answer) {
-        ParsedCode parsed = parseCodeBlocks(answer);
-        if (parsed.unclosedFence()) {
-            return true;
-        }
 
-        boolean sqlFound = false;
-        for (CodeBlock block : parsed.blocks()) {
-            String language = block.language();
-            String code = block.code();
-            if (MIXED_LANGUAGE_IDENTIFIER.matcher(code).find()) {
-                return true;
-            }
-            boolean sqlCode = language.equals("sql") || language.equals("postgresql") || language.equals("postgres")
-                    || language.equals("pgsql") || SQL_STATEMENT.matcher(code).matches();
-            sqlFound |= sqlCode;
-            if (sqlCode && containsHanOutsideSqlText(code)) {
-                return true;
-            }
-        }
-
-        if (!asksForSql(question)) {
-            return false;
-        }
-        if (!sqlFound && SQL_STATEMENT.matcher(answer).matches()) {
-            sqlFound = true;
-            if (containsHanOutsideSqlText(answer)) {
-                return true;
-            }
-        }
-        return !sqlFound;
-    }
-
-    private ParsedCode parseCodeBlocks(String answer) {
-        List<CodeBlock> blocks = new ArrayList<>();
-        String language = "";
-        StringBuilder code = null;
-        for (String line : answer.split("\\R", -1)) {
-            String stripped = line.stripLeading();
-            if (stripped.startsWith("```")) {
-                if (code == null) {
-                    String info = stripped.substring(3).strip();
-                    language = info.isBlank() ? "" : info.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
-                    code = new StringBuilder();
-                } else {
-                    blocks.add(new CodeBlock(language, code.toString()));
-                    code = null;
-                    language = "";
-                }
-                continue;
-            }
-            if (code != null) {
-                if (!code.isEmpty()) {
-                    code.append('\n');
-                }
-                code.append(line);
-            }
-        }
-        if (code != null) {
-            blocks.add(new CodeBlock(language, code.toString()));
-        }
-        return new ParsedCode(List.copyOf(blocks), code != null);
-    }
-
-    private boolean asksForSql(String question) {
-        if (question == null) {
-            return false;
-        }
-        String normalized = question.toLowerCase(Locale.ROOT);
-        return normalized.contains("sql") || normalized.contains("查询语句") || normalized.contains("查询所有表")
-                || normalized.contains("查询全部表");
-    }
-
-    private boolean containsHanOutsideSqlText(String sql) {
-        String withoutComments = sql
-                .replaceAll("(?s)/\\*.*?\\*/", " ")
-                .replaceAll("(?m)--.*$", " ");
-        String withoutQuotedText = withoutComments
-                .replaceAll("'(?:''|[^'])*'", "''")
-                .replaceAll("\"(?:\"\"|[^\"])*\"", "\"\"");
-        return HAN_CHARACTER.matcher(withoutQuotedText).find();
-    }
 
     private String generateWithHistory(String prompt, List<ChatMessage> history, Map<String, String> options) {
         return history == null || history.isEmpty()
@@ -734,11 +625,6 @@ public class RagService {
                 : chatClient.stream(prompt, history, options);
     }
 
-    private boolean isLikelyGibberishToken(String token) {
-        // 长英文词在技术回答中很常见，不能靠固定白名单判断；只拦截字符种类极少的重复乱码串。
-        long distinctCharacters = token.chars().distinct().count();
-        return token.length() >= 9 && distinctCharacters <= 4;
-    }
 
     String buildWebPrompt(String webContext, String question) {
         return """
@@ -2050,12 +1936,6 @@ public class RagService {
     }
 
     private record ConversationContext(ContextRelation relation, List<ChatMessage> history, String standaloneQuestion) {
-    }
-
-    private record CodeBlock(String language, String code) {
-    }
-
-    private record ParsedCode(List<CodeBlock> blocks, boolean unclosedFence) {
     }
 
     private record QueryRetrievalResult(

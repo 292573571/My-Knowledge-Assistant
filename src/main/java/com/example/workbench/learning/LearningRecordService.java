@@ -47,23 +47,12 @@ public class LearningRecordService {
             "(?ms)^## (?:问题|教学检查)[ \\t]*\\R+.*?(?=^## (?:问题|教学检查)[ \\t]*$|\\z)");
     private static final Pattern WORKSPACE_MARKER = Pattern.compile("(?m)^- 知识空间：(.+)$");
     private static final Pattern WORKSPACE_MARKER_LINE = Pattern.compile("(?m)^- 知识空间：.*$\\n?", Pattern.MULTILINE);
-    private static final List<String> UNRELIABLE_ANSWER_MARKERS = List.of(
-            "我在当前知识库中没有找到足够信息和依据来回答这个问题",
-            "当前知识库没有足够信息回答该问题",
-            "当前知识库没有包含任何信息",
-            "当前知识库中没有包含任何信息",
-            "当前知识库没有任何信息",
-            "当前知识库为空",
-            "当前知识库没有相关资料，且模型回退调用未能成功",
-            "请求失败，请稍后重试",
-            "暂时无法回答",
-            "无法回答这个问题"
-    );
 
     private final DocumentIngestionService documentIngestionService;
     private final Clock clock;
     private final Path notesDirectory;
     private final LearningRecordStore recordStore;
+    private final LearningRecordFormatter recordFormatter = new LearningRecordFormatter();
 
     @Autowired
     public LearningRecordService(DocumentIngestionService documentIngestionService, LearningRecordStore recordStore) {
@@ -95,15 +84,15 @@ public class LearningRecordService {
 
     public synchronized void record(AppUser user, String workspaceId, String question, String answer,
                                     List<RagSource> sources) {
-        if (question == null || question.isBlank() || !isRecordableAnswer(answer)) {
+        if (question == null || question.isBlank() || !recordFormatter.isRecordableAnswer(answer)) {
             log.info("Learning record skipped userId={} reason=no_reliable_answer", user.getId());
             return;
         }
 
         if (recordStore != null) {
             LocalDate date = LocalDate.now(clock);
-            recordStore.recordChat(user, workspaceId, date, question.strip(), withoutReferences(answer), sources,
-                    formatEntry(workspaceId, question, answer));
+            recordStore.recordChat(user, workspaceId, date, question.strip(), recordFormatter.withoutReferences(answer), sources,
+                    recordFormatter.formatEntry(workspaceId, question, answer));
             return;
         }
 
@@ -113,7 +102,7 @@ public class LearningRecordService {
             if (!Files.exists(record)) {
                 Files.writeString(record, "# " + LocalDate.now(clock) + " 学习记录\n", StandardCharsets.UTF_8);
             }
-            String entry = formatEntry(workspaceId, question, answer);
+            String entry = recordFormatter.formatEntry(workspaceId, question, answer);
             String existingContent = Files.readString(record, StandardCharsets.UTF_8);
             String updatedContent = replaceAnswerForQuestion(existingContent, workspaceId, question, entry);
             if (updatedContent != null) {
@@ -144,7 +133,7 @@ public class LearningRecordService {
             LocalDate date = LocalDate.now(clock);
             return recordStore.recordTeachingCheck(user, workspaceId, date, attemptId, topic, question, answer,
                     score, maxScore, passed, feedback, weakPoint, reviewExplanation, reviewSuggestion,
-                    formatTeachingCheck(workspaceId, attemptId, topic, question, answer, score, maxScore, passed,
+                    recordFormatter.formatTeachingCheck(workspaceId, attemptId, topic, question, answer, score, maxScore, passed,
                             feedback, weakPoint, reviewExplanation, reviewSuggestion));
         }
         Path record = recordPath(user);
@@ -157,7 +146,7 @@ public class LearningRecordService {
             if (existingContent.contains("attemptId：" + attemptId)) {
                 return DATE_FORMAT.format(LocalDate.now(clock));
             }
-            String entry = formatTeachingCheck(workspaceId, attemptId, topic, question, answer, score, maxScore, passed,
+            String entry = recordFormatter.formatTeachingCheck(workspaceId, attemptId, topic, question, answer, score, maxScore, passed,
                     feedback, weakPoint, reviewExplanation, reviewSuggestion);
             Files.writeString(record, entry, StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
             return DATE_FORMAT.format(LocalDate.now(clock));
@@ -173,7 +162,7 @@ public class LearningRecordService {
                                                        String feedback) {
         if (recordStore != null) {
             LocalDate date = LocalDate.now(clock);
-            String markdown = formatTeachingPractice(workspaceId, checkId, practiceId, topic, question, answer,
+            String markdown = recordFormatter.formatTeachingPractice(workspaceId, checkId, practiceId, topic, question, answer,
                     score, maxScore, passed, feedback);
             return recordStore.recordTeachingPractice(user, workspaceId, date, checkId, practiceId, topic,
                     question, answer, score, maxScore, passed, feedback, markdown);
@@ -186,12 +175,12 @@ public class LearningRecordService {
         if (recordStore == null) return null;
         LocalDate date = LocalDate.now(clock);
         String markdown = "\n## 教学讲解\n\n"
-                + "- 主题：" + singleLine(topic) + "\n"
-                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n")
-                + "- 教学会话：" + singleLine(sessionId) + "\n\n"
-                + withoutReferences(explanation) + "\n";
+                + "- 主题：" + recordFormatter.singleLine(topic) + "\n"
+                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + recordFormatter.singleLine(workspaceId) + "\n")
+                + "- 教学会话：" + recordFormatter.singleLine(sessionId) + "\n\n"
+                + recordFormatter.withoutReferences(explanation) + "\n";
         return recordStore.recordTeachingExplanation(user, workspaceId, date, sessionId, topic,
-                withoutReferences(explanation), sources, markdown);
+                recordFormatter.withoutReferences(explanation), sources, markdown);
     }
 
     public List<LearningRecordSummary> list(AppUser user) {
@@ -370,9 +359,9 @@ public class LearningRecordService {
             if (entries.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "学习记录不存在");
             String body = editedContent == null ? renderEntries(date, entries) : stripWorkspaceMarkerLine(validateContent(editedContent));
             Path note = notesDirectory.resolve(userDirectory(user))
-                    .resolve(workspaceId == null ? "" : safeWorkspaceDirectory(workspaceId))
+                    .resolve(workspaceId == null ? "" : recordFormatter.safeWorkspaceDirectory(workspaceId))
                     .resolve(date + "-learning-note.md").normalize();
-            String noteContent = "# " + date + " 正式笔记\n\n" + withoutGeneratedTitle(date, body).strip() + "\n";
+            String noteContent = "# " + date + " 正式笔记\n\n" + recordFormatter.withoutGeneratedTitle(date, body).strip() + "\n";
             recordStore.saveFormalNote(user, workspaceId, recordDate, note.getFileName().toString(),
                     workspacePath(note), noteContent);
             if (editedContent != null) {
@@ -385,7 +374,7 @@ public class LearningRecordService {
         }
         Path record = requireRecord(user, date);
         Path note = notesDirectory.resolve(userDirectory(user))
-                .resolve(workspaceId == null ? "" : safeWorkspaceDirectory(workspaceId))
+                .resolve(workspaceId == null ? "" : recordFormatter.safeWorkspaceDirectory(workspaceId))
                 .resolve(date + "-learning-note.md").normalize();
         if (!note.startsWith(notesDirectory)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "正式笔记路径无效");
@@ -400,7 +389,7 @@ public class LearningRecordService {
                 }
             }
             Files.createDirectories(note.getParent());
-            String body = stripWorkspaceMarkerLine(withoutGeneratedTitle(date, recordContent));
+            String body = stripWorkspaceMarkerLine(recordFormatter.withoutGeneratedTitle(date, recordContent));
             String noteContent = "# " + date + " 正式笔记\n\n" + body.strip() + "\n";
             String learningRecordContent = "# " + date + " 学习记录\n\n" + body.strip() + "\n";
             Files.writeString(note, noteContent, StandardCharsets.UTF_8);
@@ -431,18 +420,6 @@ public class LearningRecordService {
         return content;
     }
 
-    private String withoutGeneratedTitle(String date, String content) {
-        String formalHeader = "# " + date + " 正式笔记";
-        String learningHeader = "# " + date + " 学习记录";
-        String normalized = content.stripLeading();
-
-        while (normalized.startsWith(formalHeader) || normalized.startsWith(learningHeader)) {
-            String header = normalized.startsWith(formalHeader) ? formalHeader : learningHeader;
-            normalized = normalized.substring(header.length()).stripLeading();
-        }
-
-        return normalized;
-    }
 
     private Path recordPath(AppUser user) {
         return recordsDirectory.resolve(userDirectory(user)).resolve(DATE_FORMAT.format(LocalDate.now(clock)) + ".md");
@@ -519,29 +496,7 @@ public class LearningRecordService {
                                          boolean passed, String date) {
     }
 
-    private String formatEntry(String workspaceId, String question, String answer) {
-        return "\n## 问题\n\n"
-                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n\n")
-                + question.strip()
-                + "\n\n## 回答\n\n"
-                + withoutReferences(answer)
-                + "\n";
-    }
 
-    private String formatTeachingPractice(String workspaceId, String checkId, String practiceId, String topic,
-                                          String question, String answer, int score, int maxScore,
-                                          boolean passed, String feedback) {
-        return "\n## 教学实践\n\n"
-                + "- 主题：" + singleLine(topic) + "\n"
-                + (workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n")
-                + "- 检查标识：" + singleLine(checkId) + "\n"
-                + "- 实践标识：" + singleLine(practiceId) + "\n"
-                + "- 实践问题：" + singleLine(question) + "\n"
-                + "- 我的回答：" + singleLine(answer) + "\n"
-                + "- 得分：" + score + "/" + maxScore + "\n"
-                + "- 结果：" + (passed ? "通过" : "需要复习") + "\n"
-                + "- 反馈：" + singleLine(feedback) + "\n";
-    }
 
     private List<TeachingTopicProgress> progressFromEntries(List<LearningRecordEntry> entries) {
         return entries.stream()
@@ -590,7 +545,7 @@ public class LearningRecordService {
         if (result.isEmpty()) {
             result.add(new LearningRecordEntry(UUID.randomUUID().toString(), user.getId(), workspaceId, date,
                     LearningRecordType.LEGACY, null, null, null, null, null, null, null, null, null, null, null, null,
-                    "[]", withoutGeneratedTitle(date.toString(), normalized), "edit:" + user.getId() + ":" + workspaceId + ":" + date,
+                    "[]", recordFormatter.withoutGeneratedTitle(date.toString(), normalized), "edit:" + user.getId() + ":" + workspaceId + ":" + date,
                     false, Instant.now(), Instant.now()));
         }
         return result;
@@ -659,7 +614,7 @@ public class LearningRecordService {
         int headingEnd = normalized.indexOf('\n');
         String heading = headingEnd < 0 ? normalized : normalized.substring(0, headingEnd).strip();
         String body = headingEnd < 0 ? "" : normalized.substring(headingEnd + 1).strip();
-        return heading + "\n\n- 知识空间：" + singleLine(workspaceId)
+        return heading + "\n\n- 知识空间：" + recordFormatter.singleLine(workspaceId)
                 + (body.isBlank() ? "" : "\n\n" + body);
     }
 
@@ -668,33 +623,10 @@ public class LearningRecordService {
         return entries.find() ? entries.start() : content.length();
     }
 
-    private String formatTeachingCheck(String workspaceId, String attemptId, String topic, String question, String answer,
-                                       int score, int maxScore, boolean passed, String feedback,
-                                       String weakPoint, String reviewExplanation, String reviewSuggestion) {
-        StringBuilder entry = new StringBuilder("\n## 教学检查\n\n")
-                .append("- 主题：").append(singleLine(topic)).append('\n')
-                .append(workspaceId == null || workspaceId.isBlank() ? "" : "- 知识空间：" + singleLine(workspaceId) + "\n")
-                .append("- 检查问题：").append(singleLine(question)).append('\n')
-                .append("- 我的回答：").append(singleLine(answer)).append('\n')
-                .append("- 得分：").append(score).append('/').append(maxScore).append('\n')
-                .append("- 结果：").append(passed ? "通过" : "需要复习").append('\n')
-                .append("- 反馈：").append(singleLine(feedback)).append('\n')
-                .append("- attemptId：").append(singleLine(attemptId)).append('\n');
-        if (!passed && weakPoint != null) {
-            entry.append("\n### 针对性复习\n\n")
-                    .append("- 薄弱点：").append(singleLine(weakPoint)).append('\n')
-                    .append("- 关键解释：").append(singleLine(reviewExplanation)).append('\n')
-                    .append("- 复习建议：").append(singleLine(reviewSuggestion)).append('\n');
-        }
-        return entry.toString();
-    }
 
-    private String singleLine(String value) {
-        return value == null ? "" : value.strip().replaceAll("\\s*\\R\\s*", " ");
-    }
 
     private String replaceAnswerForQuestion(String content, String workspaceId, String question, String entry) {
-        String expected = normalizeQuestion(question);
+        String expected = recordFormatter.normalizeQuestion(question);
         Matcher matcher = QUESTION_ANSWER_ENTRY.matcher(content);
         StringBuffer updated = new StringBuffer();
         boolean replaced = false;
@@ -704,7 +636,7 @@ public class LearningRecordService {
             String entryWorkspace = workspace.find() ? workspace.group(1).strip() : null;
             String recordedQuestion = WORKSPACE_MARKER.matcher(matcher.group(1)).replaceFirst("").strip();
             if (!replaced && java.util.Objects.equals(workspaceId, entryWorkspace)
-                    && normalizeQuestion(recordedQuestion).equals(expected)) {
+                    && recordFormatter.normalizeQuestion(recordedQuestion).equals(expected)) {
                 matcher.appendReplacement(updated, Matcher.quoteReplacement(entry.stripLeading()));
                 replaced = true;
             } else {
@@ -719,43 +651,7 @@ public class LearningRecordService {
         return updated.toString();
     }
 
-    private String withoutReferences(String answer) {
-        return answer.strip()
-                .replaceFirst("(?ms)\\n+参考来源[：:]\\s*\\n.*$", "")
-                .replaceAll("(?m)^\\s*以上回答基于通用大模型知识，不是当前知识库内容。\\s*$\\R?", "")
-                .strip();
-    }
 
-    private boolean isRecordableAnswer(String answer) {
-        if (answer == null || answer.isBlank()) {
-            return false;
-        }
 
-        String cleaned = withoutReferences(answer);
-        if (UNRELIABLE_ANSWER_MARKERS.stream().anyMatch(cleaned::contains)) {
-            return false;
-        }
 
-        String normalized = cleaned.strip();
-        if (normalized.startsWith("我不知道")
-                || normalized.startsWith("抱歉，我无法")
-                || normalized.startsWith("抱歉，无法")) {
-            return false;
-        }
-
-        // 去除 Markdown 标题和标点后仍需有实质内容，避免把“# RAG”一类失败兜底写入学习记录。
-        String meaningful = normalized
-                .replaceAll("(?m)^#{1,6}\\s*", "")
-                .replaceAll("[\\p{P}\\p{S}\\s]+", "");
-        return meaningful.length() >= 6;
-    }
-
-    private String normalizeQuestion(String question) {
-        return question.strip().replaceAll("\\s+", " ");
-    }
-
-    private String safeWorkspaceDirectory(String workspaceId) {
-        return "workspace-" + java.util.Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(workspaceId.getBytes(StandardCharsets.UTF_8));
-    }
 }
