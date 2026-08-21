@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, reactive, re
 import ChatInput from './ChatInput.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationSidebar from './ConversationSidebar.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import { formatApiError } from '../api/apiError'
 import {
   createLearningSession,
@@ -30,6 +31,7 @@ const loading = ref(false)
 const loadingSessions = ref(false)
 const creatingSession = ref(false)
 const deletingSessionId = ref('')
+const pendingDeleteSession = ref(null)
 const error = ref('')
 const messagesEl = ref(null)
 
@@ -202,6 +204,17 @@ async function deleteSession(sessionId) {
   } finally {
     deletingSessionId.value = ''
   }
+}
+
+function requestDeleteSession(sessionId) {
+  if (!sessionId || loading.value || deletingSessionId.value) return
+  pendingDeleteSession.value = sessions.value.find(session => session.sessionId === sessionId) || { sessionId, title: '这条学习会话' }
+}
+
+async function confirmDeleteSession() {
+  const sessionId = pendingDeleteSession.value?.sessionId
+  pendingDeleteSession.value = null
+  if (sessionId) await deleteSession(sessionId)
 }
 
 async function send(content) {
@@ -410,8 +423,18 @@ function closeSourceOnPointerMove(event) {
         :mobile-open="mobileSessionsOpen"
         @new="newSession"
         @select="selectSession"
-        @delete="deleteSession"
+         @delete="requestDeleteSession"
         @close="mobileSessionsOpen = false"
+      />
+      <ConfirmDialog
+        v-if="pendingDeleteSession"
+        title="删除学习会话？"
+        :message="`将删除「${pendingDeleteSession.title || '这条学习会话'}」及其中的对话内容，此操作不可恢复。`"
+        confirm-text="删除会话"
+        :busy="Boolean(deletingSessionId)"
+        danger
+        @confirm="confirmDeleteSession"
+        @cancel="pendingDeleteSession = null"
       />
       <div v-if="mobileSessionsOpen" class="session-drawer-backdrop" role="presentation" @click="mobileSessionsOpen = false"></div>
        <section class="learning-conversation-panel">

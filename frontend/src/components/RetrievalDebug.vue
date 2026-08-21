@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createEvalCase, deleteEvalCase, downloadEvalImport, fetchEvalCases, fetchEvalImports, fetchEvalRun, fetchEvalRuns, importEvalCases, runEvals, updateEvalCase } from '../api/ragApi'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 defineProps({
   embedded: { type: Boolean, default: false }
@@ -16,6 +17,7 @@ const selectedCaseIds = ref([])
 const casesLoading = ref(false)
 const caseSaving = ref(false)
 const caseDeletingId = ref(null)
+const casePendingDelete = ref(null)
 const editingCaseId = ref(null)
 const caseFormOpen = ref(false)
 const caseForm = ref(newCaseForm())
@@ -226,7 +228,13 @@ async function downloadImport(item) {
 }
 
 async function removeEvalCase(caseItem) {
-  if (!window.confirm(`确定删除评测题“${caseItem.caseId || caseItem.question}”吗？`)) return
+  casePendingDelete.value = caseItem
+}
+
+async function confirmRemoveEvalCase() {
+  const caseItem = casePendingDelete.value
+  casePendingDelete.value = null
+  if (!caseItem) return
   caseDeletingId.value = caseItem.id
   evalError.value = ''
   try {
@@ -346,6 +354,19 @@ onMounted(loadEvalCases)
       <div v-else-if="!evalImports.length" class="retrieval-eval-empty">暂无已保存的导入文件。</div>
       <div v-else class="retrieval-eval-import-records"><article v-for="item in evalImports" :key="item.id"><div><strong :title="item.originalFileName">{{ item.originalFileName }}</strong><span>{{ formatRunTime(item.createdAt) }} · {{ formatFileSize(item.fileSize) }}</span></div><p>已导入 <b>{{ item.importedCount }}</b> 条评测题</p><button type="button" class="retrieval-eval-secondary" @click="downloadImport(item)">下载</button></article></div>
     </section>
+
+    <Teleport to="body">
+      <ConfirmDialog
+        v-if="casePendingDelete"
+        title="删除这道评测题？"
+        :message="`将删除“${casePendingDelete.caseId || casePendingDelete.question}”，并从评测题库中移除。此操作不可恢复。`"
+        confirm-text="删除评测题"
+        :busy="caseDeletingId !== null"
+        danger
+        @confirm="confirmRemoveEvalCase"
+        @cancel="casePendingDelete = null"
+      />
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="caseFormOpen" ref="caseDialogRef" class="retrieval-eval-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="retrieval-case-dialog-title" @click.self="cancelCaseEdit">

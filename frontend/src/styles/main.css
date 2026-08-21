@@ -1216,31 +1216,51 @@ textarea:focus-visible,
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(20, 30, 50, .38);
-  backdrop-filter: blur(4px);
+   background: rgba(24, 38, 29, .46);
+   backdrop-filter: blur(9px);
 }
 .confirm-dialog {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  width: min(430px, 100%);
-  gap: 14px;
-  border: 1px solid rgba(214, 224, 240, .9);
-  border-radius: 18px;
-  padding: 22px;
-  background: #fff;
-  box-shadow: 0 26px 80px rgba(24, 39, 70, .24);
+   position: relative;
+   display: grid;
+   grid-template-columns: auto minmax(0, 1fr);
+   width: min(480px, 100%);
+   gap: 16px;
+   border: 1px solid var(--site-line, #d8dfd3);
+   border-radius: 24px;
+   padding: 28px 28px 22px;
+   background: var(--site-card, #fffef9);
+   box-shadow: 0 30px 90px rgba(24, 38, 29, .28), 0 4px 16px rgba(24, 38, 29, .08);
+   animation: confirm-dialog-in .18s ease-out;
 }
-.confirm-dialog-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: var(--site-green, #1d5939); background: var(--site-green-soft, #e5eee1); font-size: 19px; font-weight: 800; }
-.confirm-dialog-icon.danger { color: #b23f4a; background: #fff0f1; }
-.confirm-dialog-copy h2 { margin: 1px 0 7px; color: #202d45; font-size: 18px; }
-.confirm-dialog-copy p { margin: 0; color: #718097; font-size: 13px; line-height: 1.65; }
-.confirm-dialog-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 9px; margin-top: 8px; }
-.confirm-dialog-actions button { border-radius: 9px; padding: 9px 15px; font-size: 13px; font-weight: 700; }
-.confirm-cancel { border: 1px solid #d7dfeb; color: #5c6b80; background: #fff; }
+.confirm-dialog-close { position: absolute; top: 15px; right: 15px; display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; color: var(--site-muted, #718074); background: transparent; font-size: 24px; line-height: 1; cursor: pointer; }
+.confirm-dialog-close:hover { color: var(--site-ink, #1b2b20); background: var(--site-green-soft, #e5eee1); }
+.confirm-dialog-icon { display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid #c6ddc5; border-radius: 15px; color: var(--site-green, #1d5939); background: var(--site-green-soft, #e5eee1); }
+.confirm-dialog-icon.danger { border-color: #efc7c5; color: #b23f4a; background: #fff0ed; }
+.confirm-dialog-icon svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.confirm-dialog-copy { min-width: 0; padding-right: 22px; }
+.confirm-dialog-eyebrow { display: block; margin: 1px 0 7px; color: var(--site-green, #1d5939); font-size: 10px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+.confirm-dialog-eyebrow.danger { color: #b23f4a; }
+.confirm-dialog-copy h2 { margin: 0 0 8px; color: var(--site-ink, #202d45); font-size: 20px; letter-spacing: -.02em; }
+.confirm-dialog-copy p { margin: 0; color: var(--site-muted, #718097); font-size: 13px; line-height: 1.7; }
+.confirm-dialog-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; border-top: 1px solid var(--site-line-soft, #e6ebe1); padding-top: 18px; }
+.confirm-dialog-actions button { min-width: 88px; border-radius: 10px; padding: 10px 15px; font-size: 13px; font-weight: 750; cursor: pointer; transition: transform .16s, background .16s, border-color .16s; }
+.confirm-dialog-actions button:not(:disabled):active { transform: translateY(1px); }
+.confirm-cancel { border: 1px solid #cbd4c5; color: #536758; background: #fffef9; }
 .confirm-submit { border: 1px solid var(--site-green, #1d5939); color: #fff; background: var(--site-green, #1d5939); }
-.confirm-submit.danger { border-color: #c84d59; background: #c84d59; }
-.confirm-cancel:hover { background: #f5f7fb; }
-.confirm-submit:hover { filter: brightness(.96); }
+.confirm-submit.danger { border-color: var(--site-danger, #b54c4f); background: var(--site-danger, #b54c4f); }
+.confirm-cancel:hover { border-color: #9eb59e; background: var(--site-green-soft, #edf3ea); }
+.confirm-submit:hover { filter: brightness(.94); }
+.confirm-dialog-actions button:disabled, .confirm-dialog-close:disabled { cursor: wait; opacity: .55; }
+@keyframes confirm-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+@media (max-width: 520px) {
+  .confirm-dialog { grid-template-columns: 1fr; width: 100%; border-radius: 21px; padding: 25px 20px 18px; }
+  .confirm-dialog-icon { width: 44px; height: 44px; }
+  .confirm-dialog-copy { padding-right: 18px; }
+  .confirm-dialog-copy h2 { font-size: 18px; }
+  .confirm-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .confirm-dialog-actions button { width: 100%; }
+}
 
 .document-reader-backdrop { position: fixed; z-index: 410; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(19,30,50,.48); backdrop-filter: blur(5px); }
 .document-reader { display: grid; grid-template-rows: auto minmax(0,1fr); width: min(940px,100%); height: min(760px,calc(100vh - 56px)); overflow: hidden; border: 1px solid #d9e2ef; border-radius: 18px; background: #fff; box-shadow: 0 28px 90px rgba(20,35,66,.28); }
@@ -3854,9 +3874,9 @@ textarea:focus-visible,
 .document-upload-spinner { border-color: #c7d9c5; border-top-color: var(--site-green); }
 
 .confirm-dialog-backdrop,
-.document-reader-backdrop { background: rgba(24, 38, 29, .38); }
+.document-reader-backdrop { background: rgba(24, 38, 29, .46); }
 .confirm-dialog,
-.document-reader { border-color: var(--site-line); border-radius: 18px; background: var(--site-card); box-shadow: 0 26px 80px rgba(35, 52, 39, .2); }
+.document-reader { border-color: var(--site-line); border-radius: 24px; background: var(--site-card); box-shadow: 0 30px 90px rgba(24, 38, 29, .28), 0 4px 16px rgba(24, 38, 29, .08); }
 .confirm-dialog-icon { color: var(--site-green); background: var(--site-green-soft); }
 .confirm-dialog-copy h2,
 .document-reader > header h2 { color: var(--site-ink); }
@@ -4574,6 +4594,19 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
   display: flex; align-items: start; justify-content: space-between; gap: 18px;
   padding: 18px 0 0;
 }
+.log-viewer-switcher {
+  display: inline-flex; gap: 4px; padding: 4px;
+  border: 1px solid var(--site-line-soft); border-radius: 10px;
+  background: rgba(255,255,255,.55); flex-shrink: 0;
+}
+.log-viewer-switcher button {
+  border: 0; border-radius: 7px; padding: 8px 13px;
+  color: var(--site-ink-soft); background: transparent; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700;
+}
+.log-viewer-switcher button.active {
+  color: #285b3e; background: var(--site-card); box-shadow: 0 1px 4px rgba(39,64,47,.12);
+}
 .log-viewer-toolbar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 12px 0; border-bottom: 1px solid var(--site-line-soft);
@@ -4638,3 +4671,9 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
   padding: 10px 0;
 }
 .log-page-info { color: #8a9aaa; font-size: 12px; }
+
+@media (max-width: 760px) {
+  .log-viewer-header { flex-direction: column; }
+  .log-viewer-switcher { width: 100%; }
+  .log-viewer-switcher button { flex: 1; }
+}

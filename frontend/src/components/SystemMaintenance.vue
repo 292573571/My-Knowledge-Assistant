@@ -25,6 +25,7 @@ const error = ref('')
 const result = ref(null)
 const pendingAction = ref('')
 const activeTool = ref('maintenance')
+const activeLogView = ref('runtime')
 const documentTasks = ref([])
 const taskStatusOpen = ref(false)
 const trackedTaskId = ref('')
@@ -48,6 +49,8 @@ const poolForm = reactive({
 const logEntries = ref([])
 const auditEntries = ref([])
 const auditLoading = ref(false)
+const auditPurging = ref(false)
+const pendingPoolDelete = ref(null)
 const logTotal = ref(0)
 const logPage = ref(0)
 const logTotalPages = ref(0)
@@ -86,13 +89,15 @@ async function loadAuditEvents() {
 }
 
 async function purgeAllAuditEvents() {
-  if (!window.confirm('确定删除全部审计日志？此操作仅限超级管理员，且不可恢复。')) return
+  auditPurging.value = true
   try {
     const result = await purgeAuditEvents()
     auditEntries.value = []
     notifySuccess(`已删除 ${result.deleted || 0} 条审计日志`)
   } catch (e) {
     notifyError(e.message || '删除审计日志失败')
+  } finally {
+    auditPurging.value = false
   }
 }
 
@@ -139,7 +144,6 @@ function logContextTitle(entry) {
 }
 
 async function clearAllLogs() {
-  if (!window.confirm('确定清理全部普通运行日志？审计日志不受影响。')) return
   try {
     const result = await clearLogs()
     logEntries.value = []
@@ -151,8 +155,85 @@ async function clearAllLogs() {
   }
 }
 
+const confirmTarget = ref('')
+const confirmation = computed(() => {
+  if (confirmTarget.value === 'clear-logs') {
+    return {
+      title: '清理运行日志？',
+      message: '将删除全部普通运行日志记录。审计日志不会受到影响，此操作不可恢复。',
+      confirmText: '清理运行日志',
+      danger: true
+    }
+  }
+  if (confirmTarget.value === 'purge-audit') {
+    return {
+      title: '删除全部审计日志？',
+      message: '这是超级管理员专属操作。删除前请确认已完成必要的归档，此操作不可恢复。',
+      confirmText: '删除全部审计日志',
+      danger: true
+    }
+  }
+  if (confirmTarget.value === 'delete-model') {
+    return {
+      title: '删除模型配置？',
+      message: `将删除「${pendingPoolDelete.value?.name || '此模型'}」及其配置，删除后无法恢复。请确认该模型不再被用户使用。`,
+      confirmText: '删除模型',
+      danger: true
+    }
+  }
+  return pendingAction.value === 'rebuild'
+    ? {
+        title: '重建当前空间索引？',
+        message: `将清理"${workspaceName.value}"现有文档索引和向量，再从空间源文件重新生成。其他空间不会受到影响。`,
+        confirmText: '开始重建',
+        danger: true
+      }
+    : {
+        title: '同步当前空间？',
+        message: `将扫描"${workspaceName.value}"的受管源文件，更新变化内容并清理已丢失文件的旧索引。`,
+        confirmText: '开始同步',
+        danger: false
+      }
+})
+
+function openClearLogsConfirm() {
+  confirmTarget.value = 'clear-logs'
+}
+
+function openPurgeAuditConfirm() {
+  confirmTarget.value = 'purge-audit'
+}
+
+function openDeletePoolConfirm(model) {
+  pendingPoolDelete.value = model
+  confirmTarget.value = 'delete-model'
+}
+
+async function confirmDialogAction() {
+  const target = confirmTarget.value
+  try {
+    if (target === 'clear-logs') await clearAllLogs()
+    else if (target === 'purge-audit') await purgeAllAuditEvents()
+    else if (target === 'delete-model') await deletePoolModelConfirmed()
+    else await confirmMaintenance()
+  } finally {
+    confirmTarget.value = ''
+    pendingAction.value = ''
+    pendingPoolDelete.value = null
+  }
+}
+
+function cancelDialog() {
+  confirmTarget.value = ''
+  pendingAction.value = ''
+  pendingPoolDelete.value = null
+}
+
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
-const workspaceName = computed(() => props.workspace?.name || '当前空间')
+const workspaceName = computed(() => {
+  if (props.workspace?.type === 'PERSONAL') return `${props.currentUser?.userName || props.workspace?.name || '当前用户'}的个人空间`
+  return props.workspace?.name || '当前空间'
+})
 const workspaceTypeLabel = computed(() => ({ PERSONAL: '个人', TEAM: '团队', PUBLIC: '公共' })[props.workspace?.type] || '空间')
 const latestRebuildTask = computed(() => documentTasks.value.find((task) => task.type === 'REBUILD') || null)
 const latestMaintenanceTask = computed(() => documentTasks.value.find((task) => ['REBUILD', 'SYNC'].includes(task.type)) || null)
@@ -193,20 +274,6 @@ const taskStageLabels = {
   DONE: '全部文件已完成索引',
   FAILED: '请查看失败原因'
 }
-const confirmation = computed(() => pendingAction.value === 'rebuild'
-  ? {
-      title: '重建当前空间索引？',
-      message: `将清理"${workspaceName.value}"现有文档索引和向量，再从空间源文件重新生成。其他空间不会受到影响。`,
-      confirmText: '开始重建',
-      danger: true
-    }
-  : {
-      title: '同步当前空间？',
-      message: `将扫描"${workspaceName.value}"的受管源文件，更新变化内容并清理已丢失文件的旧索引。`,
-      confirmText: '开始同步',
-      danger: false
-    })
-
 onMounted(() => {
   loadSummary()
   loadDocumentTasks()
@@ -296,7 +363,6 @@ async function importDirectory() {
 
 async function confirmMaintenance() {
   const action = pendingAction.value
-  pendingAction.value = ''
   if (action === 'sync') await run('sync', () => syncDocuments(props.workspace?.id), '空间同步任务已提交')
   if (action === 'rebuild') await run('rebuild', () => rebuildDocuments(props.workspace?.id), '索引重建任务已提交')
 }
@@ -360,8 +426,9 @@ async function submitPoolForm() {
   }
 }
 
-async function handleDeletePoolModel(model) {
-  if (!confirm(`确定要删除「${model.name}」吗？`)) return
+async function deletePoolModelConfirmed() {
+  const model = pendingPoolDelete.value
+  if (!model) return
   poolSaving.value = true
   poolError.value = ''
   try {
@@ -432,13 +499,9 @@ async function handleTestModel(model) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v2"/><path d="M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M12 12.5v4M9 12.5h6"/></svg>
         模型管理
       </button>
-      <button type="button" :aria-pressed="activeTool === 'logs'" :class="{ active: activeTool === 'logs' }" @click="activeTool = 'logs'; loadLogs()">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
-        日志中心
-      </button>
-      <button type="button" :aria-pressed="activeTool === 'audit'" :class="{ active: activeTool === 'audit' }" @click="activeTool = 'audit'; loadAuditEvents()">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.9 8.5 7 10 4.1-1.5 7-5.3 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
-        审计日志
+      <button type="button" :aria-pressed="activeTool === 'logs'" :class="{ active: activeTool === 'logs' }" @click="activeTool = 'logs'; activeLogView = 'runtime'; loadLogs()">
+         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+         日志中心
       </button>
     </nav>
 
@@ -551,7 +614,6 @@ async function handleTestModel(model) {
         <div class="maintenance-future-grid">
            <article><span class="maintenance-future-icon green" aria-hidden="true">◒</span><div><strong>任务监控</strong><small>查看所有后台任务的执行记录</small></div><em>即将推出</em></article>
            <article><span class="maintenance-future-icon neutral" aria-hidden="true">◈</span><div><strong>数据备份</strong><small>保护索引配置与知识库数据</small></div><em>即将推出</em></article>
-           <article><span class="maintenance-future-icon sand" aria-hidden="true">◇</span><div><strong>日志中心</strong><small>集中查看和检索系统运行时日志</small></div><em>即将推出</em></article>
         </div>
       </section>
     </div>
@@ -586,7 +648,7 @@ async function handleTestModel(model) {
             <button class="maintenance-model-btn" @click="openEditPoolModel(model)">编辑</button>
             <button v-if="!model.isDefault && model.enabled" class="maintenance-model-btn primary" @click="handleSetDefault(model)">设默认</button>
             <button class="maintenance-model-btn" :disabled="testingModelId === model.id" @click="handleTestModel(model)">{{ testingModelId === model.id ? '测试中...' : '测试' }}</button>
-            <button class="maintenance-model-btn danger" @click="handleDeletePoolModel(model)">删除</button>
+             <button class="maintenance-model-btn danger" :disabled="poolSaving" @click="openDeletePoolConfirm(model)">删除</button>
           </div>
         </div>
       </section>
@@ -596,9 +658,13 @@ async function handleTestModel(model) {
 
     <section v-else-if="activeTool === 'logs'" class="log-viewer-section">
       <header class="log-viewer-header">
-        <div><p class="retrieval-debug-kicker">SYSTEM LOGS</p><h2>日志中心</h2><p>查看应用运行日志，排查问题。</p></div>
+        <div><p class="retrieval-debug-kicker">SYSTEM LOGS</p><h2>日志中心</h2><p>查看应用运行日志和审计日志，排查问题并追踪关键变更。</p></div>
+        <div class="log-viewer-switcher" role="tablist" aria-label="日志类型">
+          <button type="button" :class="{ active: activeLogView === 'runtime' }" role="tab" :aria-selected="activeLogView === 'runtime'" @click="activeLogView = 'runtime'; loadLogs()">运行日志</button>
+          <button type="button" :class="{ active: activeLogView === 'audit' }" role="tab" :aria-selected="activeLogView === 'audit'" @click="activeLogView = 'audit'; loadAuditEvents()">审计日志</button>
+        </div>
       </header>
-      <div class="log-viewer-toolbar">
+      <div v-if="activeLogView === 'runtime'" class="log-viewer-toolbar">
         <label class="log-filter-label">级别
           <select v-model="logLevel" class="log-filter-select">
             <option value="">全部</option>
@@ -624,11 +690,11 @@ async function handleTestModel(model) {
         </label>
         <button type="button" class="retrieval-eval-secondary" :disabled="logLoading" @click="loadLogs">{{ logLoading ? '加载中...' : '刷新' }}</button>
         <button type="button" :class="['retrieval-eval-secondary', { active: logAutoRefresh }]" @click="toggleLogAutoRefresh">{{ logAutoRefresh ? '停止自动' : '自动刷新' }}</button>
-        <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="clearAllLogs">清理运行日志</button>
+         <button type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="openClearLogsConfirm">清理运行日志</button>
         <span class="log-count">{{ logTotal }} 条</span>
       </div>
 
-      <div class="log-viewer-body">
+      <div v-if="activeLogView === 'runtime'" class="log-viewer-body">
         <div v-if="logLoading && !logEntries.length" class="retrieval-eval-empty">正在加载日志...</div>
         <div v-else-if="!logEntries.length" class="retrieval-eval-empty">暂无日志。</div>
         <template v-else>
@@ -648,18 +714,13 @@ async function handleTestModel(model) {
           </div>
         </template>
       </div>
-    </section>
-
-    <section v-else-if="activeTool === 'audit'" class="log-viewer-section">
-      <header class="log-viewer-header">
-        <div><p class="retrieval-debug-kicker">IMMUTABLE AUDIT TRAIL</p><h2>审计日志</h2><p>记录登录、权限、成员、文档和模型配置变更。普通管理员只读，删除仅限超级管理员。</p></div>
-      </header>
-      <div class="log-viewer-toolbar">
+      <div v-else class="log-viewer-audit-panel">
+        <div class="log-viewer-toolbar">
         <button type="button" class="retrieval-eval-secondary" :disabled="auditLoading" @click="loadAuditEvents">{{ auditLoading ? '加载中...' : '刷新' }}</button>
-        <button v-if="currentUser?.systemRole === 'SUPER_ADMIN'" type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="purgeAllAuditEvents">删除全部审计日志</button>
+        <button v-if="currentUser?.systemRole === 'SUPER_ADMIN'" type="button" class="retrieval-eval-secondary" style="margin-left:12px" @click="openPurgeAuditConfirm">删除全部审计日志</button>
         <span class="log-count">{{ auditEntries.length }} 条 · 普通管理员只读</span>
-      </div>
-      <div class="log-viewer-body">
+        </div>
+        <div class="log-viewer-body">
         <div v-if="auditLoading && !auditEntries.length" class="retrieval-eval-empty">正在加载审计日志...</div>
         <div v-else-if="!auditEntries.length" class="retrieval-eval-empty">暂无审计日志。</div>
         <div v-else class="log-line-list">
@@ -671,10 +732,11 @@ async function handleTestModel(model) {
             <span class="log-line-context">链 {{ entry.eventHash?.slice(0, 12) }}</span>
           </div>
         </div>
+        </div>
       </div>
     </section>
 
-    <ConfirmDialog v-if="pendingAction" v-bind="confirmation" :busy="Boolean(busyAction)" @confirm="confirmMaintenance" @cancel="pendingAction = ''" />
+    <ConfirmDialog v-if="pendingAction || confirmTarget" v-bind="confirmation" :busy="Boolean(busyAction) || auditPurging || poolSaving" @confirm="confirmDialogAction" @cancel="cancelDialog" />
 
     <div v-if="showPoolForm" class="model-config-backdrop" @click.self="showPoolForm = false">
       <div class="model-config-dialog">
