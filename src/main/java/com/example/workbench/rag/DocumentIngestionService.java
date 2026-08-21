@@ -419,6 +419,7 @@ public class DocumentIngestionService {
                 vectorStore.addAll(batch);
             }
             documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
+            documents.addAll(ingested.documents());
             progress.accept("VECTORIZING", 70);
             progress.accept("PERSISTING_INDEX", 90);
             documentIndexStore.upsertAll(List.of(ingested.indexEntry()));

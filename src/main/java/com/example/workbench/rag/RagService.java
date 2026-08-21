@@ -1828,8 +1828,18 @@ public class RagService {
             return sources;
         }
         RetrievalScope scope = retrievalScope.get();
-        String owner = scope == null ? "" : scope.ownerUserId();
+        String owner = scope == null || scope.ownerUserId() == null ? "" : scope.ownerUserId();
         String workspace = scope == null ? null : scope.workspaceId();
+        if (owner.isBlank() && workspace == null) {
+            for (SourceDocument source : sources) {
+                if (owner.isBlank() && source.ownerUserId() != null) {
+                    owner = source.ownerUserId();
+                }
+                if (workspace == null) {
+                    workspace = source.workspaceId();
+                }
+            }
+        }
         List<SourceDocument> expanded = new ArrayList<>(sources);
         for (SourceDocument source : sources) {
             for (SourceDocument adjacent : sparseRetriever.adjacent(
