@@ -17,6 +17,7 @@ import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import com.example.workbench.workbench.WorkbenchChatRequest;
 import com.example.workbench.workbench.WorkbenchChatResponse;
+import com.example.workbench.rag.RagSource;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -139,6 +140,7 @@ public class LearningAssistantService {
      */
     public LearningAssistantResponse streamMessage(AppUser user, String sessionId, LearningAssistantMessageRequest request,
                                                    Consumer<String> onToken,
+                                                   Consumer<List<RagSource>> onSources,
                                                    ConversationExecutionRegistry.Execution execution) {
         WorkspaceAccessContext access = access(user, request.workspaceId());
         conversationService.messages(user, access.workspaceId(), sessionId);
@@ -168,7 +170,8 @@ public class LearningAssistantService {
                 return LearningAssistantResponse.teaching(result, intent);
             }
             WorkbenchChatResponse result = chatService.streamChat(user,
-                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()), onToken);
+                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()),
+                    onToken, onSources);
             requireRunning(execution);
             workspaceService.access(user, access.workspaceId());
             session.touch(LearningMode.CHAT, null, "CHAT", "ACTIVE");

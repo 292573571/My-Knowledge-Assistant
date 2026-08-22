@@ -121,11 +121,33 @@ public class LearningAssistantController {
             modelConfigContext.set(user.getId(), user.getPublicId(), request.modelId());
             try {
                 send(emitter, "session", Map.of("sessionId", sessionId));
+                // 检索进度事件：RAG 前置处理（检索/改写）期间让前端不再黑屏转圈。
+                send(emitter, "tool_call_start", Map.of(
+                        "id", "tool-rag-retrieve",
+                        "toolName", "rag_retrieve",
+                        "arguments", Map.of("message", request.message()),
+                        "status", "running"));
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
                         token -> {
                             if (execution.isCancelled() || Thread.currentThread().isInterrupted()) return;
                             try {
                                 send(emitter, "token", Map.of("text", token));
+                            } catch (java.io.IOException ignored) {
+                                Thread.currentThread().interrupt();
+                            }
+                        },
+                        sources -> {
+                            if (execution.isCancelled()) return;
+                            try {
+                                send(emitter, "tool_call_result", Map.of(
+                                        "id", "tool-rag-retrieve",
+                                        "toolName", "rag_retrieve",
+                                        "success", true,
+                                        "status", "success",
+                                        "resultPreview", "已检索到 " + (sources == null ? 0 : sources.size()) + " 个相关片段"));
+                                if (sources != null) {
+                                    for (Object source : sources) send(emitter, "source", source);
+                                }
                             } catch (java.io.IOException ignored) {
                                 Thread.currentThread().interrupt();
                             }

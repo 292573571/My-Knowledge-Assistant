@@ -440,6 +440,8 @@ public class RagService {
         if (hasSameRecentUserQuestion(history, question)) {
             history = List.of();
         }
+        // history 在上方可能被重新赋值，这里承接为 effectively final 供并行 lambda 使用。
+        final List<ChatMessage> contextHistory = history;
 
         if (isLearningAssistantIntroductionQuestion(question)) {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION), List.of());
@@ -448,14 +450,40 @@ public class RagService {
             return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER), List.of());
         }
 
-        ConversationContext conversationContext = resolveConversationContext(conversationId, question, history);
-        List<ChatMessage> relevantHistory = conversationContext.history();
+        // 指代/上下文改写（多轮对话时含一次同步 LLM）与向量检索并行执行，
+        // 避免改写结果串行阻塞在检索之前，从而降低首字延迟。检索基础查询始终来自原问题，
+        // standaloneQuestion 仅作为查询扩展，改写回来后再补充检索，检索质量不变。
+        java.util.concurrent.CompletableFuture<ConversationContext> contextFuture =
+                java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> resolveConversationContext(conversationId, question, contextHistory));
+
+        RagChatOptions retrievalOptions = new RagChatOptions(queryRewriteEnabled, multiQueryEnabled);
         List<SourceDocument> retrievedSources = retrieveCandidates(
-                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId), request.workspaceId(),
-                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+                question, null, ownerUserId(conversationId), request.workspaceId(), retrievalOptions);
+
+        ConversationContext conversationContext;
+        try {
+            conversationContext = contextFuture.join();
+        } catch (java.util.concurrent.CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) throw runtimeException;
+            throw new IllegalStateException(cause);
+        }
+        List<ChatMessage> relevantHistory = conversationContext.history();
+        String standaloneQuestion = conversationContext.standaloneQuestion();
+        if (standaloneQuestion != null && !standaloneQuestion.isBlank()
+                && !standaloneQuestion.equalsIgnoreCase(question)) {
+            // 改写结果回来后再补充一次扩展检索并去重合并，等价于原串行链路的最终召回集合。
+            List<SourceDocument> expanded = retrieveCandidates(
+                    standaloneQuestion, null, ownerUserId(conversationId), request.workspaceId(), retrievalOptions);
+            LinkedHashMap<String, SourceDocument> merged = new LinkedHashMap<>();
+            for (SourceDocument source : retrievedSources) merged.putIfAbsent(stableSourceKey(source), source);
+            for (SourceDocument source : expanded) merged.putIfAbsent(stableSourceKey(source), source);
+            retrievedSources = List.copyOf(merged.values());
+        }
+
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources, false);
-        String effectiveQuestion = conversationContext.standaloneQuestion() != null
-                ? conversationContext.standaloneQuestion() : question;
+        String effectiveQuestion = standaloneQuestion != null ? standaloneQuestion : question;
         if (sources.isEmpty() || !hasEnoughKnowledge(effectiveQuestion, sources)) {
             String prompt = buildModelFallbackPrompt(question);
             reactor.core.publisher.Flux<String> fallbackStream = streamWithHistory(prompt, relevantHistory, conversationId);

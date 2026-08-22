@@ -12,6 +12,7 @@ import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
+import com.example.workbench.rag.RagSource;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -118,7 +119,7 @@ public class WorkbenchChatService {
      * 流式问答：RAG 检索后逐 token 输出回答，消息持久化和学习记录在回答输出完成后执行，
      * 使首字延迟不再被完整回答生成和数据库写操作阻塞。
      */
-    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request, Consumer<String> onToken) {
+    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request, Consumer<String> onToken, Consumer<List<RagSource>> onSources) {
         long startedAt = System.currentTimeMillis();
         String mode = request.normalizedMode();
         String clientConversationId = request.normalizedConversationId();
@@ -147,6 +148,10 @@ public class WorkbenchChatService {
             workspaceService.access(user, workspace.workspaceId());
             RagStreamResponse ragResponse = ragService.stream(user,
                     new RagChatRequest(conversationId, workspace.workspaceId(), clientConversationId, request.message()));
+
+            if (onSources != null) {
+                onSources.accept(ragResponse.sources());
+            }
 
             StringBuilder content = new StringBuilder();
             AtomicBoolean firstTokenSent = new AtomicBoolean(false);

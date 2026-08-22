@@ -71,7 +71,8 @@ async function copyCode(event) {
         <strong>{{ roleLabel }}</strong>
         <time v-if="timeLabel" :datetime="message.createdAt">{{ timeLabel }}</time>
       </div>
-      <LoadingDots v-if="streaming && !message.content" />
+      <LoadingDots v-if="streaming && !message.content && !message.retrieving" />
+      <div v-if="streaming && !message.content && message.retrieving" style="color: var(--site-muted, #718074); font-size: 13px; padding: 4px 0;">正在检索知识库，请稍候…</div>
       <div v-if="message.content" class="markdown-body" @click="copyCode" v-html="html"></div>
       <div v-if="isAssistant && message.error" class="message-alert error">
         <strong>模型或后端调用失败</strong>

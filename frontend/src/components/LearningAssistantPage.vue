@@ -250,7 +250,7 @@ async function send(content) {
   const requestId = ++activeRequestId
   error.value = ''
   messages.value.push({ id: createUuid(), role: 'user', content: text, createdAt: new Date().toISOString(), streaming: false })
-  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, createdAt: new Date().toISOString() })
+  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, retrieving: false, createdAt: new Date().toISOString() })
   messages.value.push(assistant)
   try {
     const response = await streamMessage(activeSessionId.value, {
@@ -290,9 +290,14 @@ function streamMessage(sessionId, payload, assistant) {
     const close = streamLearningMessage(sessionId, payload, (type, data) => {
       if (settled) return
       if (type === 'token') {
+        assistant.retrieving = false
         assistant.content += data.text || ''
       } else if (type === 'source') {
         assistant.sources.push(data)
+      } else if (type === 'tool_call_start') {
+        assistant.retrieving = true
+      } else if (type === 'tool_call_result') {
+        assistant.retrieving = false
       } else if (type === 'check') {
         pendingCheck.value = data
       } else if (type === 'practice') {
