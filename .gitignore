@@ -57,3 +57,6 @@ Thumbs.db
 *.orig
 *.rej
 *~
+
+# 本地工作记忆与运行时配置（不入库）
+.workbuddy/
