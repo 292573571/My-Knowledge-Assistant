@@ -13,4 +13,6 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     boolean existsByPublicId(String publicId);
 
     List<AppUser> findAllByOrderByCreatedAtDesc();
+
+    Optional<AppUser> findFirstBySystemRole(SystemRole systemRole);
 }

@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -104,6 +105,7 @@ public class LogController {
     }
 
     @Scheduled(fixedRateString = "${workbench.log.cleanup-interval-ms:3600000}")
+    @Transactional
     public void cleanupOldLogs() {
         try {
             Instant cutoff = Instant.now().minus(7, ChronoUnit.DAYS);

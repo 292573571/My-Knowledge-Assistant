@@ -7,6 +7,10 @@ public record WorkspaceResponse(
         String name,
         WorkspaceType type,
         WorkspaceRole role,
-        Instant createdAt
+        Instant createdAt,
+        String parentId
 ) {
+    public WorkspaceResponse(String id, String name, WorkspaceType type, WorkspaceRole role, Instant createdAt) {
+        this(id, name, type, role, createdAt, null);
+    }
 }

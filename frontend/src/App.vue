@@ -206,12 +206,18 @@ async function switchWorkspace(event) {
 }
 
 function workspaceTypeLabel(type) {
-  return { PERSONAL: '个人', TEAM: '团队', PUBLIC: '公共' }[type] || '空间'
+  return { PERSONAL: '个人', TEAM: '团队', ORG: '组织', PUBLIC: '公共' }[type] || '空间'
 }
 
 function workspaceDisplayName(workspace) {
   return workspace.type === 'PERSONAL' ? `${currentUser.value.userName}的个人空间` : workspace.name
 }
+
+const personalWorkspaces = computed(() => workspaces.value.filter(workspace => workspace.type === 'PERSONAL'))
+const publicWorkspaces = computed(() => workspaces.value.filter(workspace => workspace.type === 'PUBLIC'))
+const orgTree = computed(() => workspaces.value
+  .filter(workspace => workspace.type === 'ORG')
+  .map(org => ({ ...org, children: workspaces.value.filter(workspace => workspace.parentId === org.id) })))
 
 async function handleWorkspaceCreated(workspace) {
   workspaceError.value = ''
@@ -333,7 +339,14 @@ async function submitPasswordChange() {
           <label class="portal-workspace-select" title="当前知识空间">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 10 6 2.7 6-2.7M6 14l6 2.7 6-2.7"/></svg>
             <select :value="activeWorkspaceId" :disabled="switchingWorkspace" aria-label="切换知识空间" @change="switchWorkspace">
-              <option v-for="workspace in workspaces" :key="workspace.id" :value="workspace.id">
+              <option v-for="workspace in personalWorkspaces" :key="workspace.id" :value="workspace.id">
+                {{ workspaceDisplayName(workspace) }} · {{ workspaceTypeLabel(workspace.type) }}
+              </option>
+              <optgroup v-for="org in orgTree" :key="org.id" :label="`${org.name}（组织）`">
+                <option :value="org.id">{{ org.name }} · 组织根空间</option>
+                <option v-for="child in org.children" :key="child.id" :value="child.id">↳ {{ child.name }} · {{ workspaceTypeLabel(child.type) }}</option>
+              </optgroup>
+              <option v-for="workspace in publicWorkspaces" :key="workspace.id" :value="workspace.id">
                 {{ workspaceDisplayName(workspace) }} · {{ workspaceTypeLabel(workspace.type) }}
               </option>
             </select>
@@ -371,7 +384,7 @@ async function submitPasswordChange() {
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
-      <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
+      <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
         <ModelConfig v-if="modelConfigOpen" :current-user="currentUser" @close="modelConfigOpen = false" @saved="modelConfigVersion += 1" />
     </div>
   </template>

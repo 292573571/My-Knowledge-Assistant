@@ -1,9 +1,11 @@
 package com.example.workbench.rag;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.ai.chroma.vectorstore.ChromaApi;
 import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaVectorStoreProperties;
 import org.slf4j.Logger;
@@ -157,19 +159,19 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
 
     @Override
     public List<SourceDocument> similaritySearch(String query, int topK) {
-        return similaritySearch(query, topK, null, null, false);
+        return scopedSearch(query, topK, null, null, false);
     }
 
     @Override
-    public List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId) {
-        return similaritySearch(query, topK, ownerUserId, workspaceId, true);
+    public List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds) {
+        return scopedSearch(query, topK, ownerUserId, readableWorkspaceIds, true);
     }
 
-    private List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId,
-                                                  boolean scoped) {
+    private List<SourceDocument> scopedSearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds,
+                                              boolean scoped) {
         org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
         if (chromaVectorStore == null) {
-            return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
+            return fallbackSearch(query, topK, ownerUserId, readableWorkspaceIds, scoped);
         }
 
         try {
@@ -177,12 +179,12 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                     .query(query)
                     .topK(topK);
             if (scoped) {
-                request.filterExpression(visibilityFilter(ownerUserId, workspaceId));
+                request.filterExpression(visibilityFilter(ownerUserId, readableWorkspaceIds));
             }
             List<Document> documents = chromaVectorStore.similaritySearch(request.build());
 
             if (documents == null || documents.isEmpty()) {
-                return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
+                return fallbackSearch(query, topK, ownerUserId, readableWorkspaceIds, scoped);
             }
 
             return documents.stream()
@@ -190,14 +192,14 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                     .toList();
         } catch (RuntimeException exception) {
             log.warn("Failed to search Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
-            return fallbackSearch(query, topK, ownerUserId, workspaceId, scoped);
+            return fallbackSearch(query, topK, ownerUserId, readableWorkspaceIds, scoped);
         }
     }
 
-    private List<SourceDocument> fallbackSearch(String query, int topK, String ownerUserId, String workspaceId,
+    private List<SourceDocument> fallbackSearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds,
                                                  boolean scoped) {
         List<SourceDocument> results = scoped
-                ? fallbackVectorStore.similaritySearch(query, topK, ownerUserId, workspaceId)
+                ? fallbackVectorStore.similaritySearch(query, topK, ownerUserId, readableWorkspaceIds)
                 : fallbackVectorStore.similaritySearch(query, topK);
         // 内存实现返回余弦相似度，适配器统一转换为与生产 Chroma 相同的“越小越好”距离语义。
         return results.stream()
@@ -205,7 +207,15 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                 .toList();
     }
 
-    private Filter.Expression visibilityFilter(String ownerUserId, String workspaceId) {
+    /**
+     * 构建 Chroma 元数据过滤表达式：
+     * <ul>
+     *   <li>PUBLIC 文档对所有用户可见；</li>
+     *   <li>PRIVATE 文档仅本人可见，且需在可读空间集合内；</li>
+     *   <li>WORKSPACE 文档在「有效可读空间集合」内可见（组织可见其全部子孙，团队可见其自身与祖先组织）。</li>
+     * </ul>
+     */
+    private Filter.Expression visibilityFilter(String ownerUserId, Set<String> readableWorkspaceIds) {
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
         FilterExpressionBuilder.Op allowed = builder.eq("visibility", "PUBLIC");
 
@@ -213,19 +223,26 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
             FilterExpressionBuilder.Op privateFilter = builder.and(
                     builder.eq("visibility", "PRIVATE"),
                     builder.eq("ownerUserId", ownerUserId));
-            if (workspaceId != null && !workspaceId.isBlank()) {
-                privateFilter = builder.and(privateFilter, builder.eq("workspaceId", workspaceId));
+            if (readableWorkspaceIds != null && !readableWorkspaceIds.isEmpty()) {
+                privateFilter = builder.and(privateFilter, workspaceEqualsAny(builder, readableWorkspaceIds));
             }
             allowed = builder.or(allowed, privateFilter);
         }
 
-        if (workspaceId != null && !workspaceId.isBlank()) {
+        if (readableWorkspaceIds != null && !readableWorkspaceIds.isEmpty()) {
             FilterExpressionBuilder.Op workspaceFilter = builder.and(
                     builder.eq("visibility", "WORKSPACE"),
-                    builder.eq("workspaceId", workspaceId));
+                    workspaceEqualsAny(builder, readableWorkspaceIds));
             allowed = builder.or(allowed, workspaceFilter);
         }
         return allowed.build();
+    }
+
+    private FilterExpressionBuilder.Op workspaceEqualsAny(FilterExpressionBuilder builder, Set<String> readableWorkspaceIds) {
+        if (readableWorkspaceIds.size() == 1) {
+            return builder.eq("workspaceId", readableWorkspaceIds.iterator().next());
+        }
+        return builder.in("workspaceId", new ArrayList<>(readableWorkspaceIds));
     }
 
     private Document toSpringAiDocument(SourceDocument sourceDocument) {

@@ -5,6 +5,7 @@ import com.example.workbench.auth.AuthFilter;
 import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.conversation.ConversationService;
 import com.example.workbench.config.HttpRequestLoggingFilter;
+import com.example.workbench.config.ModelProviderException;
 import com.example.workbench.modelconfig.ModelConfigContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -221,6 +222,17 @@ public class LearningAssistantController {
 
     private Map<String, Object> errorPayload(Exception exception, String requestId) {
         Map<String, Object> payload = new java.util.HashMap<>();
+        if (exception instanceof ModelProviderException provider) {
+            payload.put("message", provider.getUserMessage());
+            payload.put("errorType", provider.getErrorCode());
+            payload.put("status", provider.getHttpStatus());
+            payload.put("retryable", provider.isRetryable());
+            payload.put("requestId", requestId);
+            if (provider.getTraceId() != null) {
+                payload.put("traceId", provider.getTraceId());
+            }
+            return payload;
+        }
         payload.put("message", exception instanceof ResponseStatusException response && response.getReason() != null
                 ? response.getReason() : "学习助手处理失败，请稍后重试");
         payload.put("errorType", exception.getClass().getSimpleName());

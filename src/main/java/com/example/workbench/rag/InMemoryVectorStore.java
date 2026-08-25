@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import com.example.workbench.workspace.DocumentVisibility;
 import org.springframework.stereotype.Component;
@@ -43,20 +44,20 @@ public class InMemoryVectorStore implements ScopedVectorStore {
 
     @Override
     public List<SourceDocument> similaritySearch(String query, int topK) {
-        return similaritySearch(query, topK, null, null, false);
+        return scopedSearch(query, topK, null, null, false);
     }
 
     @Override
-    public List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId) {
-        return similaritySearch(query, topK, ownerUserId, workspaceId, true);
+    public List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds) {
+        return scopedSearch(query, topK, ownerUserId, readableWorkspaceIds, true);
     }
 
-    private List<SourceDocument> similaritySearch(String query, int topK, String ownerUserId, String workspaceId,
-                                                  boolean scoped) {
+    private List<SourceDocument> scopedSearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds,
+                                             boolean scoped) {
         Map<String, Double> queryVector = embed(query);
 
         return vectorDocuments.stream()
-                .filter(vectorDocument -> !scoped || isVisible(vectorDocument.document(), ownerUserId, workspaceId))
+                .filter(vectorDocument -> !scoped || isVisible(vectorDocument.document(), ownerUserId, readableWorkspaceIds))
                 .map(vectorDocument -> new SearchResult(
                         vectorDocument.document(),
                         cosineSimilarity(queryVector, vectorDocument.vector())
@@ -68,16 +69,16 @@ public class InMemoryVectorStore implements ScopedVectorStore {
                 .toList();
     }
 
-    private boolean isVisible(SourceDocument document, String ownerUserId, String workspaceId) {
+    private boolean isVisible(SourceDocument document, String ownerUserId, Set<String> readableWorkspaceIds) {
         if (document.visibility() == DocumentVisibility.PUBLIC) {
             return true;
         }
         if (document.visibility() == DocumentVisibility.PRIVATE) {
             return ownerUserId != null && !ownerUserId.isBlank()
                     && ownerUserId.equals(document.ownerUserId())
-                    && (workspaceId == null || workspaceId.isBlank() || workspaceId.equals(document.workspaceId()));
+                    && (readableWorkspaceIds == null || readableWorkspaceIds.contains(document.workspaceId()));
         }
-        return workspaceId != null && !workspaceId.isBlank() && workspaceId.equals(document.workspaceId());
+        return readableWorkspaceIds != null && readableWorkspaceIds.contains(document.workspaceId());
     }
 
     private Map<String, Double> embed(String text) {

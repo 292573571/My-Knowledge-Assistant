@@ -85,23 +85,24 @@ public class PostgresSparseRetriever implements SparseRetriever {
 
     @Override
     @Transactional(readOnly = true)
-    public List<SourceDocument> search(String query, int topK, String ownerUserId, String workspaceId) {
+    public List<SourceDocument> search(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds) {
         List<String> terms = terms(query);
         if (terms.isEmpty() || topK <= 0) {
             return List.of();
         }
 
+        boolean scoped = readableWorkspaceIds != null && !readableWorkspaceIds.isEmpty();
         StringBuilder sql = new StringBuilder("select c.* from document_chunks c where (")
                 .append("c.visibility = 'PUBLIC'");
         if (ownerUserId != null && !ownerUserId.isBlank()) {
             sql.append(" or (c.visibility = 'PRIVATE' and c.owner_user_id = :ownerUserId");
-            if (workspaceId != null && !workspaceId.isBlank()) {
-                sql.append(" and c.workspace_id = :workspaceId");
+            if (scoped) {
+                sql.append(" and c.workspace_id in (:workspaceIds)");
             }
             sql.append(")");
         }
-        if (workspaceId != null && !workspaceId.isBlank()) {
-            sql.append(" or (c.visibility = 'WORKSPACE' and c.workspace_id = :workspaceId)");
+        if (scoped) {
+            sql.append(" or (c.visibility = 'WORKSPACE' and c.workspace_id in (:workspaceIds))");
         }
         sql.append(") and (c.search_vector @@ websearch_to_tsquery('simple', :ftsQuery) or ");
         for (int index = 0; index < terms.size(); index++) {
@@ -118,8 +119,8 @@ public class PostgresSparseRetriever implements SparseRetriever {
         if (ownerUserId != null && !ownerUserId.isBlank()) {
             nativeQuery.setParameter("ownerUserId", ownerUserId);
         }
-        if (workspaceId != null && !workspaceId.isBlank()) {
-            nativeQuery.setParameter("workspaceId", workspaceId);
+        if (scoped) {
+            nativeQuery.setParameter("workspaceIds", new ArrayList<>(readableWorkspaceIds));
         }
         for (int index = 0; index < terms.size(); index++) {
             nativeQuery.setParameter("term" + index, terms.get(index));
@@ -141,10 +142,11 @@ public class PostgresSparseRetriever implements SparseRetriever {
     @Override
     @Transactional(readOnly = true)
     public List<SourceDocument> adjacent(String documentId, int chunkIndex, String ownerUserId, String workspaceId) {
+        Set<String> readable = (workspaceId == null || workspaceId.isBlank()) ? null : Set.of(workspaceId);
         return repository.findByDocumentIdAndChunkIndexBetweenOrderByChunkIndex(documentId, chunkIndex - 1, chunkIndex + 1)
                 .stream()
                 .filter(entity -> entity.chunkIndex() != chunkIndex)
-                .filter(entity -> visible(entity.toSourceDocument(0), ownerUserId, workspaceId))
+                .filter(entity -> visible(entity.toSourceDocument(0), ownerUserId, readable))
                 .map(entity -> entity.toSourceDocument(0))
                 .toList();
     }
@@ -197,15 +199,15 @@ public class PostgresSparseRetriever implements SparseRetriever {
         return score + (terms.isEmpty() ? 0 : (double) matched / terms.size());
     }
 
-    private boolean visible(SourceDocument source, String ownerUserId, String workspaceId) {
+    private boolean visible(SourceDocument source, String ownerUserId, Set<String> readableWorkspaceIds) {
         if (source.visibility() == DocumentVisibility.PUBLIC) {
             return true;
         }
         if (source.visibility() == DocumentVisibility.PRIVATE) {
             return ownerUserId != null && !ownerUserId.isBlank() && ownerUserId.equals(source.ownerUserId())
-                    && (workspaceId == null || workspaceId.isBlank() || workspaceId.equals(source.workspaceId()));
+                    && (readableWorkspaceIds == null || readableWorkspaceIds.contains(source.workspaceId()));
         }
-        return workspaceId != null && !workspaceId.isBlank() && workspaceId.equals(source.workspaceId());
+        return readableWorkspaceIds != null && readableWorkspaceIds.contains(source.workspaceId());
     }
 
     private record SparseMatch(DocumentChunkEntity entity, double score) {

@@ -1,5 +1,6 @@
 package com.example.workbench.rag;
 
+import com.example.workbench.config.ModelProviderException;
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.modelconfig.ModelClientFactory;
 import com.example.workbench.modelconfig.ModelConfigContext;
@@ -18,6 +19,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +45,19 @@ import reactor.core.publisher.Flux;
 public class LocalChatClient {
 
     private static final Logger log = LoggerFactory.getLogger(LocalChatClient.class);
+
+    /**
+     * 模型厂商把错误当成正常内容返回时的高置信度特征（HTTP 200 但响应体实为错误报文）。
+     * 仅命中这些模式才视为错误，避免把普通回答误判为报错。
+     */
+    private static final Pattern MODEL_ERROR_RATE_LIMIT = Pattern.compile(
+            "(?i)(rate[\\s_-]?limit|too many requests|请求过于频繁|请求频率过高|频率限制|限流)");
+    private static final Pattern MODEL_ERROR_QUOTA = Pattern.compile(
+            "(?i)(quota|额度|余额不足|insufficient_quota|exceeded your quota|您的配额)");
+    private static final Pattern MODEL_ERROR_BODY = Pattern.compile(
+            "(?i)(\"error\"\\s*:|error_code|\"code\"\\s*:\\s*\"?\\d{3,}|错误码|error code|invalid_request_error)");
+    private static final Pattern MODEL_ERROR_AUTH = Pattern.compile(
+            "(?i)(\"type\"\\s*:\\s*\"invalid_request_error\"|authentication failed|api key 无效|鉴权失败|unauthorized|invalid api key)");
 
     private final ChatClient chatClient;
     private final String chatBaseUrl;
@@ -192,18 +208,23 @@ public class LocalChatClient {
 
         String conversationId = options.getOrDefault("conversationId", "default");
         AtomicBoolean receivedToken = new AtomicBoolean(false);
-        Flux<String> primary = ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
-                        resolved.client(), resolved.models().get(0), resolved.requestTimeout(),
-                        resolved.temperature(), resolved.maxOutputTokens()))
-                .map(this::sanitizeModelText)
-                .filter(token -> !token.isEmpty())
-                .doOnNext(token -> receivedToken.set(true))
-                .onErrorResume(error -> !receivedToken.get() && resolved.models().size() > 1
-                        ? ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
-                                resolved.client(), resolved.models().get(1), resolved.fallbackRequestTimeout(),
+        StringBuilder streamBuffer = new StringBuilder();
+        Flux<String> primary = withModelErrorGuard(
+                        ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                                resolved.client(), resolved.models().get(0), resolved.requestTimeout(),
                                 resolved.temperature(), resolved.maxOutputTokens()))
                                 .map(this::sanitizeModelText)
-                                .filter(token -> !token.isEmpty())
+                                .filter(token -> !token.isEmpty()),
+                        streamBuffer)
+                .doOnNext(token -> receivedToken.set(true))
+                .onErrorResume(error -> !receivedToken.get() && resolved.models().size() > 1
+                        ? withModelErrorGuard(
+                                ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                                        resolved.client(), resolved.models().get(1), resolved.fallbackRequestTimeout(),
+                                        resolved.temperature(), resolved.maxOutputTokens()))
+                                        .map(this::sanitizeModelText)
+                                        .filter(token -> !token.isEmpty()),
+                                new StringBuilder())
                         : Flux.error(error));
         return primary;
     }
@@ -244,6 +265,52 @@ public class LocalChatClient {
             Duration requestTimeout,
             Duration fallbackRequestTimeout
     ) {
+    }
+
+    /**
+     * 识别模型厂商把错误报文当正常内容返回的情况（HTTP 200 但响应体实为错误）。
+     * 命中返回 {@link ModelProviderException}（含中文提示），否则返回 null。
+     */
+    private ModelProviderException detectModelError(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        if (MODEL_ERROR_RATE_LIMIT.matcher(text).find()) {
+            return ModelProviderException.rateLimited(extractTraceId(text));
+        }
+        if (MODEL_ERROR_QUOTA.matcher(text).find()) {
+            return ModelProviderException.quotaExceeded(extractTraceId(text));
+        }
+        if (MODEL_ERROR_BODY.matcher(text).find()) {
+            return ModelProviderException.providerError(extractErrorCode(text), text, extractTraceId(text));
+        }
+        if (MODEL_ERROR_AUTH.matcher(text).find()) {
+            return ModelProviderException.authError(extractTraceId(text));
+        }
+        return null;
+    }
+
+    private static String extractTraceId(String text) {
+        if (text == null) return null;
+        Matcher matcher = Pattern.compile("(?i)(trace[\\s_-]?id|trace_id)\\\"?\\s*:\\s*\\\"?([A-Za-z0-9]+)").matcher(text);
+        return matcher.find() ? matcher.group(2) : null;
+    }
+
+    private static String extractErrorCode(String text) {
+        if (text == null) return null;
+        Matcher matcher = Pattern.compile("(?i)(code|error_code|errorCode)\\\"?\\s*:\\s*\\\"?([A-Za-z0-9_]+)").matcher(text);
+        return matcher.find() ? matcher.group(2) : null;
+    }
+
+    /** 在流式 token 上累积检测厂商错误报文，命中即转为错误信号交由下游 resume/捕获。 */
+    private Flux<String> withModelErrorGuard(Flux<String> flux, StringBuilder buffer) {
+        return flux.doOnNext(token -> {
+            buffer.append(token);
+            ModelProviderException error = detectModelError(buffer.toString());
+            if (error != null) {
+                throw error;
+            }
+        });
     }
 
     String sanitizeModelText(String text) {
@@ -319,6 +386,12 @@ public class LocalChatClient {
                     ChatResponse response = callChatResponse(prompt, history, conversationId, resolved.client(),
                             model, timeout, resolved.temperature(), resolved.maxOutputTokens());
                     String content = content(response);
+                    ModelProviderException modelError = detectModelError(content);
+                    if (modelError != null) {
+                        log.warn("AI model returned error payload model={} conversationId={} errorCode={}",
+                                model, conversationId, modelError.getErrorCode());
+                        throw modelError;
+                    }
                     logModelResponse(response, model, conversationId, attempt, startedAt, content);
                     return content;
                 } catch (RuntimeException exception) {

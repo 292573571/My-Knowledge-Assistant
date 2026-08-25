@@ -22,12 +22,21 @@ export async function initializePersonalWorkspace() {
   return workspaces
 }
 
-export function createTeamWorkspace(name) {
+export function createTeamWorkspace(name, parentId = null) {
+  const body = parentId ? { name, parentId } : { name }
   return request('/api/workspaces/team', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
+    body: JSON.stringify(body)
   }, '团队空间创建失败。')
+}
+
+export function createOrgWorkspace(name) {
+  return request('/api/workspaces/org', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  }, '组织空间创建失败。')
 }
 
 export function createPublicWorkspace(name) {

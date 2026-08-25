@@ -8,7 +8,10 @@ import com.example.workbench.conversation.ConversationExecutionRegistry;
 import com.example.workbench.memory.ConversationMemory;
 import com.example.workbench.config.LoggingContext;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,17 +52,31 @@ public class WorkspaceService {
     @Transactional
     public List<WorkspaceResponse> list(AppUser user) {
         ensurePersonalWorkspace(user);
-        List<WorkspaceResponse> result = new ArrayList<>(memberRepository.findAllByUserIdOrderByWorkspaceCreatedAtAsc(user.getId()).stream()
-                .map(this::response)
-                .toList());
+        Set<String> seen = new HashSet<>();
+        List<WorkspaceResponse> result = new ArrayList<>();
+        for (WorkspaceMember membership : memberRepository.findAllByUserIdOrderByWorkspaceCreatedAtAsc(user.getId())) {
+            Workspace workspace = membership.getWorkspace();
+            addWithAncestors(result, seen, workspace, membership.getRole());
+        }
         if (isAdmin(user)) {
             workspaceRepository.findAllByTypeOrderByCreatedAtAsc(WorkspaceType.PUBLIC).stream()
-                    .filter(workspace -> result.stream().noneMatch(item -> item.id().equals(workspace.getId())))
+                    .filter(workspace -> !seen.contains(workspace.getId()))
                     .map(workspace -> new WorkspaceResponse(workspace.getId(), workspace.getName(), workspace.getType(),
-                            WorkspaceRole.EDITOR, workspace.getCreatedAt()))
+                            WorkspaceRole.EDITOR, workspace.getCreatedAt(), workspace.getParent() == null ? null : workspace.getParent().getId()))
                     .forEach(result::add);
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * 将空间本身及其所有祖先空间（组织层级）加入结果，使团队成员也能在列表中看到所属组织。
+     */
+    private void addWithAncestors(List<WorkspaceResponse> result, Set<String> seen, Workspace workspace, WorkspaceRole role) {
+        Workspace current = workspace;
+        while (current != null && seen.add(current.getId())) {
+            result.add(response(current, role));
+            current = current.getParent();
+        }
     }
 
     @Transactional
@@ -90,13 +107,82 @@ public class WorkspaceService {
     }
 
     @Transactional
+    public WorkspaceResponse createOrg(AppUser owner, CreateWorkspaceRequest request) {
+        if (!isSuperAdmin(owner)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只有超级管理员可以创建根组织");
+        }
+        if (workspaceRepository.findByNameAndType(request.name().strip(), WorkspaceType.ORG).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "同名根组织已存在");
+        }
+        return create(owner, request.name(), WorkspaceType.ORG);
+    }
+
+    @Transactional
     public WorkspaceResponse createTeam(AppUser owner, CreateWorkspaceRequest request) {
         return create(owner, request.name(), WorkspaceType.TEAM);
     }
 
     @Transactional
+    public WorkspaceResponse createTeamUnder(AppUser actor, String parentId, CreateWorkspaceRequest request) {
+        Workspace parent = workspaceRepository.findById(parentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "上级组织不存在"));
+        if (parent.getType() != WorkspaceType.ORG) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "团队只能挂在根组织之下");
+        }
+        if (!isSuperAdmin(actor)) {
+            WorkspaceMember membership = memberRepository.findByWorkspaceIdAndUserId(parentId, actor.getId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "只有根组织所有者或超级管理员可以新建团队"));
+            if (membership.getRole() != WorkspaceRole.OWNER) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只有根组织所有者或超级管理员可以新建团队");
+            }
+        }
+        Workspace workspace = workspaceRepository.save(new Workspace(request.name().strip(), WorkspaceType.TEAM, actor));
+        workspace.setParent(parent);
+        WorkspaceMember membership = memberRepository.save(new WorkspaceMember(workspace, actor, WorkspaceRole.OWNER));
+        return response(membership);
+    }
+
+    @Transactional
     public WorkspaceResponse createPublic(AppUser owner, CreateWorkspaceRequest request) {
         return create(owner, request.name(), WorkspaceType.PUBLIC);
+    }
+
+    /**
+     * 计算当前空间下用户「有效可读」的空间集合，用于 RAG 检索时的可见性过滤：
+     * <ul>
+     *   <li>组织（根）空间：自身 + 其下所有团队（组织成员可 oversight 全部团队文档）；</li>
+     *   <li>团队/个人空间：自身 + 沿父链向上的所有祖先（组织共享文档对团队可见）。</li>
+     * </ul>
+     */
+    @Transactional(readOnly = true)
+    public Set<String> effectiveReadableWorkspaceIds(AppUser user, String currentWorkspaceId) {
+        if (currentWorkspaceId == null || currentWorkspaceId.isBlank()) {
+            return Set.of();
+        }
+        Workspace workspace = workspaceRepository.findById(currentWorkspaceId.strip()).orElse(null);
+        if (workspace == null) {
+            return Set.of();
+        }
+        Set<String> readable = new LinkedHashSet<>();
+        readable.add(workspace.getId());
+        if (workspace.getType() == WorkspaceType.ORG) {
+            collectDescendants(readable, workspace.getId());
+        } else {
+            Workspace ancestor = workspace.getParent();
+            while (ancestor != null) {
+                readable.add(ancestor.getId());
+                ancestor = ancestor.getParent();
+            }
+        }
+        return readable;
+    }
+
+    private void collectDescendants(Set<String> accumulator, String parentId) {
+        for (Workspace child : workspaceRepository.findByParentId(parentId)) {
+            if (accumulator.add(child.getId())) {
+                collectDescendants(accumulator, child.getId());
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -197,6 +283,10 @@ public class WorkspaceService {
         return user.getSystemRole() == SystemRole.ADMIN || user.getSystemRole() == SystemRole.SUPER_ADMIN;
     }
 
+    private boolean isSuperAdmin(AppUser user) {
+        return user.getSystemRole() == SystemRole.SUPER_ADMIN;
+    }
+
     private WorkspaceMember requireOwner(AppUser user, String workspaceId) {
         WorkspaceMember membership = requireMember(user, workspaceId);
         if (membership.getRole() != WorkspaceRole.OWNER) {
@@ -212,10 +302,16 @@ public class WorkspaceService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "空间成员不存在"));
     }
 
+    private WorkspaceResponse response(Workspace workspace, WorkspaceRole role) {
+        return new WorkspaceResponse(workspace.getId(), workspace.getName(), workspace.getType(), role,
+                workspace.getCreatedAt(), workspace.getParent() == null ? null : workspace.getParent().getId());
+    }
+
     private WorkspaceResponse response(WorkspaceMember membership) {
         Workspace workspace = membership.getWorkspace();
         return new WorkspaceResponse(workspace.getId(), workspace.getName(), workspace.getType(),
-                membership.getRole(), workspace.getCreatedAt());
+                membership.getRole(), workspace.getCreatedAt(),
+                workspace.getParent() == null ? null : workspace.getParent().getId());
     }
 
     private WorkspaceMemberResponse memberResponse(WorkspaceMember membership) {

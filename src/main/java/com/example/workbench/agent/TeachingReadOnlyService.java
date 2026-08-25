@@ -6,6 +6,7 @@ import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagSource;
 import com.example.workbench.workspace.WorkspaceService;
 import java.util.List;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -25,8 +26,8 @@ public class TeachingReadOnlyService {
     public KnowledgeSearchResult search(TeachingAgentContext context, String query, int limit) {
         workspaceService.access(context.user(), context.access().workspaceId());
         int safeLimit = Math.max(1, Math.min(10, limit));
-        List<RagSource> sources = ragService.retrieveForAgent(query, context.access().userId(),
-                context.access().workspaceId(), safeLimit);
+        Set<String> readable = workspaceService.effectiveReadableWorkspaceIds(context.user(), context.access().workspaceId());
+        List<RagSource> sources = ragService.retrieveForAgent(query, context.access().userId(), readable, safeLimit);
         return new KnowledgeSearchResult(query.strip(), sources);
     }
 

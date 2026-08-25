@@ -16,6 +16,7 @@ import com.example.workbench.config.AiConfig;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -262,7 +263,8 @@ public class RagController {
     public RetrievalDebugResponse debugRetrieval(@RequestBody Map<String, String> body, HttpServletRequest httpRequest) {
         AppUser user = authenticatedUser(httpRequest);
         WorkspaceAccessContext workspace = workspaceService.access(user, body == null ? null : body.get("workspaceId"));
-        return ragService.debugRetrieval(body == null ? null : body.get("message"), workspace.userId(), workspace.workspaceId());
+        Set<String> readable = workspaceService.effectiveReadableWorkspaceIds(user, workspace.workspaceId());
+        return ragService.debugRetrieval(body == null ? null : body.get("message"), workspace.userId(), readable);
     }
 
     private AppUser authenticatedUser(HttpServletRequest request) {

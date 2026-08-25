@@ -45,12 +45,29 @@ public class WorkspaceController {
         return workspaceService.list(user(request));
     }
 
+    @PostMapping("/org")
+    @ResponseStatus(HttpStatus.CREATED)
+    public WorkspaceResponse createOrg(@Valid @RequestBody CreateWorkspaceRequest body, HttpServletRequest request) {
+        AppUser actor = user(request);
+        try {
+            WorkspaceResponse result = workspaceService.createOrg(actor, body);
+            record(actor, result.id(), AuditAction.WORKSPACE_CREATE, "WORKSPACE", result.id(),
+                    AuditOutcome.SUCCESS, "NONE", requestId(request));
+            return result;
+        } catch (RuntimeException exception) {
+            recordFailure(actor, "unknown", AuditAction.WORKSPACE_CREATE, "WORKSPACE", "pending", exception, request);
+            throw exception;
+        }
+    }
+
     @PostMapping("/team")
     @ResponseStatus(HttpStatus.CREATED)
     public WorkspaceResponse createTeam(@Valid @RequestBody CreateWorkspaceRequest body, HttpServletRequest request) {
         AppUser actor = user(request);
         try {
-            WorkspaceResponse result = workspaceService.createTeam(actor, body);
+            WorkspaceResponse result = body.parentId() != null && !body.parentId().isBlank()
+                    ? workspaceService.createTeamUnder(actor, body.parentId(), body)
+                    : workspaceService.createTeam(actor, body);
             record(actor, result.id(), AuditAction.WORKSPACE_CREATE, "WORKSPACE", result.id(),
                     AuditOutcome.SUCCESS, "NONE", requestId(request));
             return result;

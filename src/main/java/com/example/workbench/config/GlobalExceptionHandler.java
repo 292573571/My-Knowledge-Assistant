@@ -46,6 +46,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(exception.getStatusCode()).body(new ApiErrorResponse(message));
     }
 
+    @ExceptionHandler(ModelProviderException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelProviderException(ModelProviderException exception) {
+        log.warn("模型服务调用异常 errorCode={} traceId={} message={}",
+                exception.getErrorCode(), exception.getTraceId(), exception.getUserMessage());
+        return ResponseEntity.status(exception.getHttpStatus())
+                .body(new ApiErrorResponse(exception.getUserMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpectedException(Exception exception) {
         log.error("未处理的请求异常 errorType={} message={}", exception.getClass().getSimpleName(), exception.getMessage(), exception);

@@ -1371,6 +1371,7 @@ public class DocumentIngestionService {
             DocumentVisibility visibility = switch (access.type()) {
                 case PERSONAL -> DocumentVisibility.PRIVATE;
                 case TEAM -> DocumentVisibility.WORKSPACE;
+                case ORG -> DocumentVisibility.PUBLIC;
                 case PUBLIC -> DocumentVisibility.PUBLIC;
             };
             String contentHash = ingestionPathResolver.isBinaryDocument(originalFileName) ? ingestionPathResolver.sha256(sourceContent)

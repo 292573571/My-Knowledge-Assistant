@@ -7,6 +7,7 @@ import com.example.workbench.conversation.ConversationContextStore;
 import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
 import com.example.workbench.workspace.DocumentVisibility;
+import com.example.workbench.workspace.WorkspaceService;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -77,6 +78,7 @@ public class RagService {
     private final boolean adjacentEnabled;
     private final DocumentTaskRepository documentTaskRepository;
     private final DocumentDisplayNameResolver displayNameResolver;
+    private WorkspaceService workspaceService;
     private final RagAnswerGuardrail answerGuardrail = new RagAnswerGuardrail();
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
@@ -90,6 +92,14 @@ public class RagService {
     @Autowired(required = false)
     public void setAiExecutor(@org.springframework.beans.factory.annotation.Qualifier("aiTaskExecutor") Executor aiExecutor) {
         this.aiExecutor = aiExecutor;
+    }
+
+    /**
+     * 注入工作空间服务，用于按层级计算「有效可读空间集合」。单元测试直接构造服务时可不提供。
+     */
+    @Autowired(required = false)
+    public void setWorkspaceService(WorkspaceService workspaceService) {
+        this.workspaceService = workspaceService;
     }
 
     @Autowired
@@ -271,7 +281,8 @@ public class RagService {
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
         List<SourceDocument> retrievedSources = retrieveCandidates(
-                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId), request.workspaceId(), options);
+                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId),
+                resolveReadable(user, request.workspaceId()), options);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
@@ -384,17 +395,21 @@ public class RagService {
     }
 
     public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId) {
-        return debugRetrieval(question, ownerUserId, null);
+        return debugRetrieval(question, ownerUserId, (Set<String>) null);
     }
 
     public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId, String workspaceId) {
+        return debugRetrieval(question, ownerUserId, singletonOrNull(workspaceId));
+    }
+
+    public RetrievalDebugResponse debugRetrieval(String question, String ownerUserId, Set<String> readableWorkspaceIds) {
         try {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("message cannot be empty");
         }
 
         List<String> queries = retrievalQueries(question.strip());
-        List<SourceDocument> candidates = retrieveCandidates(queries, ownerUserId, workspaceId);
+        List<SourceDocument> candidates = retrieveCandidates(queries, ownerUserId, readableWorkspaceIds);
         List<SourceDocument> usedSources = filterByThreshold(question.strip(), candidates);
         return new RetrievalDebugResponse(
                 question.strip(),
@@ -411,13 +426,17 @@ public class RagService {
      * 为只读 Agent 检索当前授权空间的知识片段，并复用聊天链路的过滤和引用名称解析。
      */
     public List<RagSource> retrieveForAgent(String question, String ownerUserId, String workspaceId, int limit) {
+        return retrieveForAgent(question, ownerUserId, singletonOrNull(workspaceId), limit);
+    }
+
+    public List<RagSource> retrieveForAgent(String question, String ownerUserId, Set<String> readableWorkspaceIds, int limit) {
         try {
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException("query cannot be empty");
         }
         int safeLimit = Math.max(1, Math.min(10, limit));
         List<SourceDocument> candidates = retrieveCandidates(
-                question.strip(), ownerUserId, workspaceId,
+                question.strip(), ownerUserId, readableWorkspaceIds,
                 new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
         // 教学 Agent 工具检索同样跳过同步 LLM 筛选，降低工具调用带来的首字延迟。
         return toRagSources(filterByThreshold(question.strip(), candidates, false)).stream()
@@ -458,8 +477,9 @@ public class RagService {
                         () -> resolveConversationContext(conversationId, question, contextHistory));
 
         RagChatOptions retrievalOptions = new RagChatOptions(queryRewriteEnabled, multiQueryEnabled);
+        Set<String> readableWorkspaceIds = resolveReadable(user, request.workspaceId());
         List<SourceDocument> retrievedSources = retrieveCandidates(
-                question, null, ownerUserId(conversationId), request.workspaceId(), retrievalOptions);
+                question, null, ownerUserId(conversationId), readableWorkspaceIds, retrievalOptions);
 
         ConversationContext conversationContext;
         try {
@@ -475,7 +495,7 @@ public class RagService {
                 && !standaloneQuestion.equalsIgnoreCase(question)) {
             // 改写结果回来后再补充一次扩展检索并去重合并，等价于原串行链路的最终召回集合。
             List<SourceDocument> expanded = retrieveCandidates(
-                    standaloneQuestion, null, ownerUserId(conversationId), request.workspaceId(), retrievalOptions);
+                    standaloneQuestion, null, ownerUserId(conversationId), readableWorkspaceIds, retrievalOptions);
             LinkedHashMap<String, SourceDocument> merged = new LinkedHashMap<>();
             for (SourceDocument source : retrievedSources) merged.putIfAbsent(stableSourceKey(source), source);
             for (SourceDocument source : expanded) merged.putIfAbsent(stableSourceKey(source), source);
@@ -752,15 +772,15 @@ public class RagService {
                 new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
     }
 
-    private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, String workspaceId, RagChatOptions options) {
-        return retrieveCandidates(question, null, ownerUserId, workspaceId, options);
+    private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, Set<String> readableWorkspaceIds, RagChatOptions options) {
+        return retrieveCandidates(question, null, ownerUserId, readableWorkspaceIds, options);
     }
 
     private List<SourceDocument> retrieveCandidates(
             String question,
             String standaloneQuestion,
             String ownerUserId,
-            String workspaceId,
+            Set<String> readableWorkspaceIds,
             RagChatOptions options
     ) {
         List<String> queries = new ArrayList<>(retrievalQueries(question, options));
@@ -770,14 +790,14 @@ public class RagService {
                     .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
                     .forEach(queries::add);
         }
-        return retrieveCandidates(queries, ownerUserId, workspaceId);
+        return retrieveCandidates(queries, ownerUserId, readableWorkspaceIds);
     }
 
-    private List<SourceDocument> retrieveCandidates(List<String> queries, String ownerUserId, String workspaceId) {
+    private List<SourceDocument> retrieveCandidates(List<String> queries, String ownerUserId, Set<String> readableWorkspaceIds) {
         LinkedHashMap<String, CandidateAccumulator> candidates = new LinkedHashMap<>();
         int candidateLimit = Math.max(topK, topK * 3);
         List<CompletableFuture<QueryRetrievalResult>> retrievals = queries.stream()
-                .map(query -> retrieveQueryInParallel(query, candidateLimit, ownerUserId, workspaceId))
+                .map(query -> retrieveQueryInParallel(query, candidateLimit, ownerUserId, readableWorkspaceIds))
                 .toList();
 
         for (CompletableFuture<QueryRetrievalResult> retrieval : retrievals) {
@@ -786,7 +806,7 @@ public class RagService {
             List<SourceDocument> denseResults = queryResult.denseResults();
             for (int index = 0; index < denseResults.size(); index++) {
                 SourceDocument source = denseResults.get(index);
-                if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
+                if (!isVisibleToOwner(source, ownerUserId, readableWorkspaceIds)) {
                     continue;
                 }
                 candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
@@ -796,7 +816,7 @@ public class RagService {
                 List<SourceDocument> sparseResults = queryResult.sparseResults();
                 for (int index = 0; index < sparseResults.size(); index++) {
                     SourceDocument source = sparseResults.get(index);
-                    if (!isVisibleToOwner(source, ownerUserId, workspaceId)) {
+                    if (!isVisibleToOwner(source, ownerUserId, readableWorkspaceIds)) {
                         continue;
                     }
                     candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
@@ -818,20 +838,20 @@ public class RagService {
             traces.put(stableSourceKey(source), candidate.trace(index + 1));
         }
         retrievalTrace.set(traces);
-        retrievalScope.set(new RetrievalScope(ownerUserId, workspaceId));
+        retrievalScope.set(new RetrievalScope(ownerUserId, primaryWorkspaceId(readableWorkspaceIds)));
         return sources;
     }
 
     private CompletableFuture<QueryRetrievalResult> retrieveQueryInParallel(
-            String query, int candidateLimit, String ownerUserId, String workspaceId
+            String query, int candidateLimit, String ownerUserId, Set<String> readableWorkspaceIds
     ) {
         CompletableFuture<List<SourceDocument>> dense = CompletableFuture.supplyAsync(() -> {
-            List<SourceDocument> results = similaritySearch(query, candidateLimit, ownerUserId, workspaceId);
+            List<SourceDocument> results = similaritySearch(query, candidateLimit, ownerUserId, readableWorkspaceIds);
             return results;
         }, aiExecutor);
         CompletableFuture<List<SourceDocument>> sparse = hybridEnabled && sparseRetriever != null
                 ? CompletableFuture.supplyAsync(() -> {
-                    List<SourceDocument> results = safeSparseSearch(query, candidateLimit, ownerUserId, workspaceId);
+                    List<SourceDocument> results = safeSparseSearch(query, candidateLimit, ownerUserId, readableWorkspaceIds);
                     return results;
                 }, aiExecutor)
                 : CompletableFuture.completedFuture(List.of());
@@ -840,10 +860,10 @@ public class RagService {
     }
 
     private List<SourceDocument> safeSparseSearch(
-            String query, int candidateLimit, String ownerUserId, String workspaceId
+            String query, int candidateLimit, String ownerUserId, Set<String> readableWorkspaceIds
     ) {
         try {
-            return sparseRetriever.search(query, candidateLimit, ownerUserId, workspaceId);
+            return sparseRetriever.search(query, candidateLimit, ownerUserId, readableWorkspaceIds);
         } catch (RuntimeException exception) {
             log.warn("RAG sparse retrieval failed, continuing with Dense only errorType={}",
                     exception.getClass().getSimpleName());
@@ -855,9 +875,9 @@ public class RagService {
         return 1.0 / (rrfK + rank);
     }
 
-    private List<SourceDocument> similaritySearch(String query, int limit, String ownerUserId, String workspaceId) {
+    private List<SourceDocument> similaritySearch(String query, int limit, String ownerUserId, Set<String> readableWorkspaceIds) {
         if (vectorStore instanceof ScopedVectorStore scopedVectorStore) {
-            return scopedVectorStore.similaritySearch(query, limit, ownerUserId, workspaceId);
+            return scopedVectorStore.similaritySearch(query, limit, ownerUserId, readableWorkspaceIds);
         }
         int candidateLimit = ownerUserId == null || ownerUserId.isBlank() ? limit : Math.max(limit, limit * 4);
         return vectorStore.similaritySearch(query, candidateLimit);
@@ -1110,7 +1130,7 @@ public class RagService {
         return isVisibleToOwner(source, ownerUserId, null);
     }
 
-    private boolean isVisibleToOwner(SourceDocument source, String ownerUserId, String workspaceId) {
+    private boolean isVisibleToOwner(SourceDocument source, String ownerUserId, Set<String> readableWorkspaceIds) {
         String sourceOwner = source.ownerUserId();
         if ((sourceOwner == null || sourceOwner.isBlank()) && source.path() != null) {
             var matcher = Pattern.compile("/user-([^/]+)/").matcher(source.path().replace('\\', '/'));
@@ -1122,9 +1142,9 @@ public class RagService {
         if (source.visibility() == DocumentVisibility.PRIVATE) {
             return ownerUserId != null && !ownerUserId.isBlank()
                     && sourceOwner.equals(ownerUserId)
-                    && (workspaceId == null || source.workspaceId().equals(workspaceId));
+                    && (readableWorkspaceIds == null || readableWorkspaceIds.contains(source.workspaceId()));
         }
-        return workspaceId != null && !workspaceId.isBlank() && source.workspaceId().equals(workspaceId);
+        return readableWorkspaceIds != null && readableWorkspaceIds.contains(source.workspaceId());
     }
 
     private String ownerUserId(String conversationId) {
@@ -1133,6 +1153,25 @@ public class RagService {
         }
         var matcher = Pattern.compile("^user-([^:]+):").matcher(conversationId);
         return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /**
+     * 计算当前用户在某空间下的「有效可读空间集合」：组织可见其全部子孙，团队/个人可见自身与祖先组织。
+     * 未注入 WorkspaceService 或无用户/空间时返回 null（仅 PUBLIC 与本人 PRIVATE 可见）。
+     */
+    private Set<String> resolveReadable(AppUser user, String workspaceId) {
+        if (workspaceService == null || user == null || workspaceId == null || workspaceId.isBlank()) {
+            return null;
+        }
+        return workspaceService.effectiveReadableWorkspaceIds(user, workspaceId);
+    }
+
+    private static Set<String> singletonOrNull(String workspaceId) {
+        return (workspaceId == null || workspaceId.isBlank()) ? null : Set.of(workspaceId);
+    }
+
+    private static String primaryWorkspaceId(Set<String> readableWorkspaceIds) {
+        return (readableWorkspaceIds == null || readableWorkspaceIds.isEmpty()) ? null : readableWorkspaceIds.iterator().next();
     }
 
     private boolean passesThreshold(SourceDocument source) {
@@ -1855,23 +1894,12 @@ public class RagService {
         if (!adjacentEnabled || sparseRetriever == null || sources.isEmpty()) {
             return sources;
         }
-        RetrievalScope scope = retrievalScope.get();
-        String owner = scope == null || scope.ownerUserId() == null ? "" : scope.ownerUserId();
-        String workspace = scope == null ? null : scope.workspaceId();
-        if (owner.isBlank() && workspace == null) {
-            for (SourceDocument source : sources) {
-                if (owner.isBlank() && source.ownerUserId() != null) {
-                    owner = source.ownerUserId();
-                }
-                if (workspace == null) {
-                    workspace = source.workspaceId();
-                }
-            }
-        }
         List<SourceDocument> expanded = new ArrayList<>(sources);
         for (SourceDocument source : sources) {
+            // 相邻分块属于同一文档，直接复用源分块的归属（ownerUserId / workspaceId），
+            // 既避免依赖已清理的检索作用域，也保证层级空间下能正确取到祖先/组织文档的相邻块。
             for (SourceDocument adjacent : sparseRetriever.adjacent(
-                    source.documentId(), source.chunkIndex(), owner, workspace)) {
+                    source.documentId(), source.chunkIndex(), source.ownerUserId(), source.workspaceId())) {
                 boolean sameHeading = source.headingPath() == null || source.headingPath().isBlank()
                         || source.headingPath().equals(adjacent.headingPath());
                 boolean contiguousPage = source.pageNumber() <= 0 || adjacent.pageNumber() <= 0

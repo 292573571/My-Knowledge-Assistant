@@ -1,12 +1,13 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { addWorkspaceMember, createPublicWorkspace, createTeamWorkspace, fetchWorkspaceAuditEvents, fetchWorkspaceMembers, removeWorkspaceMember, updateWorkspaceMemberRole } from '../api/workspaceApi'
+import { addWorkspaceMember, createOrgWorkspace, createPublicWorkspace, createTeamWorkspace, fetchWorkspaceAuditEvents, fetchWorkspaceMembers, removeWorkspaceMember, updateWorkspaceMemberRole } from '../api/workspaceApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { useDialogFocus } from '../composables/useDialogFocus'
 
 const props = defineProps({
   workspace: { type: Object, default: null },
-  canCreatePublic: { type: Boolean, default: false }
+  canCreatePublic: { type: Boolean, default: false },
+  canCreateOrg: { type: Boolean, default: false }
 })
 const emit = defineEmits(['close', 'created'])
 
@@ -27,6 +28,10 @@ const dialogRef = ref(null)
 
 const isOwner = computed(() => props.workspace?.role === 'OWNER')
 const canManageMembers = computed(() => isOwner.value && props.workspace?.type !== 'PERSONAL')
+const isOrg = computed(() => props.workspace?.type === 'ORG')
+const canCreateSubTeam = computed(() => isOrg.value && (canCreateOrg.value || isOwner.value))
+const showCreateTypeSelect = computed(() => canCreatePublic.value || canCreateOrg.value || canCreateSubTeam.value)
+const creatingUnderOrg = computed(() => isOrg.value && workspaceType.value !== 'ORG')
 
 useDialogFocus(dialogRef, () => emit('close'))
 
@@ -74,9 +79,15 @@ async function createWorkspace() {
   creating.value = true
   error.value = ''
   try {
-    const workspace = workspaceType.value === 'PUBLIC'
-      ? await createPublicWorkspace(name)
-      : await createTeamWorkspace(name)
+    let workspace
+    if (workspaceType.value === 'ORG') {
+      workspace = await createOrgWorkspace(name)
+    } else if (workspaceType.value === 'PUBLIC') {
+      workspace = await createPublicWorkspace(name)
+    } else {
+      const parentId = isOrg.value ? props.workspace.id : null
+      workspace = await createTeamWorkspace(name, parentId)
+    }
     teamName.value = ''
     emit('created', workspace)
   } catch (nextError) {
@@ -165,20 +176,23 @@ function formatTime(value) {
      <section ref="dialogRef" class="workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-manager-title">
       <header>
         <div>
-          <span>{{ workspace?.type === 'PERSONAL' ? '个人空间' : workspace?.type === 'TEAM' ? '团队空间' : '公共空间' }}</span>
+          <span>{{ workspace?.type === 'PERSONAL' ? '个人空间' : workspace?.type === 'TEAM' ? '团队空间' : workspace?.type === 'ORG' ? '组织空间' : '公共空间' }}</span>
           <h2 id="workspace-manager-title">{{ workspace?.name || '空间管理' }}</h2>
         </div>
         <button type="button" class="workspace-manager-close" aria-label="关闭" @click="emit('close')">×</button>
       </header>
 
       <form class="workspace-create-row workspace-create-form" @submit.prevent="createWorkspace">
-        <select v-if="canCreatePublic" v-model="workspaceType" aria-label="新空间类型">
-          <option value="TEAM">团队空间</option>
-          <option value="PUBLIC">平台公共知识源</option>
+        <select v-if="showCreateTypeSelect" v-model="workspaceType" aria-label="新空间类型">
+          <option v-if="canCreateOrg" value="ORG">组织（根空间）</option>
+          <option value="TEAM">{{ isOrg ? '团队（本组织下）' : '团队空间' }}</option>
+          <option v-if="canCreatePublic" value="PUBLIC">平台公共知识源</option>
         </select>
-        <input v-model="teamName" maxlength="80" :placeholder="workspaceType === 'PUBLIC' ? '公共知识源名称' : '新团队空间名称'" aria-label="新空间名称">
-        <button type="submit" :disabled="creating || !teamName.trim()">{{ creating ? '创建中' : workspaceType === 'PUBLIC' ? '创建公共知识源' : '创建团队' }}</button>
-        <small v-if="workspaceType === 'PUBLIC'">公共知识源中的文档会对所有用户的 AI 检索开放，仅管理员可以进入维护。</small>
+        <input v-model="teamName" maxlength="80" :placeholder="workspaceType === 'ORG' ? '组织根空间名称' : workspaceType === 'PUBLIC' ? '公共知识源名称' : '新团队空间名称'" aria-label="新空间名称">
+        <button type="submit" :disabled="creating || !teamName.trim()">{{ creating ? '创建中' : (workspaceType === 'ORG' ? '创建组织' : workspaceType === 'PUBLIC' ? '创建公共知识源' : '创建团队') }}</button>
+        <small v-if="workspaceType === 'ORG'">组织根空间下的文档对其下属所有团队可见，组织成员可 oversight 整个子树。</small>
+        <small v-else-if="workspaceType === 'PUBLIC'">公共知识源中的文档会对所有用户的 AI 检索开放，仅管理员可以进入维护。</small>
+        <small v-else-if="creatingUnderOrg">将在组织「{{ workspace.name }}」下创建团队，团队可读取该组织的共享文档。</small>
       </form>
 
       <nav class="workspace-manager-tabs" aria-label="空间管理分类">

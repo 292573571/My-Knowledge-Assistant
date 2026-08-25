@@ -30,8 +30,13 @@ public class Workspace {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    @Comment("空间类型：个人、团队或公共")
+    @Comment("空间类型：个人、组织、团队或公共")
     private WorkspaceType type;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "parent_workspace_id")
+    @Comment("上级空间主键，组织级空间无上级")
+    private Workspace parent;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_user_id", nullable = false)
@@ -60,6 +65,9 @@ public class Workspace {
     public String getId() { return id; }
     public String getName() { return name; }
     public WorkspaceType getType() { return type; }
+    public Workspace getParent() { return parent; }
     public AppUser getOwner() { return owner; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void setParent(Workspace parent) { this.parent = parent; }
 }
