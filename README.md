@@ -1,22 +1,26 @@
 # My Knowledge Assistant
 
-一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答和评测。
+一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答、工作空间层级隔离和评测。
 
 当前版本已经适合作为 RAG 应用和 Agent 学习底座，但联网搜索仍是扩展点，不应当按完整搜索产品理解。
 
 ## 功能概览
 
 - 用户注册、登录、Cookie 会话、资料和头像管理。
-- 个人、团队和公共知识空间，以及 `OWNER`、`EDITOR`、`VIEWER` 权限。
+- 工作空间两级层级：组织（ORG）根空间 → 下挂团队（TEAM）子空间；组织文档对所有下属团队可见，团队文档仅本团队可见。启动时自动幂等创建 `sunline` 根组织并把现有无上级团队挂到其下。
+- `OWNER`、`EDITOR`、`VIEWER` 三级空间成员权限。
 - Markdown、TXT、HTML、DOCX、PDF、PNG、JPG/JPEG 导入。
 - PDF 文本层、扫描页 OCR 和混合 PDF 逐页处理。
 - 长 PDF 分批解析、批次状态、失败清理和成功批次跳过恢复。
-- Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。
+- Chroma 向量检索、PostgreSQL 稀疏检索、混合检索和 RRF 排序。RAG 检索按「可读空间集合」过滤——组织成员可检索整个子树文档，团队成员可检索本团队加祖先链文档。
 - 多轮聊天、SSE 流式回答、会话保存、停止和删除。
 - 统一识海教学助手：自动区分直接回答与主题教学，支持 EXPLAIN、CHECK、PRACTICE、REVIEW 状态恢复和幂等提交。
 - PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
+- 模型配置 RBAC：用户自管 CHAT 模型（跟随默认 / 池模型 / 自定义），超管管理 EMBEDDING 模型和全局池默认模型。
+- 模型服务商错误中文化：`ModelProviderException` 把厂商原始错误码（限流、配额、鉴权等）统一转为面向用户的中文提示。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
+- 前端首页引导（HomePage + OnboardingTour）、检索诊断面板（RetrievalDebug）。
 - Actuator、请求 ID、结构化日志和敏感信息脱敏。
 
 数据库日志中心通过 Log4j2 有界异步队列写入 PostgreSQL，不阻塞业务线程。队列大小可通过 `LOG_JPA_QUEUE_SIZE` 配置，默认 `8192`；队列满时优先保证业务请求和控制台/文件日志，数据库日志可能丢弃。
@@ -132,30 +136,6 @@ QQ 邮箱授权码获取方式：登录 QQ 邮箱 → 设置 → 账户 → 开�
 
 ## 启动项目
 
-## 统一教学助手接口
-
-前端主入口现在是统一的学习助手工作台。普通问题默认走 `CHAT`，包含“教我、讲解、解释、学习”等明确学习意图的问题自动升级为 `GUIDED`；也可以在界面中显式选择模式。
-
-核心接口如下：
-
-```text
-POST /api/learning-assistant/sessions
-GET  /api/learning-assistant/sessions
-GET  /api/learning-assistant/sessions/{sessionId}
-DELETE /api/learning-assistant/sessions/{sessionId}
-POST /api/learning-assistant/sessions/{sessionId}/messages
-POST /api/learning-assistant/sessions/{sessionId}/messages/stream
-POST /api/learning-assistant/sessions/{sessionId}/check
-POST /api/learning-assistant/sessions/{sessionId}/practice
-POST /api/learning-assistant/sessions/{sessionId}/stop
-```
-
-统一 session 使用 `learning_sessions` 保存 workspace、主题、模式、阶段和状态，聊天正文继续复用 `chat_conversations/chat_messages`，教学过程继续复用 `teaching_attempts` 和 `learning_records`。带 `clientRequestId` 的消息、CHECK、PRACTICE 请求会保存到 `learning_session_events`，重复提交直接返回第一次响应；同一 ID 携带不同内容会返回冲突，处理中请求有租约回收机制。前端会在 SSE EOF、停止、组件卸载和会话切换时收口本地请求，后端 stop 接口负责取消服务端执行。
-
-旧入口仍保持兼容：`/api/workbench/chat*` 和 `/api/agent/teaching/*` 不在本次改造中删除。
-
-本轮审计还将文档上传幂等约束收紧为 `(actor_user_id, workspace_id, client_request_id)`，避免不同用户或知识空间因为复用请求 ID 互相冲突。对应数据库迁移为 V10；已有部署升级前应先备份数据库并检查旧的单列唯一约束。
-
 启动后端：
 
 ```bash
@@ -195,6 +175,30 @@ cd frontend
 yarn build
 yarn preview
 ```
+
+## 统一教学助手接口
+
+前端主入口现在是统一的学习助手工作台。普通问题默认走 `CHAT`，包含“教我、讲解、解释、学习”等明确学习意图的问题自动升级为 `GUIDED`；也可以在界面中显式选择模式。
+
+核心接口如下：
+
+```text
+POST /api/learning-assistant/sessions
+GET  /api/learning-assistant/sessions
+GET  /api/learning-assistant/sessions/{sessionId}
+DELETE /api/learning-assistant/sessions/{sessionId}
+POST /api/learning-assistant/sessions/{sessionId}/messages
+POST /api/learning-assistant/sessions/{sessionId}/messages/stream
+POST /api/learning-assistant/sessions/{sessionId}/check
+POST /api/learning-assistant/sessions/{sessionId}/practice
+POST /api/learning-assistant/sessions/{sessionId}/stop
+```
+
+统一 session 使用 `learning_sessions` 保存 workspace、主题、模式、阶段和状态，聊天正文继续复用 `chat_conversations/chat_messages`，教学过程继续复用 `teaching_attempts` 和 `learning_records`。带 `clientRequestId` 的消息、CHECK、PRACTICE 请求会保存到 `learning_session_events`，重复提交直接返回第一次响应；同一 ID 携带不同内容会返回冲突，处理中请求有租约回收机制。前端会在 SSE EOF、停止、组件卸载和会话切换时收口本地请求，后端 stop 接口负责取消服务端执行。
+
+旧入口仍保持兼容：`/api/workbench/chat*` 和 `/api/agent/teaching/*` 不在本次改造中删除。
+
+本轮审计还将文档上传幂等约束收紧为 `(actor_user_id, workspace_id, client_request_id)`，避免不同用户或知识空间因为复用请求 ID 互相冲突。对应数据库迁移为 V10；已有部署升级前应先备份数据库并检查旧的单列唯一约束。
 
 ## 发版与启动脚本
 
@@ -283,10 +287,29 @@ curl -b cookies.txt http://localhost:8080/api/workspaces
 空间类型：
 
 - `PERSONAL`：用户个人空间，自动创建。
-- `TEAM`：团队空间，可由用户创建。
-- `PUBLIC`：公共空间，需要管理员权限创建。
+- `ORG`：组织根空间，需要超级管理员权限创建。组织文档对所有下属团队可见（oversight 整个子树）。
+- `TEAM`：团队空间，可由用户创建。建在组织下时需要超管或组织 OWNER 权限；独立创建则任何用户均可。
+- `PUBLIC`：公共空间，需要管理员权限创建。公共文档对所有用户的 AI 检索开放。
 
-非成员访问空间会被隐藏为不存在。聊天、文档、会话和检索都按空间隔离。
+创建组织根（仅超级管理员）：
+
+```bash
+curl -b cookies.txt -X POST http://localhost:8080/api/workspaces/org \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"sunline"}'
+```
+
+在组织下创建子团队（超管或组织 OWNER；`parentId` 可选，不传则创建顶级团队）：
+
+```bash
+curl -b cookies.txt -X POST http://localhost:8080/api/workspaces/team \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"scb","parentId":"<组织空间ID>"}'
+```
+
+工作空间层级：组织（ORG）作为根节点，通过 `parent_workspace_id` 自引用外键下挂多个团队（TEAM）。`WorkspaceService.effectiveReadableWorkspaceIds` 计算用户的可读空间集合——组织成员获得自身加全部子孙空间，团队成员获得自身加沿父链的祖先空间。RAG 检索链（向量 + 稀疏）统一按此集合过滤，使组织文档对下属团队可见，团队文档不被其他团队或组织看到。
+
+非成员访问空间会被隐藏为不存在。聊天、文档、会话和检索都按空间隔离。启动时 `WorkspaceHierarchyInitializer`（`@Profile("!test")`）幂等地创建 `sunline` 根组织并把现有无上级团队挂到其下。前端空间切换器按 `parentId` 渲染为树形（组织根 + 下属团队分组）。
 
 ## 文档导入
 
@@ -339,6 +362,16 @@ curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
 
 流式接口返回 `text/event-stream`。前端会处理文本片段、来源和工具调用事件。当前 RAG 默认启用混合检索和答案依据校验；知识库没有足够依据时可以使用模型兜底，但默认不连接真实 Web 搜索。
 
+检索诊断（查看某问题命中了哪些分块、得分和可见性过滤结果）：
+
+```bash
+curl -b cookies.txt -X POST http://localhost:8080/api/rag/debug \
+  -H 'Content-Type: application/json' \
+  -d '{"workspaceId":"team-1","message":"总结当前知识库的主要内容"}'
+```
+
+检索按当前用户在指定空间下的可读空间集合过滤：组织空间下会覆盖整个子树，团队空间下包含自身加祖先链（含所属组织）。
+
 ## 模型配置
 
 每个用户可以独立选择大模型，支持三种模式：
@@ -346,6 +379,12 @@ curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
 - **跟随默认（FOLLOW_DEFAULT）**：使用管理员设置的全局默认模型。
 - **使用池模型（USE_POOL_MODEL）**：从管理员维护的模型池中选择一个已启用的模型。
 - **自定义（CUSTOM）**：填写自己的 API 地址、密钥和模型标识。
+
+模型配置 RBAC 边界：
+
+- 用户只能创建和管理**自己的 CHAT 模型**（`/api/model-config/me/pool` 系列）。
+- EMBEDDING 模型由超级管理员统一管理。
+- 模型池的默认模型设置（`PUT /api/model-config/pool/{id}/default`）仅超级管理员可操作。
 
 管理员通过 `/api/model-config/pool` 维护全局模型池：
 
@@ -430,12 +469,13 @@ POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 | --- | --- | --- |
 | 认证 | `/api/auth/*` | 注册、登录、资料、头像、注销 |
 | 用户管理 | `/api/admin/users/*` | 管理员查看用户和调整角色 |
-| 空间 | `/api/workspaces/*` | 创建空间、成员管理、审计 |
+| 空间 | `/api/workspaces/*` | 创建空间（个人 / 组织根 / 团队 / 公共）、层级挂载、成员管理、审计 |
 | 文档 | `/api/documents/*` | 上传、导入、同步、重建、删除 |
 | 文档任务 | `/api/document-tasks/*` | 查询、批次、重试、源文件 |
 | 会话 | `/api/conversations/*` | 会话列表、消息、停止、删除 |
-| 模型配置 | `/api/model-config/*` | 全局模型池管理（管理员）和用户模型模式配置 |
+| 模型配置 | `/api/model-config/*` | 全局模型池管理（管理员）、用户自管 CHAT 模型池、用户模型模式配置 |
 | 问答 | `/api/rag/chat`、`/api/workbench/chat*` | 普通和 SSE 流式问答 |
+| 检索诊断 | `/api/rag/debug` | 输入问题查看命中分块、检索得分与可见性 |
 | 评测 | `/api/eval/*` | 题库、运行、结果和导入文件 |
 | 记录 | `/api/learning-records/*` | 学习记录和正式笔记 |
 | 状态 | `/api/health`、`/actuator/*` | 服务和依赖状态 |
@@ -493,6 +533,19 @@ V6__complete_learning_projection_schema.sql
   为既有 learning_record_outbox 补充 workspace_id，并初始化 formal-note-projection 调度任务
 ```
 
+模型配置和工作空间层级相关迁移：
+
+```text
+V11__create_model_config.sql        模型池与用户模型配置表
+V12__add_ai_models_type.sql         模型增加 CHAT/EMBEDDING 类型
+V19__add_ai_model_owner.sql         模型增加所有者（用户自管 CHAT 模型的基础）
+V20__create_eval_tables.sql         评测题库、运行和结果表
+V21__add_workspace_parent.sql       workspaces 增加 parent_workspace_id 自引用外键
+V22__allow_org_workspace_type.sql   放宽 workspaces.type 检查约束以包含 ORG 组织类型
+```
+
+V22 是一个修复性迁移：`workspaces.type` 列存在仅允许 `PERSONAL/TEAM/PUBLIC` 的 CHECK 约束（在 Flyway 之外手工创建），导致 `WorkspaceHierarchyInitializer` 插入 `ORG` 类型记录时触发约束冲突、应用启动失败。V22 删除旧约束并重建为包含 ORG 的四值约束。已部署环境如果存在同名约束，升级到本版本前应先备份数据库。
+
 数据库事实写入和 Outbox 写入必须保持在同一事务中。投影 worker 使用 `scheduled_jobs` 管理周期和租约，并使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 选择待处理事件；真实 PostgreSQL、多实例抢占、迁移升级和故障重试仍需在部署前完成集成验证。
 
 运行时目录：
@@ -527,7 +580,7 @@ src/main/resources/                  配置、日志和数据库迁移
 src/test/java/                       后端测试
 frontend/src/                        Vue 前端
 eval/                                 评测数据、模板和确定性评测脚本
- docs/                                 知识库源文档、投影文件和设计资料
+docs/                                 知识库源文档、投影文件和设计资料
 .github/workflows/                   CI 和真实模型评测工作流
 ```
 
@@ -540,6 +593,8 @@ eval/                                 评测数据、模板和确定性评测脚
 ### 模型调用失败
 
 先检查用户级模型配置：前端「设置 → 模型配置」或 `/api/model-config/me` 确认当前模式（跟随默认 / 池模型 / 自定义）。自定义模式下需确保 API Key、base URL 和模型标识正确且模型可用。
+
+模型服务商错误已通过 `ModelProviderException` 统一转为中文提示（如「模型调用频率受限，请稍后重试」「模型配额已用尽，请联系管理员或切换模型」等），不会把厂商原始错误码直接暴露给用户；响应中保留原始错误码和 traceId 便于排查。
 
 全局默认模型通过 `/api/model-config/pool` 查看；管理员可在此检查默认模型的启用状态和 API 配置。
 
