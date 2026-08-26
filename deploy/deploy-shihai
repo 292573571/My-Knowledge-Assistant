@@ -19,6 +19,32 @@ remote_deploy() {
   local service_was_active=false
   local activated=false
 
+  fix_nginx_root() {
+    local expected_root="$frontend_root"
+    local nginx_conf=/etc/nginx/conf.d/zhihai.conf
+    if [[ ! -f "$nginx_conf" ]]; then
+      echo "未发现 nginx 配置: $nginx_conf，跳过 root 修正" >&2
+      return 0
+    fi
+    if grep -Eq "^[[:space:]]*root[[:space:]]+${expected_root}/?[[:space:]]*;" "$nginx_conf"; then
+      return 0
+    fi
+    if grep -qE '^[[:space:]]*root[[:space:]]+' "$nginx_conf"; then
+      sed -i -E "s|^[[:space:]]*root[[:space:]]+[^;]+;|root ${expected_root};|" "$nginx_conf"
+      echo "已修正 nginx root 指向 $expected_root"
+    else
+      echo "nginx 配置缺少 root 指令，请人工处理: $nginx_conf" >&2
+      return 1
+    fi
+    if nginx -t >/dev/null 2>&1; then
+      nginx -s reload >/dev/null 2>&1 || systemctl reload nginx >/dev/null 2>&1 || true
+      echo "nginx 已重新加载"
+    else
+      echo "nginx 配置检查失败，请人工处理" >&2
+      return 1
+    fi
+  }
+
   if [[ -z "$archive" || -z "$revision" || ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
     echo "用法: deploy-shihai remote <release.tar.gz> <40位Git提交ID>" >&2
     exit 2
@@ -103,6 +129,7 @@ remote_deploy() {
   cp -a "$release_dir/frontend/." "$frontend_root/"
   chmod -R a+rX "$frontend_root"
   chcon -R system_u:object_r:httpd_sys_content_t:s0 "$frontend_root" 2>/dev/null || true
+  fix_nginx_root
   systemctl start shihai
 
   for attempt in $(seq 1 "$startup_attempts"); do
