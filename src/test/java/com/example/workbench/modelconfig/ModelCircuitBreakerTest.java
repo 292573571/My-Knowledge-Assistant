@@ -9,9 +9,13 @@ import org.junit.jupiter.api.Test;
 
 class ModelCircuitBreakerTest {
 
+    private static ModelCircuitBreaker newBreaker(int threshold, long cooldownMs) {
+        return new ModelCircuitBreaker(threshold, cooldownMs, new MemoryCircuitBreakerStateStore());
+    }
+
     @Test
     void closesInitiallyAndOpensAfterConsecutiveFailures() {
-        ModelCircuitBreaker breaker = new ModelCircuitBreaker(2, 50);
+        ModelCircuitBreaker breaker = newBreaker(2, 50);
         String model = "primary";
         assertTrue(breaker.allowRequest(model));
         breaker.recordFailure(model);
@@ -24,7 +28,7 @@ class ModelCircuitBreakerTest {
 
     @Test
     void successResetsBreaker() throws InterruptedException {
-        ModelCircuitBreaker breaker = new ModelCircuitBreaker(1, 50);
+        ModelCircuitBreaker breaker = newBreaker(1, 50);
         String model = "primary";
         breaker.recordFailure(model);
         assertFalse(breaker.allowRequest(model));
@@ -34,7 +38,7 @@ class ModelCircuitBreakerTest {
 
     @Test
     void opensAgainAfterHalfOpenFailureAndClosesAfterSuccess() throws InterruptedException {
-        ModelCircuitBreaker breaker = new ModelCircuitBreaker(1, 30);
+        ModelCircuitBreaker breaker = newBreaker(1, 30);
         String model = "primary";
         breaker.recordFailure(model); // open
         assertFalse(breaker.allowRequest(model));

@@ -8,24 +8,26 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * 流式会话缓冲的进程内存储。
+ * 流式会话的查找入口。
  *
- * <p>以 {@code streamId}(即请求的 {@code clientRequestId})为键,保存 {@link StreamSession}。
- * 单实例部署下进程内存储足够;接口稳定,后续若需多实例可替换为 Redis 实现而不动上层逻辑。</p>
+ * <p>以 {@code streamId}(即请求的 {@code clientRequestId})为键定位 {@link StreamSession}。
+ * 会话的片段数据存放在 {@link StreamBufferBackend} 中,本类只维护「本进程内的会话视图」缓存,
+ * 并负责把远端(其他实例)的新片段通知转发给对应会话。</p>
  *
- * <p>后台定时清理超过 TTL 的终态/过期会话,避免内存泄漏。</p>
+ * <p>因此在 Redis 后端下,即使会话是由另一个实例创建的,本实例也能通过 {@link #get(String)}
+ * 重建视图并续传 —— 这是跨实例断点续传的基础。</p>
  */
 @Component
 public class StreamSessionStore {
 
     private static final Logger log = LoggerFactory.getLogger(StreamSessionStore.class);
 
-    private final ConcurrentHashMap<String, StreamSession> sessions = new ConcurrentHashMap<>();
-    private final Map<String, Long> createdAt = new ConcurrentHashMap<>();
+    private final StreamBufferBackend backend;
+    private final ConcurrentHashMap<String, StreamSession> localViews = new ConcurrentHashMap<>();
+    private final Map<String, Long> viewCreatedAt = new ConcurrentHashMap<>();
     private final ScheduledExecutorService reaper = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "stream-session-reaper");
         thread.setDaemon(true);
@@ -33,37 +35,76 @@ public class StreamSessionStore {
     });
     private final long ttlSeconds;
 
-    public StreamSessionStore(@Value("${app.ai.stream.buffer-ttl-seconds:300}") long ttlSeconds) {
-        this.ttlSeconds = Math.max(30, ttlSeconds);
+    public StreamSessionStore(StreamBufferBackend backend, StreamBufferProperties properties) {
+        this.backend = backend;
+        this.ttlSeconds = properties.ttlSeconds();
         long period = Math.max(15, ttlSeconds / 2);
         reaper.scheduleAtFixedRate(this::reap, period, period, TimeUnit.SECONDS);
+        backend.onRemoteAppend(this::onRemoteAppend);
+        log.info("流式缓冲后端已就绪 backend={} ttlSeconds={}", backend.name(), ttlSeconds);
     }
 
+    /** 查找会话:优先用本进程视图,其次按缓冲后端中的状态重建视图(跨实例续传)。 */
     public StreamSession get(String streamId) {
-        return sessions.get(streamId);
+        StreamSession cached = localViews.get(streamId);
+        if (cached != null) {
+            return cached;
+        }
+        if (backend.readState(streamId) == null) {
+            return null;
+        }
+        return localViews.computeIfAbsent(streamId, id -> {
+            viewCreatedAt.put(id, System.nanoTime());
+            return new StreamSession(id, backend);
+        });
     }
 
     public StreamSession create(String streamId) {
-        StreamSession session = new StreamSession(streamId);
-        sessions.put(streamId, session);
-        createdAt.put(streamId, System.nanoTime());
+        backend.createSession(streamId);
+        StreamSession session = new StreamSession(streamId, backend);
+        localViews.put(streamId, session);
+        viewCreatedAt.put(streamId, System.nanoTime());
         return session;
     }
 
     public void remove(String streamId) {
-        sessions.remove(streamId);
-        createdAt.remove(streamId);
+        localViews.remove(streamId);
+        viewCreatedAt.remove(streamId);
+        backend.remove(streamId);
     }
 
+    /** 缓冲后端名称,用于诊断端点与启动日志。 */
+    public String backendName() {
+        return backend.name();
+    }
+
+    private void onRemoteAppend(String streamId) {
+        StreamSession session = localViews.get(streamId);
+        if (session != null) {
+            session.drainRemote();
+        }
+    }
+
+    /**
+     * 清理本进程内的过期会话视图。
+     *
+     * <p>只清理视图,不动缓冲数据:Redis 后端靠键 TTL 自动回收;进程内后端的数据随视图一并释放。
+     * RUNNING 中的会话永不清理,避免把正在生成的回答踢掉。</p>
+     */
     private void reap() {
         long now = System.nanoTime();
         long ttlNanos = ttlSeconds * 1_000_000_000L;
-        for (Map.Entry<String, Long> entry : createdAt.entrySet()) {
-            if (now - entry.getValue() > ttlNanos) {
-                StreamSession session = sessions.get(entry.getKey());
-                if (session == null || session.status() != StreamSession.Status.RUNNING) {
-                    sessions.remove(entry.getKey());
-                    createdAt.remove(entry.getKey());
+        for (Map.Entry<String, Long> entry : viewCreatedAt.entrySet()) {
+            if (now - entry.getValue() <= ttlNanos) {
+                continue;
+            }
+            String streamId = entry.getKey();
+            StreamBufferBackend.SessionState state = backend.readState(streamId);
+            if (state == null || state.status() != StreamSession.Status.RUNNING) {
+                localViews.remove(streamId);
+                viewCreatedAt.remove(streamId);
+                if (state != null) {
+                    backend.remove(streamId);
                 }
             }
         }

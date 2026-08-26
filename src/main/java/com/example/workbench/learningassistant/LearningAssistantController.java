@@ -199,16 +199,20 @@ public class LearningAssistantController {
             heartbeat.cancel(true);
         });
 
-        // 先取快照,再以快照末尾序号订阅,最后重放快照,保证每个片段恰好投递一次。
-        List<StreamChunk> snapshot = session.snapshot(resumeSeq);
-        long lastSnapshotSeq = snapshot.isEmpty() ? resumeSeq : snapshot.get(snapshot.size() - 1).seq();
-        session.subscribe(lastSnapshotSeq,
+        // subscribe 内部在同一把锁里先重放 resumeSeq 之后的历史、再注册实时订阅,
+        // 因此每个片段恰好投递一次且严格保序;终态回调只负责关闭连接(终态片段本身已由 onChunk 投递)。
+        session.subscribe(resumeSeq,
                 chunk -> deliver(emitter, chunk, closed),
-                terminal -> deliver(emitter, terminal, closed));
-        for (StreamChunk chunk : snapshot) {
-            if (chunk.seq() > resumeSeq) {
-                deliver(emitter, chunk, closed);
-            }
+                terminal -> closeQuietly(emitter, closed));
+    }
+
+    /** 会话已终结时干净地收尾;若连接已关闭则什么都不做。 */
+    private void closeQuietly(SseEmitter emitter, AtomicBoolean closed) {
+        if (closed.getAndSet(true)) return;
+        try {
+            emitter.complete();
+        } catch (IllegalStateException ignored) {
+            // 连接已断开或已结束,忽略
         }
     }
 

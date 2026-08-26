@@ -206,7 +206,7 @@ POST /api/learning-assistant/sessions/{sessionId}/stop
 
 1. **生成与推送解耦 + 断点续传**。后端每个请求以 `streamId`（默认即 `clientRequestId`）对应一个 `StreamSession`（`streaming` 包）：首访负责启动生成任务并写入带全局序号的有序事件；后续访问（含客户端断线重连）只作为订阅者，携带 `Last-Event-ID` 从断点重放历史片段并实时接收后续片段。客户端断开时只解除当前连接的 SSE 推送，生成任务继续跑完并写入缓冲，因此重连即可无感接回，半截答案不丢。
 2. **心跳保活**。`SseEmitter` 每 `app.ai.stream.heartbeat-ms`（默认 15000ms）发送一条 SSE 注释（`:keepalive`），避免 nginx / 网关把空闲连接掐断；响应头显式 `X-Accel-Buffering: no` 与 `Cache-Control: no-cache, no-transform`，禁止任何代理层缓冲。
-3. **模型熔断 + 回退链**。自研轻量 `ModelCircuitBreaker`（per-model closed/open/half-open，无外部依赖，离线构建友好）接入 `LocalChatClient` 的回退决策：主模型连续失败达到阈值后熔断，冷却期内请求直接走备用模型；成功后自动恢复。避免引入 Resilience4j 带来的离线 Maven 依赖。
+3. **模型熔断 + 回退链**。`ModelCircuitBreaker`（per-model closed/open/half-open）接入 `LocalChatClient` 的回退决策：主模型连续失败达到阈值后熔断，冷却期内请求直接走备用模型；成功后自动恢复。熔断状态通过 `CircuitBreakerStateStore` 抽象，Redis 可用时多实例共享同一模型的健康判断，避免每个实例各自试错。
 
 前端（`LearningAssistantPage.vue` + `learningAssistantApi.js`）配套行为：
 
@@ -219,11 +219,15 @@ POST /api/learning-assistant/sessions/{sessionId}/stop
 ```properties
 app.ai.stream.heartbeat-ms=15000
 app.ai.stream.buffer-ttl-seconds=300
+app.ai.stream.buffer-backend=auto          # auto | redis | memory
 app.ai.circuit-breaker.failure-threshold=3
 app.ai.circuit-breaker.cooldown-ms=30000
+spring.data.redis.host=${REDIS_HOST:}      # 留空则自动降级为进程内缓冲
+spring.data.redis.port=${REDIS_PORT:6379}
+spring.data.redis.password=${REDIS_PASSWORD:}
 ```
 
-进程内 `StreamSessionStore` 以 `streamId` 为键保存缓冲，单实例部署足够；接口稳定，后续若需多实例可替换为 Redis 实现而不动上层逻辑。
+**缓冲后端自动降级**：`StreamBufferBackend` 接口有两个实现——`MemoryStreamBufferBackend`（进程内，零依赖）和 `RedisStreamBufferBackend`（ZSet 有序存 chunk + Hash 存状态 + Pub/Sub 跨实例通知，全部 key 带 TTL）。`buffer-backend=auto` 时启动探活 Redis，可达则用 Redis，不可达则回落进程内并打 WARN，不阻塞启动。本地开发与单元测试无需安装 Redis。Redis 安装步骤见 `docs/runbooks/redis-setup.md`。
 
 ## 发版与启动脚本
 
