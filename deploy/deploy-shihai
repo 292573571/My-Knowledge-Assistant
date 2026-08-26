@@ -359,6 +359,7 @@ EOF
     exit 1
   }
   echo "[5/5] 部署并执行健康检查"
+  revision=${revision:-$(git rev-parse HEAD 2>/dev/null)}
   ssh "${ssh_options[@]}" "$remote" \
     "sudo -n '$remote_deploy_script' remote '$remote_archive' '$revision'"
 
