@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { changePassword, clearLegacyAccessToken, fetchAvatarUrl, fetchCurrentUser, logout } from './api/authApi'
 import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
