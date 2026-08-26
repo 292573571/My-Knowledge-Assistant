@@ -160,14 +160,19 @@ public class LearningAssistantController {
             } catch (CancellationException exception) {
                 emitter.complete();
             } catch (Exception exception) {
-                log.error("统一学习助手流式请求失败 sessionId={} errorType={} message={}",
+                log.warn("统一学习助手流式请求失败 sessionId={} errorType={} message={}",
                         sessionId, exception.getClass().getSimpleName(), exception.getMessage(), exception);
                 try {
                     send(emitter, "error", errorPayload(exception, requestId));
                 } catch (Exception ignored) {
                     // 浏览器可能已关闭连接。
                 }
-                emitter.completeWithError(exception);
+                // 这里必须用 complete() 而不是 completeWithError(exception)：
+                // completeWithError 会让 Tomcat 走 async-error 分发，调用 GlobalExceptionHandler
+                // 再写一份响应，但 Content-Type 已是 text/event-stream，Spring 找不到对应的
+                // 转换器（Map -> SSE），会再抛 HttpMessageNotWritableException 二次失败。
+                // 错误事件已通过 SSE 发给前端，干净地关掉 emitter 即可。
+                emitter.complete();
             } finally {
                 executionRegistry.finish(scope, execution);
                 modelConfigContext.clear();
@@ -233,6 +238,14 @@ public class LearningAssistantController {
             }
             return payload;
         }
+        // 区分模型超时与一般异常，前端可给更具体的提示。
+        if (isTimeoutException(exception)) {
+            payload.put("message", "模型响应超时，请稍后重试或切换其他模型");
+            payload.put("errorType", "timeout");
+            payload.put("retryable", true);
+            payload.put("requestId", requestId);
+            return payload;
+        }
         payload.put("message", exception instanceof ResponseStatusException response && response.getReason() != null
                 ? response.getReason() : "学习助手处理失败，请稍后重试");
         payload.put("errorType", exception.getClass().getSimpleName());
@@ -243,5 +256,23 @@ public class LearningAssistantController {
             payload.put("retryable", status == 408 || status == 429 || status >= 500);
         }
         return payload;
+    }
+
+    private static boolean isTimeoutException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String name = current.getClass().getName();
+            if (name.equals("java.util.concurrent.TimeoutException")
+                    || name.equals("reactor.core.Exceptions$ReactiveException")
+                            && current.getMessage() != null
+                            && current.getMessage().contains("TimeoutException")) {
+                return true;
+            }
+            if (current instanceof java.util.concurrent.TimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }
