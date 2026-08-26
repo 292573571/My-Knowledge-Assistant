@@ -41,13 +41,20 @@ export function deleteLearningSession(sessionId) {
   }, '删除学习会话失败。')
 }
 
-export function streamLearningMessage(sessionId, payload, onEvent) {
+export function streamLearningMessage(sessionId, payload, onEvent, options = {}) {
   const controller = new AbortController()
   let sawTerminalEvent = false
-  void fetch(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
+  let lastEventId = Number.isFinite(options.lastEventId) ? options.lastEventId : 0
+  let streamId = options.streamId || null
+  const query = streamId
+    ? `?streamId=${encodeURIComponent(streamId)}&resumeFrom=${encodeURIComponent(String(lastEventId))}`
+    : ''
+  const headers = authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' })
+  if (lastEventId) headers['Last-Event-ID'] = String(lastEventId)
+  void fetch(`/api/learning-assistant/sessions/${encodeURIComponent(sessionId)}/messages/stream${query}`, {
     method: 'POST',
     credentials: 'include',
-    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
+    headers,
     body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), ...payload }),
     signal: controller.signal
   }).then(async response => {
@@ -61,12 +68,14 @@ export function streamLearningMessage(sessionId, payload, onEvent) {
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
       const blocks = buffer.split(/\r?\n\r?\n/)
       buffer = blocks.pop() || ''
-      for (const block of blocks) dispatchEventBlock(block, dispatch)
+      for (const block of blocks) handleBlock(block)
       if (done) {
-        if (buffer.trim()) dispatchEventBlock(buffer, dispatch)
+        if (buffer.trim()) handleBlock(buffer)
         if (!sawTerminalEvent) {
+          // 流意外结束但未收到终态事件:可能是连接中断。标记为 synthetic,
+          // 上层据此区分「连接中断(可断点续传)」与「服务端真实错误(需重建重生成)」。
           const apiError = apiErrorFromException(new Error('回答流意外结束，请重试。'), '回答流意外结束，请重试。')
-          dispatch('error', { apiError, message: apiError.message, retryable: true })
+          dispatch('error', { apiError, message: apiError.message, retryable: true, synthetic: true })
         }
         break
       }
@@ -79,29 +88,51 @@ export function streamLearningMessage(sessionId, payload, onEvent) {
         message: apiError.message,
         status: apiError.status,
         requestId: apiError.requestId,
-        retryable: apiError.retryable
+        retryable: apiError.retryable,
+        synthetic: true
       })
     }
   })
 
   function dispatch(type, data) {
     if (type === 'done' || type === 'error') sawTerminalEvent = true
-    onEvent(type, data)
+    onEvent(type, data, { seq: lastEventId, streamId })
+  }
+
+  function handleBlock(block) {
+    let type = 'message'
+    let id = null
+    const dataLines = []
+    let sawContent = false
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith(':')) continue // SSE 注释(心跳保活), 忽略
+      if (line.startsWith('id:')) {
+        id = line.substring(3).trim()
+        continue
+      }
+      if (line.startsWith('event:')) {
+        type = line.substring(6).trim()
+        sawContent = true
+        continue
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.substring(5).trimStart())
+        sawContent = true
+      }
+    }
+    if (!sawContent) return // 纯注释或空块, 不派发
+    if (id != null && /^\d+$/.test(id)) lastEventId = Number(id)
+    const raw = dataLines.join('\n')
+    let parsed = {}
+    try {
+      parsed = raw ? JSON.parse(raw) : {}
+    } catch {
+      parsed = { text: raw }
+    }
+    if (type === 'stream_init' && parsed.streamId) streamId = parsed.streamId
+    dispatch(type, parsed)
   }
   return () => controller.abort()
-}
-
-function dispatchEventBlock(block, onEvent) {
-  let type = 'message'
-  const data = []
-  for (const line of block.split(/\r?\n/)) {
-    if (line.startsWith('event:')) type = line.substring(6).trim()
-    else if (line.startsWith('data:')) data.push(line.substring(5).trimStart())
-  }
-  const raw = data.join('\n')
-  let parsed = {}
-  try { parsed = raw ? JSON.parse(raw) : {} } catch { parsed = { text: raw } }
-  onEvent(type, parsed)
 }
 
 export function submitLearningCheck(sessionId, payload) {

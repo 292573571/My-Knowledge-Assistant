@@ -200,6 +200,31 @@ POST /api/learning-assistant/sessions/{sessionId}/stop
 
 本轮审计还将文档上传幂等约束收紧为 `(actor_user_id, workspace_id, client_request_id)`，避免不同用户或知识空间因为复用请求 ID 互相冲突。对应数据库迁移为 V10；已有部署升级前应先备份数据库并检查旧的单列唯一约束。
 
+## 流式回答韧性(断点续传 + 模型熔断)
+
+学习助手流式回答过去一旦上游模型超时，就会"答到一半 + 红框报错 + 半截答案丢失"。现在从三层解决这一问题，既不牺牲流式体验，也能从断点接回：
+
+1. **生成与推送解耦 + 断点续传**。后端每个请求以 `streamId`（默认即 `clientRequestId`）对应一个 `StreamSession`（`streaming` 包）：首访负责启动生成任务并写入带全局序号的有序事件；后续访问（含客户端断线重连）只作为订阅者，携带 `Last-Event-ID` 从断点重放历史片段并实时接收后续片段。客户端断开时只解除当前连接的 SSE 推送，生成任务继续跑完并写入缓冲，因此重连即可无感接回，半截答案不丢。
+2. **心跳保活**。`SseEmitter` 每 `app.ai.stream.heartbeat-ms`（默认 15000ms）发送一条 SSE 注释（`:keepalive`），避免 nginx / 网关把空闲连接掐断；响应头显式 `X-Accel-Buffering: no` 与 `Cache-Control: no-cache, no-transform`，禁止任何代理层缓冲。
+3. **模型熔断 + 回退链**。自研轻量 `ModelCircuitBreaker`（per-model closed/open/half-open，无外部依赖，离线构建友好）接入 `LocalChatClient` 的回退决策：主模型连续失败达到阈值后熔断，冷却期内请求直接走备用模型；成功后自动恢复。避免引入 Resilience4j 带来的离线 Maven 依赖。
+
+前端（`LearningAssistantPage.vue` + `learningAssistantApi.js`）配套行为：
+
+- 已收到的 token 始终保留在界面上，出错时不清空，只在底部显示灰色「回答中断，正在自动恢复…」轻提示，而不是红色 error 框。
+- 区分两类中断：连接中断（SSE 意外 EOF / 网络错误，标记为 `synthetic`）复用同一 `streamId` + `Last-Event-ID` 断点续传；服务端真实生成失败则自动重建会话、从 `seq=0` 重放新答案并替换旧半截，避免重复拼接。
+- 最多自动重试 1 次；若仍失败，提供「重新生成」按钮（以全新 `clientRequestId` 发起）。
+
+相关配置（均带默认值，可直接覆盖）：
+
+```properties
+app.ai.stream.heartbeat-ms=15000
+app.ai.stream.buffer-ttl-seconds=300
+app.ai.circuit-breaker.failure-threshold=3
+app.ai.circuit-breaker.cooldown-ms=30000
+```
+
+进程内 `StreamSessionStore` 以 `streamId` 为键保存缓冲，单实例部署足够；接口稳定，后续若需多实例可替换为 Redis 实现而不动上层逻辑。
+
 ## 发版与启动脚本
 
 项目只保留一个发版入口：

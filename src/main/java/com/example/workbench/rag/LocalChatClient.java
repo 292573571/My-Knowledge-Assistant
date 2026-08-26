@@ -2,6 +2,7 @@ package com.example.workbench.rag;
 
 import com.example.workbench.config.ModelProviderException;
 import com.example.workbench.memory.ChatMessage;
+import com.example.workbench.modelconfig.ModelCircuitBreaker;
 import com.example.workbench.modelconfig.ModelClientFactory;
 import com.example.workbench.modelconfig.ModelConfigContext;
 import com.example.workbench.modelconfig.ModelConfigService;
@@ -74,6 +75,7 @@ public class LocalChatClient {
     private ModelConfigContext modelConfigContext;
     private ModelConfigService modelConfigService;
     private ModelClientFactory modelClientFactory;
+    private ModelCircuitBreaker circuitBreaker;
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
 
     /** 注入用户级模型解析依赖；测试直接构造时不提供，回退到全局默认模型。 */
@@ -88,6 +90,11 @@ public class LocalChatClient {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiExecutor(@Qualifier("aiTaskExecutor") Executor aiExecutor) {
         this.aiExecutor = aiExecutor;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCircuitBreaker(ModelCircuitBreaker circuitBreaker) {
+        this.circuitBreaker = circuitBreaker;
     }
 
     public LocalChatClient(
@@ -207,26 +214,36 @@ public class LocalChatClient {
         }
 
         String conversationId = options.getOrDefault("conversationId", "default");
+        List<String> candidates = resolved.models().stream()
+                .filter(model -> circuitBreaker == null || circuitBreaker.allowRequest(model))
+                .collect(Collectors.toList());
+        if (candidates.isEmpty()) {
+            // 所有候选模型均被熔断,退化为直接尝试主模型,避免完全不可用。
+            candidates = List.of(resolved.models().get(0));
+            log.warn("All candidate models tripped circuit breaker, falling back to primary model={}", candidates.get(0));
+        }
+
         AtomicBoolean receivedToken = new AtomicBoolean(false);
-        StringBuilder streamBuffer = new StringBuilder();
-        Flux<String> primary = withModelErrorGuard(
-                        ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
-                                resolved.client(), resolved.models().get(0), resolved.requestTimeout(),
-                                resolved.temperature(), resolved.maxOutputTokens()))
-                                .map(this::sanitizeModelText)
-                                .filter(token -> !token.isEmpty()),
-                        streamBuffer)
-                .doOnNext(token -> receivedToken.set(true))
-                .onErrorResume(error -> !receivedToken.get() && resolved.models().size() > 1
-                        ? withModelErrorGuard(
-                                ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
-                                        resolved.client(), resolved.models().get(1), resolved.fallbackRequestTimeout(),
-                                        resolved.temperature(), resolved.maxOutputTokens()))
-                                        .map(this::sanitizeModelText)
-                                        .filter(token -> !token.isEmpty()),
-                                new StringBuilder())
-                        : Flux.error(error));
-        return primary;
+        Flux<String> chain = null;
+        for (int index = 0; index < candidates.size(); index++) {
+            final String model = candidates.get(index);
+            final boolean primary = index == 0;
+            StringBuilder stepBuffer = new StringBuilder();
+            Flux<String> step = withModelErrorGuard(
+                            ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                                    resolved.client(), model,
+                                    primary ? resolved.requestTimeout() : resolved.fallbackRequestTimeout(),
+                                    resolved.temperature(), resolved.maxOutputTokens()))
+                                    .map(this::sanitizeModelText)
+                                    .filter(token -> !token.isEmpty()),
+                            stepBuffer)
+                    .doOnNext(token -> receivedToken.set(true))
+                    .doOnComplete(() -> { if (circuitBreaker != null) circuitBreaker.recordSuccess(model); })
+                    .doOnError(error -> { if (circuitBreaker != null) circuitBreaker.recordFailure(model); });
+            // 仅在尚未产出任何 token 时才切换到下一个候选模型,避免半截答案拼接。
+            chain = chain == null ? step : chain.onErrorResume(error -> !receivedToken.get() ? step : Flux.error(error));
+        }
+        return chain != null ? chain : Flux.error(new IllegalStateException("No model available"));
     }
 
     /** 解析当前请求实际使用的模型，未启用动态配置时回退到全局默认。 */
@@ -367,6 +384,10 @@ public class LocalChatClient {
 
         for (int modelIndex = 0; modelIndex < models.size(); modelIndex++) {
             String model = models.get(modelIndex);
+            if (circuitBreaker != null && !circuitBreaker.allowRequest(model)) {
+                log.warn("AI model skipped by circuit breaker model={} conversationId={}", model, conversationId);
+                continue;
+            }
             Duration timeout = modelIndex == 0 ? syncRequestTimeout : resolved.fallbackRequestTimeout();
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -393,9 +414,11 @@ public class LocalChatClient {
                         throw modelError;
                     }
                     logModelResponse(response, model, conversationId, attempt, startedAt, content);
+                    if (circuitBreaker != null) circuitBreaker.recordSuccess(model);
                     return content;
                 } catch (RuntimeException exception) {
                     boolean retryable = logModelError(exception, model, conversationId, attempt, startedAt, modelIndex < models.size() - 1);
+                    if (circuitBreaker != null) circuitBreaker.recordFailure(model);
                     if (retryable && attempt < maxAttempts) {
                         sleepBackoff(model, conversationId, attempt);
                     } else if (!retryable) {

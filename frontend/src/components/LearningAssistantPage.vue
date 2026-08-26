@@ -250,7 +250,7 @@ async function send(content) {
   const requestId = ++activeRequestId
   error.value = ''
   messages.value.push({ id: createUuid(), role: 'user', content: text, createdAt: new Date().toISOString(), streaming: false })
-  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, retrieving: false, createdAt: new Date().toISOString() })
+  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, retrieving: false, createdAt: new Date().toISOString(), streamId: null, lastEventId: 0, interrupted: false, _aborted: false, _needsReset: false, prompt: text })
   messages.value.push(assistant)
   try {
     const response = await streamMessage(activeSessionId.value, {
@@ -287,44 +287,102 @@ async function send(content) {
 function streamMessage(sessionId, payload, assistant) {
   return new Promise((resolve, reject) => {
     let settled = false
-    const close = streamLearningMessage(sessionId, payload, (type, data) => {
-      if (settled) return
-      if (type === 'token') {
-        assistant.retrieving = false
-        assistant.content += data.text || ''
-      } else if (type === 'source') {
-        assistant.sources.push(data)
-      } else if (type === 'tool_call_start') {
-        assistant.retrieving = true
-      } else if (type === 'tool_call_result') {
-        assistant.retrieving = false
-      } else if (type === 'check') {
-        pendingCheck.value = data
-      } else if (type === 'practice') {
-        pendingPractice.value = data
-      } else if (type === 'done') {
-        settled = true
-        if (closeStream.value?.close === close) closeStream.value = null
-        resolve(data.response || {})
-      } else if (type === 'error') {
-        settled = true
-        if (closeStream.value?.close === close) closeStream.value = null
-        reject(data.apiError || Object.assign(new Error(data.message || '学习助手回答失败。'), {
-          status: data.status || null,
-          requestId: data.requestId || ''
-        }))
-      }
-    })
-    closeStream.value = {
-      close,
-      cancel() {
+    let retries = 0
+    const MAX_AUTO_RETRIES = 1
+    let activeClose = null
+    let retryTimer = null
+    function open() {
+      const close = streamLearningMessage(sessionId, payload, (type, data, meta) => {
+        if (meta?.seq != null) assistant.lastEventId = meta.seq
+        if (meta?.streamId) assistant.streamId = meta.streamId
         if (settled) return
-        settled = true
-        close()
-        reject(new DOMException('请求已停止', 'AbortError'))
+        if (type === 'token') {
+          assistant.interrupted = false
+          assistant.retrieving = false
+          assistant.content += data.text || ''
+        } else if (type === 'source') {
+          assistant.sources.push(data)
+        } else if (type === 'tool_call_start') {
+          assistant.retrieving = true
+        } else if (type === 'tool_call_result') {
+          assistant.retrieving = false
+        } else if (type === 'stream_init') {
+          // 重建重生成(真实失败后的重试)以完整新答案替换旧半截, 避免重复拼接。
+          if (assistant._needsReset) {
+            assistant.content = ''
+            assistant.lastEventId = 0
+            assistant._needsReset = false
+          }
+        } else if (type === 'check') {
+          pendingCheck.value = data
+        } else if (type === 'practice') {
+          pendingPractice.value = data
+        } else if (type === 'done') {
+          settled = true
+          assistant.interrupted = false
+          if (closeStream.value?.close === activeClose) closeStream.value = null
+          resolve(data.response || {})
+        } else if (type === 'error') {
+          const canRetry = data.retryable && retries < MAX_AUTO_RETRIES && !assistant._aborted
+          if (canRetry) {
+            retries += 1
+            assistant.interrupted = true
+            assistant.retrieving = false
+            assistant.error = ''
+            if (closeStream.value?.close === activeClose) closeStream.value = null
+            if (!data.synthetic) {
+              // 服务端真实生成失败: 会话已重建, 重连须从 seq=0 重放新答案并清空旧半截。
+              assistant._needsReset = true
+              assistant.lastEventId = 0
+            }
+            // 连接中断(synthetic)则保留 streamId / lastEventId / 半截内容, 由服务端断点续传。
+            retryTimer = window.setTimeout(() => {
+              retryTimer = null
+              if (settled || assistant._aborted) return
+              open()
+            }, 900)
+            return
+          }
+          settled = true
+          if (closeStream.value?.close === activeClose) closeStream.value = null
+          reject(data.apiError || Object.assign(new Error(data.message || '学习助手回答失败。'), {
+            status: data.status || null,
+            requestId: data.requestId || ''
+          }))
+        }
+      }, {
+        streamId: assistant.streamId,
+        lastEventId: assistant.lastEventId
+      })
+      activeClose = close
+      closeStream.value = {
+        close,
+        cancel() {
+          if (settled) return
+          settled = true
+          assistant._aborted = true
+          if (retryTimer) window.clearTimeout(retryTimer)
+          close()
+          reject(new DOMException('请求已停止', 'AbortError'))
+        }
       }
     }
+    open()
   })
+}
+
+async function regenerate(assistant) {
+  if (loading.value || assistant.streaming) return
+  assistant._aborted = true
+  cancelLocalStream()
+  // 移除该助手消息及其前面的用户消息,用原问题以全新 clientRequestId 重新发起。
+  const index = messages.value.indexOf(assistant)
+  if (index > 0 && messages.value[index - 1]?.role === 'user') {
+    messages.value.splice(index - 1, 2)
+  } else {
+    messages.value = messages.value.filter(message => message !== assistant)
+  }
+  await send(assistant.prompt || '')
 }
 
 async function stop() {
@@ -493,7 +551,16 @@ function closeSourceOnPointerMove(event) {
             </section>
             <div v-if="error" class="learning-empty-error" role="alert"><strong>暂时无法打开学习空间</strong><span>{{ error }}</span><button type="button" @click="loadSessions">重试</button></div>
           </div>
-          <ChatMessage v-for="message in messages" :key="message.id" :message="message" :streaming="message.streaming" />
+          <template v-for="message in messages" :key="message.id">
+            <ChatMessage :message="message" :streaming="message.streaming" />
+            <div v-if="message.role === 'assistant' && message.interrupted && message.streaming" class="stream-recovery hint" role="status">
+              回答中断,正在自动恢复…
+            </div>
+            <div v-else-if="message.role === 'assistant' && (message.error || message.interrupted) && !message.streaming" class="stream-recovery">
+              <span>{{ message.error || '回答未能完成。' }}</span>
+              <button type="button" class="stream-regenerate" :disabled="loading" @click="regenerate(message)">重新生成</button>
+            </div>
+          </template>
         </section>
         <div v-if="error && messages.length" class="learning-assistant-error" role="alert"><span>{{ error }}</span></div>
          <footer class="learning-input-bar">
@@ -551,3 +618,43 @@ function closeSourceOnPointerMove(event) {
       </div>
   </main>
 </template>
+
+<style scoped>
+.stream-recovery {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.stream-recovery.hint {
+  color: var(--color-text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--color-background-tertiary, #f1f5f9) 80%, transparent);
+  border: 1px solid var(--color-border-tertiary, rgba(0, 0, 0, 0.08));
+}
+.stream-recovery:not(.hint) {
+  color: var(--color-text-primary, #1f2937);
+  background: color-mix(in srgb, var(--color-background-secondary, #fff) 90%, transparent);
+  border: 1px solid var(--color-border-secondary, rgba(0, 0, 0, 0.12));
+}
+.stream-regenerate {
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-secondary, rgba(0, 0, 0, 0.18));
+  background: transparent;
+  color: var(--color-text-primary, #1f2937);
+  cursor: pointer;
+  font-size: 13px;
+}
+.stream-regenerate:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-background-tertiary, #f1f5f9) 70%, transparent);
+}
+.stream-regenerate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+</style>
