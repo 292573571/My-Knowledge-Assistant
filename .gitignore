@@ -24,6 +24,7 @@ deploy/*
 !deploy/release-local.sh
 !deploy/deploy-shihai
 !deploy/migrate-zhihai-to-shihai.sh
+!deploy/install-redis.sh
 scripts/
 docker-compose.yml
 
