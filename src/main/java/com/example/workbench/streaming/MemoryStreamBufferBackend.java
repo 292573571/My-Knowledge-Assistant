@@ -52,8 +52,8 @@ public class MemoryStreamBufferBackend implements StreamBufferBackend {
     }
 
     @Override
-    public void createSession(String streamId) {
-        sessions.computeIfAbsent(streamId, key -> new SessionData());
+    public void createSession(String streamId, Long userId) {
+        sessions.computeIfAbsent(streamId, key -> new SessionData()).userId = userId;
     }
 
     @Override
@@ -69,7 +69,7 @@ public class MemoryStreamBufferBackend implements StreamBufferBackend {
         if (data == null) {
             return null;
         }
-        return new SessionState(data.status, data.terminalSeq);
+        return new SessionState(data.status, data.terminalSeq, data.userId);
     }
 
     @Override
@@ -86,5 +86,6 @@ public class MemoryStreamBufferBackend implements StreamBufferBackend {
         private final List<StreamChunk> chunks = new ArrayList<>();
         private volatile StreamSession.Status status = StreamSession.Status.RUNNING;
         private volatile long terminalSeq = 0L;
+        private volatile Long userId = null;
     }
 }

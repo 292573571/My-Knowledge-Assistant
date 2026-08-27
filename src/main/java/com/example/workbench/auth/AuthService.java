@@ -35,7 +35,7 @@ public class AuthService {
             AppUserRepository userRepository,
             UserSessionRepository sessionRepository,
             EmailVerificationService emailVerificationService,
-            @Value("${app.auth.session-hours:168}") long sessionHours
+            @Value("${app.auth.session-hours:24}") long sessionHours
     ) {
         this(userRepository, sessionRepository, emailVerificationService, sessionHours, null, 10, 10);
     }
@@ -45,7 +45,7 @@ public class AuthService {
             AppUserRepository userRepository,
             UserSessionRepository sessionRepository,
             EmailVerificationService emailVerificationService,
-            @Value("${app.auth.session-hours:168}") long sessionHours,
+            @Value("${app.auth.session-hours:24}") long sessionHours,
             RateLimiter rateLimiter,
             @Value("${app.rate-limit.login-per-ip:10}") int loginPerIp,
             @Value("${app.rate-limit.login-per-account:10}") int loginPerAccount
@@ -117,12 +117,7 @@ public class AuthService {
 
         String hash = tokenHash(token);
         UserSession session = sessionRepository.findByTokenHash(hash)
-                .or(() -> sessionRepository.findByLegacyToken(token))
                 .orElseThrow(() -> new InvalidCredentialsException("invalid or expired session"));
-        if (session.getTokenHash() == null) {
-            session.migrateTokenHash(hash);
-            sessionRepository.save(session);
-        }
         if (session.getExpiresAt().isBefore(Instant.now())) {
             throw new InvalidCredentialsException("invalid or expired session");
         }
@@ -136,7 +131,6 @@ public class AuthService {
     public void logout(String token) {
         if (token != null && !token.isBlank()) {
             sessionRepository.deleteByTokenHash(tokenHash(token));
-            sessionRepository.deleteByLegacyToken(token);
             log.info("User logged out");
         }
     }

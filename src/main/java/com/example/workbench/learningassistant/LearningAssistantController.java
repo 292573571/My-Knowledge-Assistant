@@ -162,11 +162,11 @@ public class LearningAssistantController {
         String streamId = resolveStreamId(requestStreamId, request);
         long resumeSeq = parseLastEventId(lastEventIdHeader);
 
-        StreamSession session = streamStore.get(streamId);
+        StreamSession session = streamStore.get(streamId, user.getId());
         boolean owner = false;
         if (session == null || session.status() == StreamSession.Status.FAILED) {
             streamStore.remove(streamId);
-            session = streamStore.create(streamId);
+            session = streamStore.create(streamId, user.getId());
             owner = true;
         }
 

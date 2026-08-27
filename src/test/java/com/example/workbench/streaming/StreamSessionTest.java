@@ -12,7 +12,7 @@ class StreamSessionTest {
 
     private static StreamSession newSession(String id) {
         MemoryStreamBufferBackend backend = new MemoryStreamBufferBackend();
-        backend.createSession(id);
+        backend.createSession(id, 1L);
         return new StreamSession(id, backend);
     }
 

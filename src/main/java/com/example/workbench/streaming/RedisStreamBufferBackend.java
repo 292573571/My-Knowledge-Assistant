@@ -103,12 +103,13 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
     }
 
     @Override
-    public void createSession(String streamId) {
+    public void createSession(String streamId, Long userId) {
         try {
             redis.delete(List.of(seqKey(streamId), chunksKey(streamId), metaKey(streamId)));
             redis.opsForHash().putAll(metaKey(streamId), Map.of(
                     "status", StreamSession.Status.RUNNING.name(),
-                    "terminalSeq", "0"));
+                    "terminalSeq", "0",
+                    "userId", userId == null ? "" : userId.toString()));
             redis.expire(metaKey(streamId), ttl);
         } catch (RuntimeException exception) {
             log.warn("流式会话初始化 Redis 失败 streamId={} error={}", streamId, exception.getMessage());
@@ -137,7 +138,8 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
                 return null;
             }
             Object terminalSeq = redis.opsForHash().get(metaKey(streamId), "terminalSeq");
-            return new SessionState(StreamSession.Status.valueOf(status.toString()), parseLong(terminalSeq));
+            Object userId = redis.opsForHash().get(metaKey(streamId), "userId");
+            return new SessionState(StreamSession.Status.valueOf(status.toString()), parseLong(terminalSeq), parseLongOrNull(userId));
         } catch (RuntimeException exception) {
             log.warn("流式会话状态读取 Redis 失败 streamId={} error={}", streamId, exception.getMessage());
             return null;
@@ -217,6 +219,17 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
             return Long.parseLong(value.toString());
         } catch (NumberFormatException exception) {
             return 0L;
+        }
+    }
+
+    private static Long parseLongOrNull(Object value) {
+        if (value == null || value.toString().isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException exception) {
+            return null;
         }
     }
 

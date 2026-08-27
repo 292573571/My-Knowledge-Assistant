@@ -26,8 +26,8 @@ public interface StreamBufferBackend {
     /** 读取序号大于 {@code fromSeq} 的片段,按序号升序返回。 */
     List<StreamChunk> readChunks(String streamId, long fromSeq);
 
-    /** 创建会话元数据,状态置为 {@link StreamSession.Status#RUNNING}。 */
-    void createSession(String streamId);
+    /** 创建会话元数据,状态置为 {@link StreamSession.Status#RUNNING},并绑定创建者 userId 防越权。 */
+    void createSession(String streamId, Long userId);
 
     /** 写入终态(DONE / FAILED)与终态片段。 */
     void saveTerminal(String streamId, StreamSession.Status status, StreamChunk terminal);
@@ -53,7 +53,8 @@ public interface StreamBufferBackend {
      *
      * @param status       会话状态
      * @param terminalSeq  终态片段的序号,未终结时为 0
+     * @param userId       创建者用户 ID,用于越权校验;旧会话(升级前创建)可能为 {@code null}
      */
-    record SessionState(StreamSession.Status status, long terminalSeq) {
+    record SessionState(StreamSession.Status status, long terminalSeq, Long userId) {
     }
 }
