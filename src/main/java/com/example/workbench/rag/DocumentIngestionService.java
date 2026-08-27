@@ -49,6 +49,7 @@ public class DocumentIngestionService {
     // 解析与落盘等慢速 IO 在锁外进行，避免大文件解析期间串行阻塞其他摄入操作。
     private final ReentrantLock ingestionLock = new ReentrantLock();
     private final IngestionPathResolver ingestionPathResolver;
+    private final long maxFileBytes;
 
     /**
      * 注入异步任务批次产物存储。
@@ -71,9 +72,10 @@ public class DocumentIngestionService {
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
-            @Value("${workbench.pdf.batch-pages:50}") int pdfBatchPages
+            @Value("${workbench.pdf.batch-pages:50}") int pdfBatchPages,
+            @Value("${app.ingestion.max-file-bytes:52428800}") long maxFileBytes
     ) {
-        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY, pdfBatchPages);
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, DEFAULT_DOCS_DIRECTORY, pdfBatchPages, maxFileBytes);
     }
 
     DocumentIngestionService(
@@ -83,7 +85,7 @@ public class DocumentIngestionService {
             DocumentChunkerRouter documentChunkerRouter,
             Path docsDirectory
     ) {
-        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, docsDirectory, 50);
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, docsDirectory, 50, 52428800L);
     }
 
     DocumentIngestionService(
@@ -94,12 +96,25 @@ public class DocumentIngestionService {
             Path docsDirectory,
             int pdfBatchPages
     ) {
+        this(vectorStore, documentIndexStore, documentParserRouter, documentChunkerRouter, docsDirectory, pdfBatchPages, 52428800L);
+    }
+
+    DocumentIngestionService(
+            VectorStore vectorStore,
+            DocumentIndexStore documentIndexStore,
+            DocumentParserRouter documentParserRouter,
+            DocumentChunkerRouter documentChunkerRouter,
+            Path docsDirectory,
+            int pdfBatchPages,
+            long maxFileBytes
+    ) {
         this.vectorStore = vectorStore;
         this.documentIndexStore = documentIndexStore;
         this.documentParserRouter = documentParserRouter;
         this.documentChunkerRouter = documentChunkerRouter;
         this.docsDirectory = docsDirectory.toAbsolutePath().normalize();
         this.pdfBatchPages = Math.max(1, pdfBatchPages);
+        this.maxFileBytes = maxFileBytes;
         this.ingestionPathResolver = new IngestionPathResolver(this.docsDirectory);
     }
 
@@ -534,7 +549,7 @@ public class DocumentIngestionService {
                     entry.fileName(),
                      entry.path(),
                      entry.category(),
-                     documentParserRouter.parse(entry.fileName(), Files.readAllBytes(realDocumentPath)).content(),
+                     documentParserRouter.parse(entry.fileName(), readBoundedBytes(realDocumentPath)).content(),
                      true
             );
         } catch (java.nio.file.NoSuchFileException exception) {
@@ -593,7 +608,7 @@ public class DocumentIngestionService {
             if (!realSource.startsWith(realDocsDirectory) || !Files.isRegularFile(realSource)) {
                 throw new IllegalArgumentException("文档源文件不可用：" + fileName);
             }
-            return new DocumentSourceFile(fileName, Files.readAllBytes(realSource));
+            return new DocumentSourceFile(fileName, readBoundedBytes(realSource));
         } catch (java.nio.file.NoSuchFileException exception) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档源文件已缺失：" + fileName);
         } catch (IOException exception) {
@@ -1285,7 +1300,7 @@ public class DocumentIngestionService {
     private IngestedFile ingestFile(Path path) {
         try {
             String fileName = path.getFileName().toString();
-            byte[] sourceContent = Files.readAllBytes(path);
+            byte[] sourceContent = readBoundedBytes(path);
             ParsedDocument parsedDocument = documentParserRouter.parse(fileName, sourceContent);
             String normalizedContent = parsedDocument.content();
             if (normalizedContent.isEmpty()) {
@@ -1364,7 +1379,7 @@ public class DocumentIngestionService {
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
                                               String taskId, BiConsumer<String, Integer> progress) {
         try {
-            byte[] sourceContent = Files.readAllBytes(path);
+            byte[] sourceContent = readBoundedBytes(path);
             progress.accept(ingestionPathResolver.isImageDocument(originalFileName) ? "OCR" : "PARSING", 25);
             DocumentParser parser = documentParserRouter.parserFor(originalFileName);
             boolean pdf = originalFileName.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
@@ -1438,5 +1453,15 @@ public class DocumentIngestionService {
         private int chunkCount() {
             return documents.size();
         }
+    }
+
+    /** 读取文件前校验大小,防止超大文件导致 OOM。 */
+    private byte[] readBoundedBytes(Path path) throws IOException {
+        long size = Files.size(path);
+        if (size > maxFileBytes) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "文件过大,无法处理: " + path.getFileName() + " (" + size + " bytes > " + maxFileBytes + " limit)");
+        }
+        return Files.readAllBytes(path);
     }
 }

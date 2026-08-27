@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AiModelService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiModelService.class);
 
     private final AiModelRepository aiModelRepository;
     private final AdminAuthorizationService adminAuthorizationService;
@@ -264,8 +268,10 @@ public class AiModelService {
                     continue;
                 }
                 if (response.statusCode() != 200) {
+                    String body = response.body();
+                    log.debug("模型连通测试失败 url={} status={} body={}", currentUri, response.statusCode(), body);
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "连接测试失败，HTTP " + response.statusCode() + ": " + response.body());
+                            "连接测试失败，HTTP " + response.statusCode() + ": " + truncateBody(body));
                 }
                 return;
             }
@@ -367,5 +373,14 @@ public class AiModelService {
 
     private String normalizeFallback(String value) {
         return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    /** 截断响应体,避免将大段或含敏感信息的 API 响应回显给前端用户。 */
+    private static String truncateBody(String body) {
+        if (body == null) {
+            return "";
+        }
+        int max = 500;
+        return body.length() > max ? body.substring(0, max) + "..." : body;
     }
 }

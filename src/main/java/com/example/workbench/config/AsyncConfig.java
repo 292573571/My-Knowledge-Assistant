@@ -34,9 +34,12 @@ public class AsyncConfig {
         executor.setMaxPoolSize(max);
         executor.setQueueCapacity(queue);
         executor.setThreadNamePrefix(prefix + "-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        // 饱和时由调用线程自行执行,提供背压而非静默丢弃任务。
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setTaskDecorator(new MdcTaskDecorator());
-        executor.setWaitForTasksToCompleteOnShutdown(false);
+        // 优雅关机:等待在途任务完成,最多 30 秒。
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
         executor.initialize();
         return executor;
     }
