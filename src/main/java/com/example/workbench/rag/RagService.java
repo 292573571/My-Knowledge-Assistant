@@ -1690,26 +1690,27 @@ public class RagService {
 
     private List<RagSource> toRagSources(List<SourceDocument> sources) {
         List<DocumentIndexEntry> indexedDocuments = documentIngestionService.listIndexedDocuments();
-        return sources.stream()
-                .map(source -> {
-                    String displayName = displayNameResolver == null
-                            ? source.fileName()
-                            : displayNameResolver.resolve(source, indexedDocuments);
-                    log.info("RAG citation resolved documentId={} workspaceId={} rawFile={} rawSource={} rawPath={} displayFile={} indexedDocuments={}",
-                            source.documentId(), source.workspaceId(), source.fileName(), source.source(), source.path(),
-                            displayName, indexedDocuments.size());
-                    return new RagSource(
-                            displayName,
-                            source.chunkIndex(),
-                            snippet(source.content()),
-                            source.score(),
-                            source.headingPath(),
-                            source.path(),
-                            source.pageNumber() > 0 ? source.pageNumber() : null
-                    );
-                })
-                .distinct()
-                .toList();
+        List<String> displayNames = displayNameResolver == null
+                ? sources.stream().map(SourceDocument::fileName).toList()
+                : displayNameResolver.resolveMany(sources, indexedDocuments);
+        List<RagSource> ragSources = new ArrayList<>(sources.size());
+        for (int i = 0; i < sources.size(); i++) {
+            SourceDocument source = sources.get(i);
+            String displayName = displayNames.get(i);
+            log.info("RAG citation resolved documentId={} workspaceId={} rawFile={} rawSource={} rawPath={} displayFile={} indexedDocuments={}",
+                    source.documentId(), source.workspaceId(), source.fileName(), source.source(), source.path(),
+                    displayName, indexedDocuments.size());
+            ragSources.add(new RagSource(
+                    displayName,
+                    source.chunkIndex(),
+                    snippet(source.content()),
+                    source.score(),
+                    source.headingPath(),
+                    source.path(),
+                    source.pageNumber() > 0 ? source.pageNumber() : null
+            ));
+        }
+        return ragSources.stream().distinct().toList();
     }
 
     String originalSourceFileName(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {

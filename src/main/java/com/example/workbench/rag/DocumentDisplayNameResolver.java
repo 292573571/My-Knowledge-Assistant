@@ -1,7 +1,9 @@
 package com.example.workbench.rag;
 
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,6 +34,33 @@ public class DocumentDisplayNameResolver {
     }
 
     public String resolve(SourceDocument source, List<DocumentIndexEntry> indexedDocuments) {
+        String workspaceId = value(source.workspaceId());
+        List<DocumentTaskEntity> tasks = taskRepository.findByWorkspaceIdAndTypeOrderByCreatedAtDesc(
+                workspaceId, DocumentTaskType.UPLOAD);
+        return resolveWithTasks(source, indexedDocuments, tasks);
+    }
+
+    /**
+     * 批量解析多个来源的展示名。同一 workspace 的任务列表只查询一次(消除逐来源 N+1),
+     * 后续每个来源在内存中匹配。返回顺序与输入 {@code sources} 一致。
+     */
+    public List<String> resolveMany(List<SourceDocument> sources, List<DocumentIndexEntry> indexedDocuments) {
+        if (sources == null || sources.isEmpty()) {
+            return List.of();
+        }
+        Map<String, List<DocumentTaskEntity>> tasksByWorkspace = new HashMap<>();
+        List<String> result = new ArrayList<>(sources.size());
+        for (SourceDocument source : sources) {
+            String workspaceId = value(source.workspaceId());
+            List<DocumentTaskEntity> tasks = tasksByWorkspace.computeIfAbsent(workspaceId,
+                    key -> taskRepository.findByWorkspaceIdAndTypeOrderByCreatedAtDesc(key, DocumentTaskType.UPLOAD));
+            result.add(resolveWithTasks(source, indexedDocuments, tasks));
+        }
+        return result;
+    }
+
+    private String resolveWithTasks(SourceDocument source, List<DocumentIndexEntry> indexedDocuments,
+            List<DocumentTaskEntity> tasks) {
         if (source == null) return "知识库文档";
         String workspaceId = value(source.workspaceId());
         boolean scopedWorkspace = !workspaceId.isBlank() && !"public-default".equals(workspaceId);
@@ -57,23 +86,24 @@ public class DocumentDisplayNameResolver {
 
         String documentId = value(source.documentId());
         if (!documentId.isBlank()) {
-            String taskName = taskRepository.findFirstByDocumentIdAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
-                            documentId, workspaceId, DocumentTaskType.UPLOAD)
+            String taskName = tasks.stream()
+                    .filter(task -> documentId.equals(task.getDocumentId()))
+                    .filter(task -> !isGeneratedName(task.getFileName()))
+                    .max(Comparator.comparing(task -> task.getCreatedAt() == null ? java.time.Instant.EPOCH : task.getCreatedAt()))
                     .map(DocumentTaskEntity::getFileName)
-                    .filter(name -> !isGeneratedName(name))
                     .orElse(null);
             if (taskName != null) return taskName;
         }
 
-        String taskName = taskRepository.findFirstBySourcePathAndWorkspaceIdAndTypeOrderByCreatedAtDesc(
-                        normalize(source.path()), workspaceId, DocumentTaskType.UPLOAD)
+        String taskName = tasks.stream()
+                .filter(task -> normalize(source.path()).equals(normalize(task.getSourcePath())))
+                .filter(task -> !isGeneratedName(task.getFileName()))
+                .max(Comparator.comparing(task -> task.getCreatedAt() == null ? java.time.Instant.EPOCH : task.getCreatedAt()))
                 .map(DocumentTaskEntity::getFileName)
-                .filter(name -> !isGeneratedName(name))
                 .orElse(null);
         if (taskName != null) return taskName;
 
-        String taskByStorageName = taskRepository.findByWorkspaceIdAndTypeOrderByCreatedAtDesc(
-                        workspaceId, DocumentTaskType.UPLOAD).stream()
+        String taskByStorageName = tasks.stream()
                 .filter(task -> sameStorageFile(source, task.getSourcePath()))
                 .map(DocumentTaskEntity::getFileName)
                 .filter(name -> !isGeneratedName(name))

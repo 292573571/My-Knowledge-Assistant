@@ -1,6 +1,7 @@
 package com.example.workbench.modelconfig;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -42,8 +43,9 @@ public class UserModelConfig {
     @Comment("自定义模型接口地址")
     private String baseUrl;
 
-    @Column(name = "api_key", length = 256)
-    @Comment("自定义模型 API 密钥")
+    @Column(name = "api_key")
+    @Convert(converter = EncryptedStringConverter.class)
+    @Comment("自定义模型 API 密钥(透明加密存储)")
     private String apiKey;
 
     @Column(name = "model", length = 128)

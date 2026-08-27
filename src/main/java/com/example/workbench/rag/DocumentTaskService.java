@@ -9,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import com.example.workbench.pagination.PageResponse;
 import java.util.concurrent.Executor;
@@ -436,18 +439,25 @@ public class DocumentTaskService {
                                    int startPage, int endPage) {
         if (batchRepository == null) return;
         int batchSize = Math.max(1, endPage - startPage + 1);
+        List<DocumentTaskBatchEntity> batches = batchRepository.findByTaskIdOrderByBatchIndex(taskId);
+        Set<String> existingIds = batches.stream()
+                .map(DocumentTaskBatchEntity::getBatchId)
+                .collect(Collectors.toSet());
         for (int index = 1; index <= total; index++) {
             String batchId = taskId + "-batch-" + index;
-            if (!batchRepository.existsById(batchId)) {
+            if (!existingIds.contains(batchId)) {
                 int plannedStart = (index - 1) * batchSize + 1;
                 int plannedEnd = Math.min(totalPages, index * batchSize);
                 batchRepository.save(new DocumentTaskBatchEntity(taskId, index, plannedStart, plannedEnd));
             }
         }
-        batchRepository.findById(taskId + "-batch-" + batchIndex).ifPresent(batch -> {
-            batch.start(startPage, endPage);
-            batchRepository.save(batch);
-        });
+        batches.stream()
+                .filter(batch -> batch.getBatchIndex() == batchIndex)
+                .findFirst()
+                .ifPresent(batch -> {
+                    batch.start(startPage, endPage);
+                    batchRepository.save(batch);
+                });
     }
 
     private void failCurrentBatch(DocumentTaskEntity task, String message) {
@@ -480,20 +490,23 @@ public class DocumentTaskService {
     private void persistBatchProgress(String taskId, int batchIndex, int total, int startPage, int endPage,
                                       int chunks) {
         if (batchRepository == null) return;
+        List<DocumentTaskBatchEntity> batches = batchRepository.findByTaskIdOrderByBatchIndex(taskId);
+        Map<Integer, DocumentTaskBatchEntity> byIndex = batches.stream()
+                .collect(Collectors.toMap(DocumentTaskBatchEntity::getBatchIndex, batch -> batch, (a, b) -> a));
         for (int index = 1; index <= total; index++) {
-            String batchId = taskId + "-batch-" + index;
-            if (batchRepository.existsById(batchId)) continue;
+            if (byIndex.containsKey(index)) continue;
             batchRepository.save(new DocumentTaskBatchEntity(taskId, index,
                     index == batchIndex ? startPage : 0, index == batchIndex ? endPage : 0));
         }
-        batchRepository.findById(taskId + "-batch-" + batchIndex).ifPresent(batch -> {
-            int previousChunks = batchRepository.findByTaskIdOrderByBatchIndex(taskId).stream()
+        DocumentTaskBatchEntity batch = byIndex.get(batchIndex);
+        if (batch != null) {
+            int previousChunks = batches.stream()
                     .filter(previous -> previous.getBatchIndex() < batchIndex)
                     .filter(previous -> previous.getStatus() == DocumentTaskBatchStatus.SUCCEEDED)
                     .mapToInt(DocumentTaskBatchEntity::getChunkCount).sum();
             batch.succeed(Math.max(0, chunks - previousChunks));
             batchRepository.save(batch);
-        });
+        }
     }
 
      private void updateRebuildProgress(String taskId, long generation, RebuildProgress progress) {
