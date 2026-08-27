@@ -29,8 +29,8 @@ const dialogRef = ref(null)
 const isOwner = computed(() => props.workspace?.role === 'OWNER')
 const canManageMembers = computed(() => isOwner.value && props.workspace?.type !== 'PERSONAL')
 const isOrg = computed(() => props.workspace?.type === 'ORG')
-const canCreateSubTeam = computed(() => isOrg.value && (canCreateOrg.value || isOwner.value))
-const showCreateTypeSelect = computed(() => canCreatePublic.value || canCreateOrg.value || canCreateSubTeam.value)
+const canCreateSubTeam = computed(() => isOrg.value && (props.canCreateOrg || isOwner.value))
+const showCreateTypeSelect = computed(() => props.canCreatePublic || props.canCreateOrg || canCreateSubTeam.value)
 const creatingUnderOrg = computed(() => isOrg.value && workspaceType.value !== 'ORG')
 
 useDialogFocus(dialogRef, () => emit('close'))
@@ -183,11 +183,11 @@ function formatTime(value) {
       </header>
 
       <form class="workspace-create-row workspace-create-form" @submit.prevent="createWorkspace">
-        <select v-if="showCreateTypeSelect" v-model="workspaceType" aria-label="新空间类型">
-          <option v-if="canCreateOrg" value="ORG">组织（根空间）</option>
-          <option value="TEAM">{{ isOrg ? '团队（本组织下）' : '团队空间' }}</option>
-          <option v-if="canCreatePublic" value="PUBLIC">平台公共知识源</option>
-        </select>
+         <select v-if="showCreateTypeSelect" v-model="workspaceType" aria-label="新空间类型">
+           <option v-if="props.canCreateOrg" value="ORG">组织（根空间）</option>
+           <option value="TEAM">{{ isOrg ? '团队（本组织下）' : '团队空间' }}</option>
+           <option v-if="props.canCreatePublic" value="PUBLIC">平台公共知识源</option>
+         </select>
         <input v-model="teamName" maxlength="80" :placeholder="workspaceType === 'ORG' ? '组织根空间名称' : workspaceType === 'PUBLIC' ? '公共知识源名称' : '新团队空间名称'" aria-label="新空间名称">
         <button type="submit" :disabled="creating || !teamName.trim()">{{ creating ? '创建中' : (workspaceType === 'ORG' ? '创建组织' : workspaceType === 'PUBLIC' ? '创建公共知识源' : '创建团队') }}</button>
         <small v-if="workspaceType === 'ORG'">组织根空间下的文档对其下属所有团队可见，组织成员可 oversight 整个子树。</small>
