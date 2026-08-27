@@ -23,7 +23,7 @@ remote_deploy() {
     local expected_root="$frontend_root"
     local nginx_conf=/etc/nginx/conf.d/zhihai.conf
     if [[ ! -f "$nginx_conf" ]]; then
-      echo "未发现 nginx 配置: $nginx_conf，跳过 root 修正" >&2
+      echo "未发现 nginx 配置: ${nginx_conf}，跳过 root 修正" >&2
       return 0
     fi
     if grep -Eq "^[[:space:]]*root[[:space:]]+${expected_root}/?[[:space:]]*;" "$nginx_conf"; then
@@ -136,7 +136,7 @@ remote_deploy() {
     if curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null; then
       activated=false
       cleanup_archive
-      echo "服务器本地健康检查成功: $revision，等待公网健康检查后清理旧版本"
+      echo "服务器本地健康检查成功: ${revision}，等待公网健康检查后清理旧版本"
       exit 0
     fi
 
@@ -147,7 +147,7 @@ remote_deploy() {
     sleep "$startup_interval_seconds"
   done
 
-  echo "健康检查超时: $health_url，等待时间=${startup_attempts}x${startup_interval_seconds}s" >&2
+  echo "健康检查超时: ${health_url}，等待时间=${startup_attempts}x${startup_interval_seconds}s" >&2
   exit 1
 }
 
@@ -370,7 +370,7 @@ EOF
       ssh "${ssh_options[@]}" "$remote" \
         "sudo -n '$remote_deploy_script' cleanup '$revision'"
       echo "公网健康检查成功: $public_health_url"
-      echo "发版成功: $revision，旧版本已清理"
+      echo "发版成功: ${revision}，旧版本已清理"
       exit 0
     fi
     sleep "$public_health_interval"
