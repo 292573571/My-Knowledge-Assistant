@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.pagination.PageResponse;
 
 @Service
 public class EvalImportStorage {
@@ -44,6 +45,10 @@ public class EvalImportStorage {
     @Transactional(readOnly = true)
     public List<EvalImportResponse> list(AppUser user) {
         return repository.findAllByOwnerIdOrderByCreatedAtDesc(user.getId()).stream().map(this::response).toList();
+    }
+
+    public PageResponse<EvalImportResponse> page(AppUser user, int page, int size) {
+        return PageResponse.of(list(user), page, size);
     }
 
     @Transactional(readOnly = true)

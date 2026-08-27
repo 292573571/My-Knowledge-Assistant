@@ -43,6 +43,10 @@ public class ChatMessageEntity {
     @Comment("工具调用 JSON")
     private String toolCallsJson;
 
+    @Column(name = "client_request_id", length = 100)
+    @Comment("客户端请求幂等标识")
+    private String clientRequestId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Comment("创建时间")
     private Instant createdAt;
@@ -51,11 +55,17 @@ public class ChatMessageEntity {
     }
 
     public ChatMessageEntity(ChatConversation conversation, String role, String content, String sourcesJson, String toolCallsJson) {
+        this(conversation, role, content, sourcesJson, toolCallsJson, null);
+    }
+
+    public ChatMessageEntity(ChatConversation conversation, String role, String content, String sourcesJson,
+                             String toolCallsJson, String clientRequestId) {
         this.conversation = conversation;
         this.role = role;
         this.content = content;
         this.sourcesJson = sourcesJson;
         this.toolCallsJson = toolCallsJson;
+        this.clientRequestId = clientRequestId;
         this.createdAt = Instant.now();
     }
 
@@ -65,4 +75,5 @@ public class ChatMessageEntity {
     public String getSourcesJson() { return sourcesJson; }
     public String getToolCallsJson() { return toolCallsJson; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getClientRequestId() { return clientRequestId; }
 }

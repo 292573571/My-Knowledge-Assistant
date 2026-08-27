@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import com.example.workbench.pagination.PageResponse;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -214,6 +215,10 @@ public class LearningRecordService {
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to list learning records", exception);
         }
+    }
+
+    public PageResponse<LearningRecordSummary> page(AppUser user, String workspaceId, int page, int size) {
+        return PageResponse.of(list(user, workspaceId), page, size);
     }
 
     public List<TeachingTopicProgress> teachingProgress(AppUser user) {

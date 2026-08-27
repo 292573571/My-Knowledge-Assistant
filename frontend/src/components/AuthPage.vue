@@ -118,5 +118,8 @@ function switchMode(nextMode) {
         {{ mode === 'login' ? '没有账号？注册' : '已有账号？登录' }}
       </button>
     </form>
+    <footer class="site-footer">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">鄂ICP备2026046031号</a>
+    </footer>
   </main>
 </template>

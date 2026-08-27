@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.pagination.PageResponse;
 
 @Service
 public class EvalRunStorage {
@@ -36,6 +37,10 @@ public class EvalRunStorage {
     @Transactional(readOnly = true)
     public List<EvalRunEntity> list(AppUser owner) {
         return runRepository.findAllByOwnerIdOrderByCreatedAtDesc(owner.getId());
+    }
+
+    public PageResponse<EvalRunEntity> page(AppUser owner, int page, int size) {
+        return PageResponse.of(list(owner), page, size);
     }
 
     @Transactional(readOnly = true)

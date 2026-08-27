@@ -155,9 +155,13 @@ public class WorkspaceController {
     }
 
     @GetMapping("/{workspaceId}/audit-events")
-    public List<AuditEventResponse> auditEvents(@PathVariable String workspaceId, HttpServletRequest request) {
+    public Object auditEvents(@PathVariable String workspaceId,
+                              @org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                              @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                              HttpServletRequest request) {
         workspaceService.ownerAccess(user(request), workspaceId);
-        return auditService.list(workspaceId);
+        List<AuditEventResponse> events = auditService.list(workspaceId);
+        return page == null && size == null ? events : com.example.workbench.pagination.PageResponse.of(events, page, size);
     }
 
     private AppUser user(HttpServletRequest request) {

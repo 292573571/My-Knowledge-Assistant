@@ -3,6 +3,8 @@ package com.example.workbench.rag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.when;
 
 import com.example.workbench.workspace.DocumentVisibility;
@@ -32,6 +34,8 @@ class DocumentTaskServiceTest {
         });
         when(repository.findById("task-1")).thenReturn(Optional.of(task));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.succeed(anyString(), any(), any(), anyString(), anyLong(), any(), any()))
+                .thenAnswer(invocation -> { task.succeed(invocation.getArgument(5)); return 1; });
         when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new WorkspaceDocumentUploadResponse(
                         "document-1", "guide.pdf", "docs/workspaces/team-1/guide.pdf", 3,
@@ -56,6 +60,11 @@ class DocumentTaskServiceTest {
         });
         when(repository.findById("task-1")).thenReturn(Optional.of(task));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.fail(anyString(), any(), anyString(), anyLong(), anyString(), anyBoolean(), any(),
+                anyString(), any(), any())).thenAnswer(invocation -> {
+                    task.fail(invocation.getArgument(4), invocation.getArgument(5));
+                    return 1;
+                });
         when(ingestionService.indexWorkspaceUpload(any(), anyString(), anyString(), anyString(), any()))
                 .thenThrow(new IllegalStateException("Failed to write documents to Chroma"));
         DocumentTaskService service = service(repository, ingestionService);
@@ -97,6 +106,8 @@ class DocumentTaskServiceTest {
         });
         when(repository.findById("rebuild-1")).thenReturn(Optional.of(task));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.succeed(anyString(), any(), any(), anyString(), anyLong(), any(), any()))
+                .thenAnswer(invocation -> { task.succeed(invocation.getArgument(5)); return 1; });
         when(ingestionService.rebuildDocuments(any(), Mockito.<Consumer<RebuildProgress>>any()))
                 .thenAnswer(invocation -> {
                     Consumer<RebuildProgress> progress = invocation.getArgument(1);

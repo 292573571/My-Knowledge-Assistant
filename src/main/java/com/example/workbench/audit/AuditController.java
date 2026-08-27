@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.pagination.PageResponse;
 
 @RestController
 @RequestMapping("/api/audit-events")
@@ -26,9 +27,12 @@ public class AuditController {
     }
 
     @GetMapping
-    public List<AuditEventResponse> list(HttpServletRequest request) {
+    public Object list(@org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                       @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                       HttpServletRequest request) {
         adminAuthorizationService.requireAdmin(user(request));
-        return auditService.listAll();
+        List<AuditEventResponse> events = auditService.listAll();
+        return page == null && size == null ? events : PageResponse.of(events, page, size);
     }
 
     @DeleteMapping

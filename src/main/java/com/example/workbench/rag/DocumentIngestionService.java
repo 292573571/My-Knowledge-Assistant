@@ -193,7 +193,7 @@ public class DocumentIngestionService {
         )).toList();
         DocumentIndexEntry projectedEntry = new DocumentIndexEntry(
                 documentId, parsed.indexEntry().fileName(), relativePath, scopedHash, projectedDocuments.size(),
-                System.currentTimeMillis(), "FORMAL_NOTE", "INDEXED", ownerUserId, workspaceId, visibility
+                java.time.Instant.now(), "FORMAL_NOTE", "INDEXED", ownerUserId, workspaceId, visibility
         );
 
         ingestionLock.lock();
@@ -437,7 +437,7 @@ public class DocumentIngestionService {
             vectorStore.deleteByIds(streamedIds);
             documents.removeIf(document -> streamedIds.contains(document.id()));
             if (previousEntry == null) {
-                documentIndexStore.delete(ingested.indexEntry().documentId());
+                documentIndexStore.delete(ingested.indexEntry().documentId(), ingested.indexEntry().workspaceId());
             } else {
                 documentIndexStore.upsertAll(List.of(previousEntry));
             }
@@ -460,7 +460,7 @@ public class DocumentIngestionService {
         documentIndexStore.list().forEach(entry -> latestByPath.merge(
                 entry.path().replace('\\', '/'),
                 entry,
-                (current, candidate) -> current.ingestedAt() >= candidate.ingestedAt() ? current : candidate
+                 (current, candidate) -> current.ingestedAt().compareTo(candidate.ingestedAt()) >= 0 ? current : candidate
         ));
         return latestByPath.values().stream()
                 .filter(entry -> !isLearningRecordEntry(entry))
@@ -1041,7 +1041,7 @@ public class DocumentIngestionService {
         List<String> ids = chunkIds(entry);
         vectorStore.deleteByIds(ids);
         documents.removeIf(document -> document.documentId().equals(entry.documentId()));
-        documentIndexStore.delete(entry.documentId());
+        documentIndexStore.delete(entry.documentId(), entry.workspaceId());
         return ids.size();
     }
 
@@ -1159,7 +1159,7 @@ public class DocumentIngestionService {
                 );
                 vectorStore.deleteByIds(chunkIds(existingEntry));
                 documents.removeIf(document -> document.documentId().equals(existingEntry.documentId()));
-                documentIndexStore.delete(existingEntry.documentId());
+                documentIndexStore.delete(existingEntry.documentId(), existingEntry.workspaceId());
             }
 
             documents.removeIf(document -> document.documentId().equals(ingestedFile.indexEntry().documentId()));
@@ -1330,7 +1330,7 @@ public class DocumentIngestionService {
                     relativePath,
                     contentHash,
                     chunks.size(),
-                    System.currentTimeMillis(),
+                     java.time.Instant.now(),
                     category,
                     "INDEXED",
                     ownerUserId
@@ -1416,7 +1416,7 @@ public class DocumentIngestionService {
                     documentId, originalFileName, contentHash, chunk, "SOURCE", access.userId(),
                     access.workspaceId(), visibility)).toList();
             DocumentIndexEntry entry = new DocumentIndexEntry(
-                    documentId, originalFileName, relativePath, scopedHash, chunks.size(), System.currentTimeMillis(),
+                     documentId, originalFileName, relativePath, scopedHash, chunks.size(), java.time.Instant.now(),
                     "SOURCE", "INDEXED", access.userId(), access.workspaceId(), visibility
             );
             return new IngestedFile(entry, sourceDocuments);

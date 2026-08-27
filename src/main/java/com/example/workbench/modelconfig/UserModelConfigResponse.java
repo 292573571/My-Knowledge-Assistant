@@ -5,8 +5,8 @@ import java.util.List;
 public record UserModelConfigResponse(
         UserModelMode mode,
         Long modelId,
-        ModelSpec custom,
-        ModelSpec resolved,
+        ModelSpecResponse custom,
+        ModelSpecResponse resolved,
         List<AiModelResponse> poolModels,
         Long defaultModelId,
         Long defaultEmbeddingId,

@@ -20,8 +20,10 @@ function workspaceQuery() {
   return `?workspaceId=${encodeURIComponent(getActiveWorkspaceId())}`
 }
 
-export function fetchLearningSessions() {
-  return request(`/api/learning-assistant/sessions${workspaceQuery()}`, {}, '学习会话加载失败。')
+export function fetchLearningSessions(pagination = null) {
+  const query = workspaceQuery()
+  const suffix = pagination ? `&page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/learning-assistant/sessions${query}${suffix}`, {}, '学习会话加载失败。')
 }
 
 export function createLearningSession({ mode = 'AUTO', userLevel = 'BEGINNER' } = {}) {

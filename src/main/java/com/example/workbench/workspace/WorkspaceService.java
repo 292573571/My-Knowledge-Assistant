@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.pagination.PageResponse;
 
 @Service
 public class WorkspaceService {
@@ -66,6 +67,10 @@ public class WorkspaceService {
                     .forEach(result::add);
         }
         return List.copyOf(result);
+    }
+
+    public PageResponse<WorkspaceResponse> page(AppUser user, int page, int size) {
+        return PageResponse.of(list(user), page, size);
     }
 
     /**
@@ -119,18 +124,27 @@ public class WorkspaceService {
 
     @Transactional
     public WorkspaceResponse createTeam(AppUser owner, CreateWorkspaceRequest request) {
+        validateTeamName(request.name());
+        if (request.parentId() != null && !request.parentId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "带父级组织的团队必须通过组织层级创建");
+        }
         return create(owner, request.name(), WorkspaceType.TEAM);
     }
 
     @Transactional
     public WorkspaceResponse createTeamUnder(AppUser actor, String parentId, CreateWorkspaceRequest request) {
-        Workspace parent = workspaceRepository.findById(parentId)
+        validateTeamName(request.name());
+        if (parentId == null || parentId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "层级团队必须指定根组织");
+        }
+        String normalizedParentId = parentId.strip();
+        Workspace parent = workspaceRepository.findById(normalizedParentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "上级组织不存在"));
-        if (parent.getType() != WorkspaceType.ORG) {
+        if (parent.getType() != WorkspaceType.ORG || parent.getParent() != null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "团队只能挂在根组织之下");
         }
-        if (!isSuperAdmin(actor)) {
-            WorkspaceMember membership = memberRepository.findByWorkspaceIdAndUserId(parentId, actor.getId())
+        if (!isAdmin(actor)) {
+            WorkspaceMember membership = memberRepository.findByWorkspaceIdAndUserId(normalizedParentId, actor.getId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "只有根组织所有者或超级管理员可以新建团队"));
             if (membership.getRole() != WorkspaceRole.OWNER) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只有根组织所有者或超级管理员可以新建团队");
@@ -140,6 +154,12 @@ public class WorkspaceService {
         workspace.setParent(parent);
         WorkspaceMember membership = memberRepository.save(new WorkspaceMember(workspace, actor, WorkspaceRole.OWNER));
         return response(membership);
+    }
+
+    private void validateTeamName(String name) {
+        if (name == null || name.isBlank() || name.strip().length() > 80) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "团队名称不能为空且不能超过 80 个字符");
+        }
     }
 
     @Transactional
@@ -191,6 +211,17 @@ public class WorkspaceService {
         return memberRepository.findAllByWorkspaceIdOrderByJoinedAtAsc(workspaceId).stream()
                 .map(this::memberResponse)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<WorkspaceMemberResponse> pageMembers(AppUser actor, String workspaceId, int page, int size) {
+        requireMemberOrPublicAdmin(actor, workspaceId);
+        var result = memberRepository.findAllByWorkspaceId(workspaceId,
+                org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "joinedAt")
+                                .and(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "id"))));
+        return new PageResponse<>(result.getContent().stream().map(this::memberResponse).toList(), result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages(), result.hasNext());
     }
 
     @Transactional

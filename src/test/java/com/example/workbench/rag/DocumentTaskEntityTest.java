@@ -60,6 +60,19 @@ class DocumentTaskEntityTest {
         assertThat(task.getErrorMessage()).isNull();
     }
 
+    @Test
+    void rejectsProgressFromAnOldWorkerGeneration() {
+        DocumentTaskEntity task = task();
+        task.start();
+        org.springframework.test.util.ReflectionTestUtils.setField(task, "workerId", "worker-a");
+        long generation = task.getGeneration();
+
+        assertThat(task.ownsLease("worker-a", generation)).isTrue();
+        task.recoverInterruptedExecution();
+        assertThat(task.ownsLease("worker-a", generation)).isFalse();
+        assertThat(task.getGeneration()).isGreaterThan(generation);
+    }
+
     private DocumentTaskEntity task() {
         return new DocumentTaskEntity("task-1", "guide.pdf", "docs/workspaces/team-1/guide.pdf", "request-1",
                 "user-1", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);

@@ -31,9 +31,13 @@ public class ConversationController {
     }
 
     @GetMapping
-    public List<ConversationResponse> list(@RequestParam(required = false) String workspaceId, HttpServletRequest request) {
+    public Object list(@RequestParam(required = false) String workspaceId,
+                       @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
+                       HttpServletRequest request) {
         AppUser user = user(request);
-        return conversationService.list(user, access(user, workspaceId).workspaceId());
+        String resolvedWorkspace = access(user, workspaceId).workspaceId();
+        return page == null && size == null ? conversationService.list(user, resolvedWorkspace)
+                : conversationService.page(user, resolvedWorkspace, page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @PostMapping
@@ -45,10 +49,15 @@ public class ConversationController {
     }
 
     @GetMapping("/{conversationId}/messages")
-    public List<MessageResponse> messages(@PathVariable String conversationId,
-                                          @RequestParam(required = false) String workspaceId, HttpServletRequest request) {
+    public Object messages(@PathVariable String conversationId,
+                           @RequestParam(required = false) String workspaceId,
+                           @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
+                           HttpServletRequest request) {
         AppUser user = user(request);
-        return conversationService.messages(user, access(user, workspaceId).workspaceId(), conversationId);
+        String resolvedWorkspace = access(user, workspaceId).workspaceId();
+        return page == null && size == null ? conversationService.messages(user, resolvedWorkspace, conversationId)
+                : conversationService.pageMessages(user, resolvedWorkspace, conversationId, page == null ? 0 : page,
+                size == null ? 100 : size);
     }
 
     @DeleteMapping("/{conversationId}")

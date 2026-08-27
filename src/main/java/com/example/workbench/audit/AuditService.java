@@ -7,34 +7,65 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class AuditService {
+    private static final Logger log = LoggerFactory.getLogger(AuditService.class);
 
     private final AuditEventRepository repository;
     private final AuditPurgeEventRepository purgeEventRepository;
     private final EntityManager entityManager;
+    private final AuditOutboxService outboxService;
+    private final AuditEventWriter eventWriter;
 
     public AuditService(AuditEventRepository repository, AuditPurgeEventRepository purgeEventRepository,
                         EntityManager entityManager) {
+        this(repository, purgeEventRepository, entityManager, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AuditService(AuditEventRepository repository, AuditPurgeEventRepository purgeEventRepository,
+                        EntityManager entityManager, AuditOutboxService outboxService, AuditEventWriter eventWriter) {
         this.repository = repository;
         this.purgeEventRepository = purgeEventRepository;
         this.entityManager = entityManager;
+        this.outboxService = outboxService;
+        this.eventWriter = eventWriter;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(AppUser actor, String workspaceId, AuditAction action, String resourceType,
                        String resourceId, AuditOutcome outcome, String reasonCode, String requestId) {
         record(actor == null ? "unknown" : actor.getPublicId(), workspaceId, action, resourceType, resourceId,
                 outcome, reasonCode, requestId);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized void record(String actorPublicId, String workspaceId, AuditAction action, String resourceType,
-                                    String resourceId, AuditOutcome outcome, String reasonCode, String requestId) {
-        AuditEvent previous = repository.findTopByOrderByIdDesc();
-        repository.save(new AuditEvent(actorPublicId, workspaceId, action, resourceType, resourceId,
-                outcome, reasonCode, requestId, previous == null ? "GENESIS" : previous.getEventHash()));
+                                     String resourceId, AuditOutcome outcome, String reasonCode, String requestId) {
+        try {
+            if (eventWriter == null) {
+                AuditEvent previous = repository.findTopByOrderByIdDesc();
+                repository.save(new AuditEvent(actorPublicId, workspaceId, action, resourceType, resourceId,
+                        outcome, reasonCode, requestId, previous == null ? "GENESIS" : previous.getEventHash()));
+            } else {
+                eventWriter.write(actorPublicId, workspaceId, action, resourceType, resourceId,
+                        outcome, reasonCode, requestId);
+            }
+        } catch (RuntimeException exception) {
+            if (outboxService != null) {
+                try {
+                    outboxService.enqueue(actorPublicId, workspaceId, action, resourceType, resourceId,
+                            outcome, reasonCode, requestId);
+                } catch (RuntimeException enqueueException) {
+                    log.error("审计写入和补偿入队均失败 action={} resourceType={} reasonType={}", action,
+                            resourceType, enqueueException.getClass().getSimpleName());
+                }
+            } else {
+                log.error("审计写入失败 action={} resourceType={} reasonType={}", action, resourceType,
+                        exception.getClass().getSimpleName());
+            }
+        }
     }
 
     @Transactional(readOnly = true)

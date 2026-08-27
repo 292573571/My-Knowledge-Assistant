@@ -27,6 +27,9 @@ import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import com.example.workbench.pagination.PageResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import java.util.regex.Pattern;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -76,9 +79,18 @@ public class LearningAssistantService {
 
     public List<LearningAssistantSessionResponse> listSessions(AppUser user, String workspaceId) {
         WorkspaceAccessContext access = access(user, workspaceId);
-        return sessionRepository.findByUserIdAndWorkspaceIdOrderByUpdatedAtDesc(user.getId(), access.workspaceId()).stream()
+        return sessionRepository.findByUserIdAndWorkspaceIdOrderByUpdatedAtDescSessionIdDesc(user.getId(), access.workspaceId()).stream()
                 .map(this::summary)
                 .toList();
+    }
+
+    public PageResponse<LearningAssistantSessionResponse> pageSessions(AppUser user, String workspaceId, int page, int size) {
+        WorkspaceAccessContext access = access(user, workspaceId);
+        var result = sessionRepository.findByUserIdAndWorkspaceId(user.getId(), access.workspaceId(),
+                PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
+                        Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by(Sort.Direction.DESC, "sessionId"))));
+        return new PageResponse<>(result.getContent().stream().map(this::summary).toList(), result.getNumber(),
+                result.getSize(), result.getTotalElements(), result.getTotalPages(), result.hasNext());
     }
 
     public LearningAssistantSessionResponse getSession(AppUser user, String sessionId, String workspaceId) {
@@ -108,7 +120,7 @@ public class LearningAssistantService {
             requireRunning(execution);
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
                 String topic = null;
-                conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
+                conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                         request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)),
                         "teaching", request.message());
                 TeachingAgentResult result = teachingService.chat(user, access,
@@ -120,7 +132,7 @@ public class LearningAssistantService {
                 session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
                 session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
                 sessionRepository.save(session);
-                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, "teaching",
+                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
                         result.answer(), result.sources(), result.traces());
                 return LearningAssistantResponse.teaching(result, intent);
             }
@@ -152,7 +164,7 @@ public class LearningAssistantService {
             requireRunning(execution);
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
                 String topic = null;
-                conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
+                conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                         request.message().strip().substring(0, Math.min(request.message().strip().length(), 24)),
                         "teaching", request.message());
                 TeachingAgentResult result = teachingService.streamChat(user, access,
@@ -165,7 +177,7 @@ public class LearningAssistantService {
                 session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
                 session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
                 sessionRepository.save(session);
-                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, "teaching",
+                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
                         result.answer(), result.sources(), result.traces());
                 return LearningAssistantResponse.teaching(result, intent);
             }
@@ -190,9 +202,9 @@ public class LearningAssistantService {
                             new SubmitTeachingCheckRequest(request.workspaceId(), sessionId,
                                     request.checkId(), request.answer()));
                     workspaceService.access(user, access.workspaceId());
-                    conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
+                    conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "理解检查", "teaching", request.answer());
-                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId,
+                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "teaching", result.feedback(), List.of(), List.of());
                     session.touch(LearningMode.REVIEW, result.topic(), result.stage().name(),
                             result.nextAction().name().equals("COMPLETE") ? "COMPLETED" : "ACTIVE");
@@ -210,9 +222,9 @@ public class LearningAssistantService {
                             new SubmitTeachingPracticeRequest(request.workspaceId(), sessionId,
                                     request.practiceId(), request.answer()));
                     workspaceService.access(user, access.workspaceId());
-                    conversationService.recordUserMessage(user, access.workspaceId(), sessionId,
+                    conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "实践练习", "teaching", request.answer());
-                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId,
+                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "teaching", result.feedback(), List.of(), List.of());
                     session.touch(LearningMode.PRACTICE, result.topic(), result.stage().name(),
                             result.nextAction().name().equals("COMPLETE") ? "COMPLETED" : "ACTIVE");
@@ -308,12 +320,15 @@ public class LearningAssistantService {
             return requestCoordinator.replayAfterConflict(session.getSessionId(), requestId,
                     type, requestHash, exception);
         }
+        if ("SUCCEEDED".equals(event.getStatus())) {
+            return requestCoordinator.existing(session.getSessionId(), requestId, type, requestHash);
+        }
         try {
             LearningAssistantResponse response = operation.get();
-            requestCoordinator.succeed(event.getEventId(), response);
+            requestCoordinator.succeed(event.getEventId(), event.getGeneration(), response);
             return response;
         } catch (RuntimeException exception) {
-            requestCoordinator.abandon(event.getEventId());
+            requestCoordinator.abandon(event.getEventId(), event.getGeneration());
             throw exception;
         }
     }

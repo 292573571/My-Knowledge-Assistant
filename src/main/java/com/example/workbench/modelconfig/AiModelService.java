@@ -2,12 +2,19 @@ package com.example.workbench.modelconfig;
 
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AdminAuthorizationService;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +26,32 @@ public class AiModelService {
     private final AiModelRepository aiModelRepository;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ModelClientFactory modelClientFactory;
+    private final boolean requireHttps;
+    private final boolean allowLocalhost;
+    private final Set<String> allowedHosts;
 
     public AiModelService(AiModelRepository aiModelRepository,
                           AdminAuthorizationService adminAuthorizationService,
                           ModelClientFactory modelClientFactory) {
+        this(aiModelRepository, adminAuthorizationService, modelClientFactory, "development", "", false, "");
+    }
+
+    @Autowired
+    public AiModelService(AiModelRepository aiModelRepository,
+                          AdminAuthorizationService adminAuthorizationService,
+                          ModelClientFactory modelClientFactory,
+                          @Value("${app.logging.environment:development}") String environment,
+                          @Value("${app.ai.model-test.require-https:}") String requireHttps,
+                          @Value("${app.ai.model-test.allow-localhost:false}") boolean allowLocalhost,
+                          @Value("${app.ai.model-test.allowed-hosts:}") String allowedHosts) {
         this.aiModelRepository = aiModelRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.modelClientFactory = modelClientFactory;
+        this.requireHttps = requireHttps == null || requireHttps.isBlank()
+                ? "production".equalsIgnoreCase(environment) || "prod".equalsIgnoreCase(environment)
+                : Boolean.parseBoolean(requireHttps);
+        this.allowLocalhost = allowLocalhost;
+        this.allowedHosts = parseAllowedHosts(allowedHosts);
     }
 
     @Transactional(readOnly = true)
@@ -215,24 +241,127 @@ public class AiModelService {
     private void testConnection(String baseUrl, String apiKey) {
         String url = baseUrl.replaceAll("/+$", "") + "/models";
         try {
+            URI currentUri = URI.create(url);
+            validateEndpoint(currentUri, allowLocalhost);
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
+                    .followRedirects(HttpClient.Redirect.NEVER)
                     .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .GET()
-                    .timeout(Duration.ofSeconds(15))
-                    .build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "连接测试失败，HTTP " + response.statusCode() + ": " + response.body());
+            for (int redirects = 0; redirects <= 5; redirects++) {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(currentUri)
+                        .header("Authorization", "Bearer " + apiKey)
+                        .GET()
+                        .timeout(Duration.ofSeconds(15))
+                        .build();
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 300 && response.statusCode() < 400) {
+                    if (redirects == 5 || response.headers().firstValue("Location").isEmpty()) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败，重定向次数过多或缺少目标地址");
+                    }
+                    currentUri = currentUri.resolve(response.headers().firstValue("Location").get());
+                    validateEndpoint(currentUri, false);
+                    continue;
+                }
+                if (response.statusCode() != 200) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "连接测试失败，HTTP " + response.statusCode() + ": " + response.body());
+                }
+                return;
             }
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: " + e.getMessage());
+        }
+    }
+
+    private void validateEndpoint(URI uri, boolean allowLocalhostEndpoint) {
+        if (uri == null || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
+                || (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无效");
+        }
+        if (requireHttps && !"https".equalsIgnoreCase(uri.getScheme())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: 生产环境仅允许 HTTPS 地址");
+        }
+
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        boolean localHost = isLocalhost(host);
+        if (localHost && !allowLocalhostEndpoint) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: localhost 仅允许在显式配置后使用");
+        }
+        boolean allowedHost = allowedHosts.contains(host) || (localHost && allowLocalhostEndpoint);
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无法解析");
+            }
+            if (!allowedHost && Arrays.stream(addresses).anyMatch(this::isRestrictedAddress)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址指向受限网络地址");
+            }
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无法解析");
+        }
+    }
+
+    private boolean isLocalhost(String host) {
+        return "localhost".equals(host) || "localhost.localdomain".equals(host);
+    }
+
+    private boolean isRestrictedAddress(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+        if (bytes.length == 4) {
+            int first = bytes[0] & 0xff;
+            int second = bytes[1] & 0xff;
+            return (first == 100 && second >= 64 && second <= 127)
+                    || (first == 198 && (second == 18 || second == 19));
+        }
+        return (bytes[0] & 0xfe) == 0xfc || (bytes[0] & 0xff) == 0
+                || isIpv4MappedRestricted(bytes);
+    }
+
+    private boolean isIpv4MappedRestricted(byte[] bytes) {
+        if (bytes.length != 16) {
+            return false;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (bytes[i] != 0) {
+                return false;
+            }
+        }
+        if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) {
+            return false;
+        }
+        int first = bytes[12] & 0xff;
+        int second = bytes[13] & 0xff;
+        return first == 10 || first == 127 || (first == 172 && second >= 16 && second <= 31)
+                || first == 192 && second == 168 || first == 169 && second == 254;
+    }
+
+    private Set<String> parseAllowedHosts(String value) {
+        if (value == null || value.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::strip)
+                .filter(host -> !host.isBlank())
+                .map(this::normalizeAllowedHost)
+                .filter(host -> !host.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private String normalizeAllowedHost(String value) {
+        try {
+            URI uri = value.contains("://") ? URI.create(value) : URI.create("https://" + value);
+            return uri.getHost() == null ? value.toLowerCase(Locale.ROOT) : uri.getHost().toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            return value.toLowerCase(Locale.ROOT);
         }
     }
 

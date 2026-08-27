@@ -18,6 +18,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
+import com.example.workbench.pagination.PageResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 @Service
 public class ConversationService {
@@ -70,6 +74,15 @@ public class ConversationService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public PageResponse<ConversationResponse> page(AppUser user, String workspaceId, int page, int size) {
+        var result = conversationRepository.findVisibleByUserAndWorkspace(user.getId(), workspaceId, personalWorkspaceId(user),
+                PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
+                        Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by(Sort.Direction.DESC, "id"))));
+        return new PageResponse<>(result.getContent().stream().map(this::response).toList(), result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages(), result.hasNext());
+    }
+
     @Transactional
     public ConversationResponse create(AppUser user, String workspaceId, ConversationRequest request) {
         ChatConversation conversation = findConversation(user, workspaceId, request.id())
@@ -84,6 +97,16 @@ public class ConversationService {
         return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
                 .map(message -> messageResponse(message, workspaceId))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<MessageResponse> pageMessages(AppUser user, String workspaceId, String conversationId, int page, int size) {
+        ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
+        var result = messageRepository.findByConversationId(conversation.getId(),
+                PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
+                        Sort.by(Sort.Direction.ASC, "createdAt").and(Sort.by(Sort.Direction.ASC, "id"))));
+        return new PageResponse<>(result.getContent().stream().map(message -> messageResponse(message, workspaceId)).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(), result.hasNext());
     }
 
     @Transactional
@@ -103,22 +126,52 @@ public class ConversationService {
 
     @Transactional
     public void recordUserMessage(AppUser user, String workspaceId, String conversationId, String title, String mode, String content) {
+        recordUserMessage(user, workspaceId, conversationId, null, title, mode, content);
+    }
+
+    @Transactional
+    public void recordUserMessage(AppUser user, String workspaceId, String conversationId, String clientRequestId,
+                                  String title, String mode, String content) {
         // 用户首次发言时创建会话；之后仅更新模式和默认标题。
         ChatConversation conversation = getOrCreate(user, workspaceId, conversationId, title, mode);
-        messageRepository.save(new ChatMessageEntity(conversation, "user", content, "[]", "[]"));
+        if (clientRequestId != null) {
+            messageRepository.insertIfAbsent(conversation.getId(), "user", content, "[]", "[]", clientRequestId);
+            return;
+        }
+        try {
+            messageRepository.save(new ChatMessageEntity(conversation, "user", content, "[]", "[]", clientRequestId));
+        } catch (DataIntegrityViolationException exception) {
+            if (clientRequestId == null) throw exception;
+        }
     }
 
     @Transactional
     public boolean recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String mode, String content, Object sources, Object toolCalls) {
+        return recordAssistantMessage(user, workspaceId, conversationId, null, mode, content, sources, toolCalls);
+    }
+
+    @Transactional
+    public boolean recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String clientRequestId,
+                                          String mode, String content, Object sources, Object toolCalls) {
         ChatConversation conversation = findConversation(user, workspaceId, conversationId)
                 .orElse(null);
         if (conversation == null) {
             // 会话被删除后不自动重建，调用方据此丢弃模型的迟到结果。
             return false;
         }
+        if (clientRequestId != null) {
+            conversation.touch(null, mode);
+            conversationRepository.save(conversation);
+            messageRepository.insertIfAbsent(conversation.getId(), "assistant", content, json(sources), json(toolCalls), clientRequestId);
+            return true;
+        }
         conversation.touch(null, mode);
         conversationRepository.save(conversation);
-        messageRepository.save(new ChatMessageEntity(conversation, "assistant", content, json(sources), json(toolCalls)));
+        try {
+            messageRepository.save(new ChatMessageEntity(conversation, "assistant", content, json(sources), json(toolCalls), clientRequestId));
+        } catch (DataIntegrityViolationException exception) {
+            if (clientRequestId == null) throw exception;
+        }
         return true;
     }
 

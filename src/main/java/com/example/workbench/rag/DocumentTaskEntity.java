@@ -161,6 +161,10 @@ public class DocumentTaskEntity {
     @Comment("乐观锁版本")
     private long version;
 
+    @Column(nullable = false)
+    @Comment("任务租约 fencing generation")
+    private long generation;
+
     protected DocumentTaskEntity() {
     }
 
@@ -182,6 +186,7 @@ public class DocumentTaskEntity {
         this.maxAttempts = 3;
         this.nextAttemptAt = Instant.now();
         this.createdAt = Instant.now();
+        this.generation = 0;
     }
 
     DocumentTaskEntity(String taskId, DocumentTaskType type, String label, String sourcePath,
@@ -260,6 +265,7 @@ public class DocumentTaskEntity {
     }
 
     void recoverInterruptedExecution() {
+        generation++;
         status = DocumentTaskStatus.QUEUED;
         stage = "QUEUED";
         nextAttemptAt = Instant.now();
@@ -271,6 +277,29 @@ public class DocumentTaskEntity {
         if (this.workerId != null && this.workerId.equals(workerId)) {
             this.leaseExpiresAt = leaseExpiresAt;
         }
+    }
+
+    boolean renewLease(String workerId, long generation, Instant leaseExpiresAt) {
+        if (!ownsLease(workerId, generation)) return false;
+        this.leaseExpiresAt = leaseExpiresAt;
+        return true;
+    }
+
+    boolean ownsLease(String workerId, long generation) {
+        return this.workerId != null && this.workerId.equals(workerId) && this.generation == generation
+                && this.status == DocumentTaskStatus.RUNNING;
+    }
+
+    boolean succeed(String documentId, String workerId, long generation) {
+        if (!ownsLease(workerId, generation)) return false;
+        succeed(documentId);
+        return true;
+    }
+
+    boolean fail(String message, boolean retryable, String workerId, long generation) {
+        if (!ownsLease(workerId, generation)) return false;
+        fail(message, retryable);
+        return true;
     }
 
     private void releaseLease() {
@@ -310,4 +339,5 @@ public class DocumentTaskEntity {
     Instant getFinishedAt() { return finishedAt; }
     String getWorkerId() { return workerId; }
     Instant getLeaseExpiresAt() { return leaseExpiresAt; }
+    long getGeneration() { return generation; }
 }

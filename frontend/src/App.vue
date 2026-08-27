@@ -386,6 +386,9 @@ async function submitPasswordChange() {
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
         <ModelConfig v-if="modelConfigOpen" :current-user="currentUser" @close="modelConfigOpen = false" @saved="modelConfigVersion += 1" />
+      <footer class="site-footer">
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">鄂ICP备2026046031号</a>
+      </footer>
     </div>
   </template>
 </template>

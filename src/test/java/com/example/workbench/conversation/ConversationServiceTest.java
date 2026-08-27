@@ -122,6 +122,30 @@ class ConversationServiceTest {
     }
 
     @Test
+    void recordsOnlyOneUserAndAssistantMessageForTheSameClientRequest() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation conversation = new ChatConversation("conversation-a", user, "测试", "rag", "team-1");
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        when(conversations.save(Mockito.any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(messages.findByConversationIdAndClientRequestIdAndRole("conversation-a", "request-1", "user"))
+                .thenReturn(Optional.of(Mockito.mock(ChatMessageEntity.class)));
+        when(messages.findByConversationIdAndClientRequestIdAndRole("conversation-a", "request-1", "assistant"))
+                .thenReturn(Optional.of(Mockito.mock(ChatMessageEntity.class)));
+
+        service.recordUserMessage(user, "team-1", "conversation-a", "request-1", "测试", "rag", "问题");
+        boolean recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "request-1",
+                "rag", "答案", List.of(), List.of());
+
+        assertThat(recorded).isTrue();
+        verify(messages, never()).save(Mockito.any(ChatMessageEntity.class));
+    }
+
+    @Test
     void cancelsGenerationAndDeletesConversationImmediately() {
         ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
         ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);

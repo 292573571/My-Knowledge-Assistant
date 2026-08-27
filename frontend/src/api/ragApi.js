@@ -21,8 +21,9 @@ async function evalRequest(path, options = {}, fallbackMessage) {
   }
 }
 
-export function fetchEvalCases() {
-  return evalRequest('/api/eval/cases', {}, '加载评测题失败，请检查后端服务。')
+export function fetchEvalCases(pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return evalRequest(`/api/eval/cases${suffix}`, {}, '加载评测题失败，请检查后端服务。')
 }
 
 export function createEvalCase(caseDto) {
@@ -53,8 +54,9 @@ export function importEvalCases(file) {
   return evalRequest('/api/eval/cases/import', { method: 'POST', body }, '导入评测题失败。')
 }
 
-export function fetchEvalImports() {
-  return evalRequest('/api/eval/imports', {}, '加载导入记录失败。')
+export function fetchEvalImports(pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return evalRequest(`/api/eval/imports${suffix}`, {}, '加载导入记录失败。')
 }
 
 export async function downloadEvalImport(id) {
@@ -73,8 +75,9 @@ export function runEvals(caseIds, enhanced, suite = null, layer = null) {
   }, '评测执行失败，请检查后端服务和模型配置。')
 }
 
-export function fetchEvalRuns() {
-  return evalRequest('/api/eval/runs', {}, '加载检索历史失败，请检查后端服务。')
+export function fetchEvalRuns(pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return evalRequest(`/api/eval/runs${suffix}`, {}, '加载检索历史失败，请检查后端服务。')
 }
 
 export function fetchEvalRun(runId) {

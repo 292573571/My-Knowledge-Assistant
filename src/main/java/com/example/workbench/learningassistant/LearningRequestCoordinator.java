@@ -23,9 +23,25 @@ public class LearningRequestCoordinator {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public LearningSessionEventEntity claim(LearningSessionEntity session, String requestId,
-                                            String eventType, String requestHash) {
-        repository.deleteBySessionIdAndStatusAndProcessingExpiresAtBefore(
-                session.getSessionId(), "PROCESSING", Instant.now());
+                                             String eventType, String requestHash) {
+        Instant now = Instant.now();
+        repository.expireProcessing(session.getSessionId(), "EXPIRED", now);
+        LearningSessionEventEntity existing = repository
+                .findBySessionIdAndEventTypeAndClientRequestId(session.getSessionId(), eventType, requestId)
+                .orElse(null);
+        if (existing != null) {
+            if (!existing.getRequestHash().equals(requestHash)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "clientRequestId 已用于不同的请求内容");
+            }
+            if ("SUCCEEDED".equals(existing.getStatus())) return existing;
+            if ("PROCESSING".equals(existing.getStatus())
+                    && existing.getProcessingExpiresAt() != null
+                    && existing.getProcessingExpiresAt().isAfter(now)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "该请求正在处理中，请稍后重试");
+            }
+            existing.claim();
+            return repository.saveAndFlush(existing);
+        }
         LearningSessionEventEntity event = new LearningSessionEventEntity(UUID.randomUUID().toString(),
                 session.getSessionId(), session.getUserId(), session.getWorkspaceId(), requestId,
                 eventType, requestHash);
@@ -48,24 +64,24 @@ public class LearningRequestCoordinator {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void succeed(String eventId, LearningAssistantResponse response) {
-        LearningSessionEventEntity event = repository.findById(eventId)
-                .orElseThrow(() -> new IllegalStateException("学习请求事件不存在"));
+    public void succeed(String eventId, long generation, LearningAssistantResponse response) {
         try {
-            event.succeed(objectMapper.writeValueAsString(response));
+            if (repository.succeed(eventId, generation, objectMapper.writeValueAsString(response)) == 0) {
+                throw new IllegalStateException("学习请求租约已失效");
+            }
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("无法保存学习请求响应", exception);
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void abandon(String eventId) {
-        repository.deleteById(eventId);
+    public void abandon(String eventId, long generation) {
+        repository.abandon(eventId, generation, "ABANDONED");
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void abandonProcessing(String sessionId) {
-        repository.deleteBySessionIdAndStatus(sessionId, "PROCESSING");
+        repository.abandonProcessing(sessionId, "ABANDONED");
     }
 
     public LearningAssistantResponse replayAfterConflict(String sessionId, String requestId,

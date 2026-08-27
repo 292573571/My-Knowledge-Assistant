@@ -57,6 +57,10 @@ class FormalNoteOutboxEntity {
     @Comment("事件完成时间")
     private Instant processedAt;
 
+    @Column(nullable = false)
+    @Comment("投影事件 fencing generation")
+    private long generation;
+
     protected FormalNoteOutboxEntity() {
     }
 
@@ -66,9 +70,11 @@ class FormalNoteOutboxEntity {
         this.status = Status.QUEUED;
         this.availableAt = Instant.now();
         this.createdAt = Instant.now();
+        this.generation = 0;
     }
 
     void claim(String owner, Instant expiresAt) {
+        generation++;
         status = Status.PROCESSING;
         leaseOwner = owner;
         leaseExpiresAt = expiresAt;
@@ -94,4 +100,15 @@ class FormalNoteOutboxEntity {
     String noteId() { return noteId; }
     String id() { return id; }
     int attemptCount() { return attemptCount; }
+    long generation() { return generation; }
+    String leaseOwner() { return leaseOwner; }
+    boolean ownsLease(String owner, long generation) {
+        return status == Status.PROCESSING && owner.equals(leaseOwner) && this.generation == generation;
+    }
+
+    boolean renewLease(String owner, long generation, Instant expiresAt) {
+        if (!ownsLease(owner, generation)) return false;
+        leaseExpiresAt = expiresAt;
+        return true;
+    }
 }

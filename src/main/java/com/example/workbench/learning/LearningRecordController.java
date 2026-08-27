@@ -28,10 +28,14 @@ public class LearningRecordController {
     }
 
     @GetMapping
-    public List<LearningRecordSummary> list(@RequestParam String workspaceId, HttpServletRequest request) {
+    public Object list(@RequestParam String workspaceId,
+                       @RequestParam(required = false) Integer page,
+                       @RequestParam(required = false) Integer size,
+                       HttpServletRequest request) {
         AppUser user = user(request);
         workspaceService.access(user, workspaceId);
-        return learningRecordService.list(user, workspaceId);
+        return page == null && size == null ? learningRecordService.list(user, workspaceId)
+                : learningRecordService.page(user, workspaceId, page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @GetMapping("/teaching-progress")

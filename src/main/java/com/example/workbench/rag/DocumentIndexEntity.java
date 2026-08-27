@@ -10,9 +10,14 @@ import com.example.workbench.workspace.DocumentVisibility;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import org.hibernate.annotations.Comment;
+import java.time.Instant;
 
 @Entity
-@Table(name = "document_indexes")
+@Table(name = "document_indexes", uniqueConstraints = {
+        @jakarta.persistence.UniqueConstraint(name = "uk_document_indexes_workspace_document", columnNames = {"workspace_id", "document_id"}),
+        @jakarta.persistence.UniqueConstraint(name = "uk_document_indexes_workspace_path", columnNames = {"workspace_id", "path"}),
+        @jakarta.persistence.UniqueConstraint(name = "uk_document_indexes_workspace_hash", columnNames = {"workspace_id", "content_hash"})
+})
 @Comment("知识文档索引表")
 public class DocumentIndexEntity {
 
@@ -21,16 +26,16 @@ public class DocumentIndexEntity {
     @Comment("索引记录主键")
     private Long id;
 
-    @Column(name = "document_id", nullable = false, unique = true, length = 128)
+    @Column(name = "document_id", nullable = false, length = 128)
     @Comment("业务文档标识")
     private String documentId;
     @Column(name = "file_name", nullable = false)
     @Comment("原始文件名")
     private String fileName;
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     @Comment("文档源文件路径")
     private String path;
-    @Column(name = "content_hash", nullable = false, unique = true, length = 128)
+    @Column(name = "content_hash", nullable = false, length = 128)
     @Comment("文档内容哈希")
     private String contentHash;
     @Column(name = "chunk_count", nullable = false)
@@ -38,7 +43,7 @@ public class DocumentIndexEntity {
     private int chunkCount;
     @Column(name = "ingested_at", nullable = false)
     @Comment("导入时间戳")
-    private long ingestedAt;
+    private Instant ingestedAt;
     @Column(nullable = false, length = 32)
     @Comment("文档分类")
     private String category;
@@ -48,7 +53,7 @@ public class DocumentIndexEntity {
     @Column(name = "owner_user_id", nullable = false, length = 64)
     @Comment("文档所有者业务标识")
     private String ownerUserId;
-    @Column(name = "workspace_id", length = 36)
+    @Column(name = "workspace_id", nullable = false, length = 36)
     @Comment("所属知识空间主键")
     private String workspaceId;
     @Enumerated(EnumType.STRING)

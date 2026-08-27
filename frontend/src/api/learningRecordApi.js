@@ -13,8 +13,9 @@ async function request(path, options = {}) {
   return response.json()
 }
 
-export function fetchLearningRecords(workspaceId) {
-  return request(`/api/learning-records?workspaceId=${encodeURIComponent(workspaceId || '')}`)
+export function fetchLearningRecords(workspaceId, pagination = null) {
+  const suffix = pagination ? `&page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/learning-records?workspaceId=${encodeURIComponent(workspaceId || '')}${suffix}`)
 }
 
 export function fetchTeachingProgress(workspaceId) {

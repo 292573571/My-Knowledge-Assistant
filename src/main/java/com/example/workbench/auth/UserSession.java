@@ -27,9 +27,13 @@ public class UserSession {
     @Comment("所属用户主键")
     private AppUser user;
 
-    @Column(name = "token_hash", nullable = false, unique = true, length = 64)
+    @Column(name = "token_hash", unique = true, length = 64)
     @Comment("会话令牌")
     private String tokenHash;
+
+    @Column(name = "legacy_token", unique = true, length = 255)
+    @Comment("待渐进迁移的旧版明文会话令牌")
+    private String legacyToken;
 
     @Column(name = "expires_at", nullable = false)
     @Comment("会话过期时间")
@@ -54,5 +58,10 @@ public class UserSession {
 
     public Instant getExpiresAt() {
         return expiresAt;
+    }
+
+    public void migrateTokenHash(String tokenHash) {
+        this.tokenHash = tokenHash;
+        this.legacyToken = null;
     }
 }

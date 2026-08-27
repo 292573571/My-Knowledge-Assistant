@@ -1,6 +1,7 @@
 package com.example.workbench.rag;
 
 import com.example.workbench.workspace.DocumentVisibility;
+import java.time.Instant;
 
 public record DocumentIndexEntry(
         String documentId,
@@ -8,19 +9,19 @@ public record DocumentIndexEntry(
         String path,
         String contentHash,
         int chunkCount,
-        long ingestedAt,
+        Instant ingestedAt,
         String category,
         String indexStatus,
         String ownerUserId,
         String workspaceId,
         DocumentVisibility visibility
 ) {
-    public DocumentIndexEntry(String documentId, String fileName, String path, String contentHash, int chunkCount, long ingestedAt) {
+    public DocumentIndexEntry(String documentId, String fileName, String path, String contentHash, int chunkCount, Instant ingestedAt) {
         this(documentId, fileName, path, contentHash, chunkCount, ingestedAt, "SOURCE", "INDEXED", "", "public-default", DocumentVisibility.PUBLIC);
     }
 
     public DocumentIndexEntry(String documentId, String fileName, String path, String contentHash, int chunkCount,
-                              long ingestedAt, String category, String indexStatus, String ownerUserId) {
+                              Instant ingestedAt, String category, String indexStatus, String ownerUserId) {
         this(documentId, fileName, path, contentHash, chunkCount, ingestedAt, category, indexStatus, ownerUserId,
                 defaultWorkspace(ownerUserId), defaultVisibility(ownerUserId));
     }

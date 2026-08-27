@@ -274,12 +274,12 @@ class DocumentIngestionServiceSyncTest {
         Path document = docsDirectory.resolve("team.md");
         Files.writeString(document, "# Team\n\nWorkspace-only architecture notes.");
         DocumentIndexEntry entry = new DocumentIndexEntry(
-                "team-doc", "team.md", "docs/team.md", "team-hash", 1, 100L,
+                "team-doc", "team.md", "docs/team.md", "team-hash", 1, java.time.Instant.ofEpochMilli(100L),
                 "SOURCE", "INDEXED", "1", "team-1", DocumentVisibility.WORKSPACE
         );
         indexStore.upsertAll(List.of(entry));
         DocumentIndexEntry personal = new DocumentIndexEntry(
-                "personal-doc", "personal.md", "docs/personal.md", "personal-hash", 1, 100L,
+                "personal-doc", "personal.md", "docs/personal.md", "personal-hash", 1, java.time.Instant.ofEpochMilli(100L),
                 "SOURCE", "INDEXED", "2", "personal-2", DocumentVisibility.PRIVATE
         );
         indexStore.upsertAll(List.of(personal));
@@ -605,7 +605,7 @@ class DocumentIngestionServiceSyncTest {
         Path source = workspaceDirectory.resolve("managed.md");
         Files.writeString(source, "# Managed\n\nAdministrator-managed source.");
         DocumentIndexEntry entry = new DocumentIndexEntry(
-                "managed-doc", "managed.md", "docs/workspaces/team-1/managed.md", "managed-hash", 1, 100L,
+                "managed-doc", "managed.md", "docs/workspaces/team-1/managed.md", "managed-hash", 1, java.time.Instant.ofEpochMilli(100L),
                 "SOURCE", "INDEXED", "2", "team-1", DocumentVisibility.WORKSPACE);
         indexStore.upsertAll(List.of(entry));
         WorkspaceAccessContext editor = new WorkspaceAccessContext("2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
@@ -628,7 +628,7 @@ class DocumentIngestionServiceSyncTest {
             return;
         }
         DocumentIndexEntry entry = new DocumentIndexEntry(
-                "linked-doc", "linked.md", "docs/workspaces/team-1/" + link.getFileName(), "linked-hash", 1, 100L,
+                "linked-doc", "linked.md", "docs/workspaces/team-1/" + link.getFileName(), "linked-hash", 1, java.time.Instant.ofEpochMilli(100L),
                 "SOURCE", "INDEXED", "2", "team-1", DocumentVisibility.WORKSPACE);
         indexStore.upsertAll(List.of(entry));
         WorkspaceAccessContext editor = new WorkspaceAccessContext("2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);

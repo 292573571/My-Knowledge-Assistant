@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.example.workbench.pagination.PageResponse;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -146,6 +147,23 @@ public class DocumentTaskService {
                 .toList();
     }
 
+    public PageResponse<DocumentTaskResponse> page(WorkspaceAccessContext access, boolean systemAdmin, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 500);
+        org.springframework.data.domain.Page<DocumentTaskEntity> result = systemAdmin
+                ? repository.findByWorkspaceId(access.workspaceId(),
+                org.springframework.data.domain.PageRequest.of(safePage, safeSize,
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")
+                                .and(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "taskId"))))
+                : repository.findByWorkspaceIdAndType(access.workspaceId(), DocumentTaskType.UPLOAD,
+                org.springframework.data.domain.PageRequest.of(safePage, safeSize,
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")
+                                .and(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "taskId"))));
+        return new PageResponse<>(result.getContent().stream()
+                .map(task -> DocumentTaskResponse.from(task, documentDeleted(task, access))).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(), result.hasNext());
+    }
+
     /**
      * 查询一个可见任务的全部页面批次。
      *
@@ -248,23 +266,33 @@ public class DocumentTaskService {
         if (claimed == 0) {
             return;
         }
-        DocumentTaskEntity task = repository.findById(taskId).orElseThrow();
+         DocumentTaskEntity task = repository.findById(taskId).orElseThrow();
+         long generation = task.getGeneration();
 
         try {
             WorkspaceAccessContext access = resolveCurrentAccess(task);
-            String documentId = executeTask(task, access);
-            task = repository.findById(taskId).orElseThrow();
-            task.succeed(documentId);
-            repository.saveAndFlush(task);
-            deleteBatchArtifacts(taskId);
-            log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
-        } catch (Exception exception) {
-            task = repository.findById(taskId).orElseThrow();
-            String failedStage = task.getStage();
-            failCurrentBatch(task, publicErrorMessage(exception));
-            task.fail(publicErrorMessage(exception), isRetryable(exception));
-            repository.saveAndFlush(task);
-            if (task.getStatus() == DocumentTaskStatus.FAILED) deleteBatchArtifacts(taskId);
+             String documentId = executeTask(task, access, generation);
+             int updated = repository.succeed(taskId, DocumentTaskStatus.RUNNING, DocumentTaskStatus.SUCCEEDED,
+                     workerId, generation, documentId, Instant.now());
+             if (updated == 1) {
+                 deleteBatchArtifacts(taskId);
+                 log.info("Document task completed taskId={} type={} documentId={}", taskId, task.getType(), documentId);
+             }
+         } catch (Exception exception) {
+             String failedStage = task.getStage();
+             boolean retryable = isRetryable(exception);
+             DocumentTaskStatus nextStatus = retryable && task.getAttemptCount() < task.getMaxAttempts()
+                     ? DocumentTaskStatus.RETRY_WAIT : DocumentTaskStatus.FAILED;
+             Instant nextAttemptAt = nextStatus == DocumentTaskStatus.RETRY_WAIT
+                     ? Instant.now().plusSeconds(30L * task.getAttemptCount()) : null;
+             int updated = repository.fail(taskId, DocumentTaskStatus.RUNNING, workerId, generation,
+                     publicErrorMessage(exception), retryable, nextStatus, nextStatus == DocumentTaskStatus.RETRY_WAIT
+                             ? "RETRY_WAIT" : "FAILED", nextAttemptAt,
+                     nextStatus == DocumentTaskStatus.FAILED ? Instant.now() : null);
+             if (updated == 1) {
+                 failCurrentBatch(task, publicErrorMessage(exception));
+                 if (nextStatus == DocumentTaskStatus.FAILED) deleteBatchArtifacts(taskId);
+             }
             // 后台线程没有 HTTP 异常处理器兜底，必须保留完整异常链才能区分 OCR、Embedding 和 Chroma 故障。
             log.warn("Document task failed taskId={} type={} fileName={} failedStage={} status={} attempt={}",
                     taskId, task.getType(), task.getFileName(), failedStage, task.getStatus(),
@@ -282,40 +310,40 @@ public class DocumentTaskService {
         }
     }
 
-    private String executeTask(DocumentTaskEntity task, WorkspaceAccessContext access) throws java.io.IOException {
+     private String executeTask(DocumentTaskEntity task, WorkspaceAccessContext access, long generation) throws java.io.IOException {
         return switch (task.getType()) {
             case UPLOAD -> ingestionService.indexWorkspaceUpload(
                     access, task.getSourcePath(), task.getFileName(), task.getTaskId(),
-                    (stage, progress) -> updateProgress(task.getTaskId(), stage, progress)).documentId();
+                     (stage, progress) -> updateProgress(task.getTaskId(), generation, stage, progress)).documentId();
             case INGEST_FILE -> {
-                updateProgress(task.getTaskId(), "PARSING", 25);
+                 updateProgress(task.getTaskId(), generation, "PARSING", 25);
                 IngestResponse response = ingestionService.ingestDocument(task.getSourcePath(), true, access);
                 requireSuccessfulIngest(response, "文件导入");
-                updateProgress(task.getTaskId(), "PERSISTING_INDEX", 90);
+                 updateProgress(task.getTaskId(), generation, "PERSISTING_INDEX", 90);
                 yield response.documents().stream().map(IngestDocumentResult::documentId)
                         .filter(id -> id != null && !id.isBlank()).findFirst().orElse(null);
             }
             case INGEST_DIRECTORY -> {
-                updateProgress(task.getTaskId(), "SCANNING", 20);
+                 updateProgress(task.getTaskId(), generation, "SCANNING", 20);
                 IngestResponse response = ingestionService.ingestDirectory(task.getSourcePath(), true, access);
                 requireSuccessfulIngest(response, "目录导入");
-                updateProgress(task.getTaskId(), "PERSISTING_INDEX", 90);
+                 updateProgress(task.getTaskId(), generation, "PERSISTING_INDEX", 90);
                 yield null;
             }
             case SYNC -> {
-                updateProgress(task.getTaskId(), "SCANNING", 20);
+                 updateProgress(task.getTaskId(), generation, "SCANNING", 20);
                 ingestionService.syncWorkspace(access);
-                updateProgress(task.getTaskId(), "PERSISTING_INDEX", 90);
+                 updateProgress(task.getTaskId(), generation, "PERSISTING_INDEX", 90);
                 yield null;
             }
             case REBUILD -> {
-                updateProgress(task.getTaskId(), "SCANNING", 15);
+                updateProgress(task.getTaskId(), generation, "SCANNING", 15);
                 RebuildResult result = ingestionService.rebuildDocuments(access,
-                        progress -> updateRebuildProgress(task.getTaskId(), progress));
+                         progress -> updateRebuildProgress(task.getTaskId(), generation, progress));
                 if (result.failedFiles() > 0) {
                     throw new IllegalArgumentException("索引重建完成，但有 " + result.failedFiles() + " 个文件处理失败");
                 }
-                updateProgress(task.getTaskId(), "PERSISTING_INDEX", 90);
+                 updateProgress(task.getTaskId(), generation, "PERSISTING_INDEX", 90);
                 yield null;
             }
         };
@@ -350,23 +378,25 @@ public class DocumentTaskService {
         }
     }
 
-    private void updateProgress(String taskId, String stage, int progress) {
-        repository.findById(taskId).ifPresent(task -> {
-            if (!workerId.equals(task.getWorkerId())) {
-                return;
-            }
-            java.util.regex.Matcher batchStart = java.util.regex.Pattern.compile(
-                    "BATCH_START_(\\d+)_OF_(\\d+)_TOTALPAGES_(\\d+)_PAGES_(\\d+)_(\\d+)").matcher(stage);
-            if (batchStart.matches()) {
+     private void updateProgress(String taskId, long generation, String stage, int progress) {
+         repository.findById(taskId).ifPresent(task -> {
+             if (!task.ownsLease(workerId, generation)) {
+                 return;
+             }
+             java.util.regex.Matcher batchStart = java.util.regex.Pattern.compile(
+                     "BATCH_START_(\\d+)_OF_(\\d+)_TOTALPAGES_(\\d+)_PAGES_(\\d+)_(\\d+)").matcher(stage);
+             String persistedStage = stage;
+             int persistedProgress = Math.max(task.getProgress(), progress);
+             if (batchStart.matches()) {
                 int batchIndex = Integer.parseInt(batchStart.group(1));
                 int total = Integer.parseInt(batchStart.group(2));
                 int totalPages = Integer.parseInt(batchStart.group(3));
                 int startPage = Integer.parseInt(batchStart.group(4));
                 int endPage = Integer.parseInt(batchStart.group(5));
-                task.updateBatchDetails(batchIndex, total, startPage, endPage);
+                 task.updateBatchDetails(batchIndex, total, startPage, endPage);
                 persistBatchStart(taskId, batchIndex, total, totalPages, startPage, endPage);
-                task.updateProgress("REBUILDING", progress);
-            }
+                 persistedStage = "REBUILDING";
+             }
             java.util.regex.Matcher batch = java.util.regex.Pattern.compile(
                     "BATCH_(\\d+)_OF_(\\d+)_PAGES_(\\d+)_(\\d+)_CHUNKS_(\\d+)").matcher(stage);
             if (!batchStart.matches() && batch.matches()) {
@@ -375,17 +405,32 @@ public class DocumentTaskService {
                 int startPage = Integer.parseInt(batch.group(3));
                 int endPage = Integer.parseInt(batch.group(4));
                 int chunks = Integer.parseInt(batch.group(5));
-                task.updateBatchProgress(total, completed, completed, 0, chunks);
-                task.updateBatchDetails(completed, total, startPage, endPage);
-                task.updateProgress("REBUILDING", progress);
-                persistBatchProgress(taskId, completed, total, startPage, endPage, chunks);
-            } else if (!batchStart.matches()) {
-                task.updateProgress(stage, progress);
-            }
-            task.renewLease(workerId, Instant.now().plusSeconds(LEASE_SECONDS));
-            repository.saveAndFlush(task);
-        });
-    }
+                 task.updateBatchProgress(total, completed, completed, 0, chunks);
+                 task.updateBatchDetails(completed, total, startPage, endPage);
+                 persistedStage = "REBUILDING";
+             } else if (!batchStart.matches()) {
+                 persistedStage = stage;
+             }
+             task.updateProgress(persistedStage, persistedProgress);
+             if (repository.updateProgress(taskId, DocumentTaskStatus.RUNNING, workerId, generation,
+                     persistedStage, persistedProgress, task.getTotalItems(), task.getCompletedItems(),
+                     task.getSucceededItems(), task.getFailedItems(), task.getResultChunks(), task.getCurrentBatch(),
+                     task.getTotalBatches(), task.getCurrentStartPage(), task.getCurrentEndPage(),
+                     Instant.now().plusSeconds(LEASE_SECONDS)) == 0) return;
+             persistBatchProgressIfOwned(taskId, stage, batchStart, batch);
+         });
+     }
+
+      private void persistBatchProgressIfOwned(String taskId, String stage,
+                                               java.util.regex.Matcher batchStart,
+                                               java.util.regex.Matcher batch) {
+          if (batchStart.matches()) {
+              persistBatchStart(taskId, Integer.parseInt(batchStart.group(1)), Integer.parseInt(batchStart.group(2)),
+                      Integer.parseInt(batchStart.group(3)), Integer.parseInt(batchStart.group(4)), Integer.parseInt(batchStart.group(5)));
+          }
+          if (batch.matches()) persistBatchProgress(taskId, Integer.parseInt(batch.group(1)), Integer.parseInt(batch.group(2)),
+                  Integer.parseInt(batch.group(3)), Integer.parseInt(batch.group(4)), Integer.parseInt(batch.group(5)));
+      }
 
     private void persistBatchStart(String taskId, int batchIndex, int total, int totalPages,
                                    int startPage, int endPage) {
@@ -451,19 +496,22 @@ public class DocumentTaskService {
         });
     }
 
-    private void updateRebuildProgress(String taskId, RebuildProgress progress) {
-        repository.findById(taskId).ifPresent(task -> {
-            if (!workerId.equals(task.getWorkerId())) {
-                return;
-            }
+     private void updateRebuildProgress(String taskId, long generation, RebuildProgress progress) {
+         repository.findById(taskId).ifPresent(task -> {
+             if (!task.ownsLease(workerId, generation)) {
+                 return;
+             }
             int percentage = progress.totalFiles() == 0 ? 85
                     : 20 + (int) Math.floor(progress.completedFiles() * 65.0 / progress.totalFiles());
             task.updateProgress("REBUILDING", percentage);
             task.updateBatchProgress(progress.totalFiles(), progress.completedFiles(), progress.succeededFiles(),
                     progress.failedFiles(), progress.chunks());
-            task.renewLease(workerId, Instant.now().plusSeconds(LEASE_SECONDS));
-            repository.saveAndFlush(task);
-        });
+             repository.updateProgress(taskId, DocumentTaskStatus.RUNNING, workerId, generation,
+                     task.getStage(), task.getProgress(), task.getTotalItems(), task.getCompletedItems(),
+                     task.getSucceededItems(), task.getFailedItems(), task.getResultChunks(), task.getCurrentBatch(),
+                     task.getTotalBatches(), task.getCurrentStartPage(), task.getCurrentEndPage(),
+                     Instant.now().plusSeconds(LEASE_SECONDS));
+         });
     }
 
     private void recoverExpiredTasks() {
@@ -477,8 +525,8 @@ public class DocumentTaskService {
     private void renewOwnedLeases() {
         Instant expiresAt = Instant.now().plusSeconds(LEASE_SECONDS);
         repository.findByStatusAndWorkerId(DocumentTaskStatus.RUNNING, workerId).forEach(task -> {
-            task.renewLease(workerId, expiresAt);
-            repository.saveAndFlush(task);
+                     repository.renewLease(task.getTaskId(), DocumentTaskStatus.RUNNING, workerId,
+                             task.getGeneration(), expiresAt);
         });
     }
 

@@ -59,7 +59,7 @@ class LearningRequestCoordinatorTest {
     }
 
     @Test
-    void claimRemovesExpiredProcessingLeaseBeforeCreatingPlaceholder() {
+    void claimMarksExpiredProcessingLeaseAndCreatesPlaceholder() {
         LearningSessionEntity session = new LearningSessionEntity(
                 "session-1", 7L, "workspace-1", "conversation-1", "标题", null, LearningMode.AUTO, "BEGINNER");
         when(repository.saveAndFlush(any(LearningSessionEventEntity.class)))
@@ -69,7 +69,18 @@ class LearningRequestCoordinatorTest {
 
         assertThat(event.getStatus()).isEqualTo("PROCESSING");
         assertThat(event.getRequestHash()).isEqualTo("hash-1");
-        verify(repository).deleteBySessionIdAndStatusAndProcessingExpiresAtBefore(eq("session-1"), eq("PROCESSING"), any(Instant.class));
+        verify(repository).expireProcessing(eq("session-1"), eq("EXPIRED"), any(Instant.class));
+    }
+
+    @Test
+    void keepsAbandonedEventForTraceability() {
+        LearningSessionEventEntity event = event("MESSAGE", "hash-1");
+        when(repository.findById("event-1")).thenReturn(Optional.of(event));
+        when(repository.abandon("event-1", event.getGeneration(), "ABANDONED")).thenReturn(1);
+
+        coordinator.abandon("event-1", event.getGeneration());
+
+        verify(repository).abandon("event-1", event.getGeneration(), "ABANDONED");
     }
 
     private LearningSessionEventEntity event(String type, String hash) {

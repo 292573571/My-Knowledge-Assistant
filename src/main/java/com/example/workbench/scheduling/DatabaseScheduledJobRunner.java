@@ -4,6 +4,7 @@ import com.example.workbench.agent.MaintenancePendingActionCleanupService;
 import com.example.workbench.agent.TeachingAttemptCleanupService;
 import com.example.workbench.learning.LearningRecordProjectionService;
 import com.example.workbench.learning.FormalNoteProjectionService;
+import com.example.workbench.audit.AuditOutboxService;
 import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -18,6 +19,7 @@ class DatabaseScheduledJobRunner {
     static final String MAINTENANCE_ACTION_CLEANUP = "maintenance-action-cleanup";
     static final String LEARNING_RECORD_PROJECTION = "learning-record-projection";
     static final String FORMAL_NOTE_PROJECTION = "formal-note-projection";
+    static final String AUDIT_EVENT_OUTBOX_RETRY = "audit-event-outbox-retry";
     private static final Logger log = LoggerFactory.getLogger(DatabaseScheduledJobRunner.class);
     private static final long LEASE_SECONDS = 60;
 
@@ -26,12 +28,22 @@ class DatabaseScheduledJobRunner {
     private final MaintenancePendingActionCleanupService maintenanceActionCleanupService;
     private final LearningRecordProjectionService learningRecordProjectionService;
     private final FormalNoteProjectionService formalNoteProjectionService;
+    private final AuditOutboxService auditOutboxService;
     private final String workerId = UUID.randomUUID().toString();
 
     DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
                                TeachingAttemptCleanupService teachingAttemptCleanupService,
                                MaintenancePendingActionCleanupService maintenanceActionCleanupService) {
-        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService, null, null);
+        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService, null, null, null);
+    }
+
+    DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
+                               TeachingAttemptCleanupService teachingAttemptCleanupService,
+                               MaintenancePendingActionCleanupService maintenanceActionCleanupService,
+                               LearningRecordProjectionService learningRecordProjectionService,
+                               FormalNoteProjectionService formalNoteProjectionService) {
+        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService,
+                learningRecordProjectionService, formalNoteProjectionService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -39,12 +51,14 @@ class DatabaseScheduledJobRunner {
                                TeachingAttemptCleanupService teachingAttemptCleanupService,
                                MaintenancePendingActionCleanupService maintenanceActionCleanupService,
                                LearningRecordProjectionService learningRecordProjectionService,
-                               FormalNoteProjectionService formalNoteProjectionService) {
+                               FormalNoteProjectionService formalNoteProjectionService,
+                               AuditOutboxService auditOutboxService) {
         this.jobRepository = jobRepository;
         this.teachingAttemptCleanupService = teachingAttemptCleanupService;
         this.maintenanceActionCleanupService = maintenanceActionCleanupService;
         this.learningRecordProjectionService = learningRecordProjectionService;
         this.formalNoteProjectionService = formalNoteProjectionService;
+        this.auditOutboxService = auditOutboxService;
     }
 
     // 这里只负责高频唤醒；任务是否启用、何时执行和多实例抢占由 scheduled_jobs 控制。
@@ -58,6 +72,9 @@ class DatabaseScheduledJobRunner {
             }
             if (formalNoteProjectionService != null) {
                 runIfDue(FORMAL_NOTE_PROJECTION, formalNoteProjectionService::projectOne);
+            }
+            if (auditOutboxService != null) {
+                runIfDue(AUDIT_EVENT_OUTBOX_RETRY, auditOutboxService::projectOne);
             }
         } catch (Exception e) {
             log.warn("Scheduled poll error (will retry next cycle): {}", e.getMessage());

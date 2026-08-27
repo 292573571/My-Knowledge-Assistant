@@ -41,8 +41,8 @@ public class UserModelConfigService {
         return new UserModelConfigResponse(
                 config == null ? UserModelMode.FOLLOW_DEFAULT : config.getMode(),
                 config == null ? null : config.getModelId(),
-                config == null || config.getMode() != UserModelMode.CUSTOM ? null : toSpec(config),
-                resolved,
+                config == null || config.getMode() != UserModelMode.CUSTOM ? null : ModelSpecResponse.from(toSpec(config)),
+                ModelSpecResponse.from(resolved),
                 pool,
                 defaultModelId,
                 defaultEmbedding == null ? null : defaultEmbedding.getId(),

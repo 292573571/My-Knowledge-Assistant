@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import com.example.workbench.pagination.PageResponse;
 
 @RestController
 @RequestMapping("/api/eval")
@@ -44,8 +45,11 @@ public class EvalController {
     }
 
     @GetMapping("/cases")
-    public List<EvalCaseResponse> cases(HttpServletRequest request) {
-        return evalCaseService.list(user(request));
+    public Object cases(@org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                        @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                        HttpServletRequest request) {
+        return page == null && size == null ? evalCaseService.list(user(request))
+                : evalCaseService.page(user(request), page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @PostMapping("/cases")
@@ -60,8 +64,11 @@ public class EvalController {
     }
 
     @GetMapping("/imports")
-    public List<EvalImportResponse> imports(HttpServletRequest request) {
-        return evalImportStorage.list(user(request));
+    public Object imports(@org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                          @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                          HttpServletRequest request) {
+        return page == null && size == null ? evalImportStorage.list(user(request))
+                : evalImportStorage.page(user(request), page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @GetMapping("/imports/{id}/download")
@@ -103,8 +110,11 @@ public class EvalController {
     }
 
     @GetMapping("/runs")
-    public List<EvalRunEntity> runs(HttpServletRequest request) {
-        return evalRunStorage.list(user(request));
+    public Object runs(@org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                       @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                       HttpServletRequest request) {
+        return page == null && size == null ? evalRunStorage.list(user(request))
+                : evalRunStorage.page(user(request), page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @GetMapping("/runs/{runId}")

@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.pagination.PageResponse;
 
 @Service
 public class EvalCaseService {
@@ -35,6 +36,10 @@ public class EvalCaseService {
     public List<EvalCaseResponse> list(AppUser user) {
         seedIfNeeded(user);
         return repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream().map(this::response).toList();
+    }
+
+    public PageResponse<EvalCaseResponse> page(AppUser user, int page, int size) {
+        return PageResponse.of(list(user), page, size);
     }
 
     @Transactional

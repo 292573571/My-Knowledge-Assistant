@@ -16,8 +16,9 @@ export function fetchLogs({ page = 0, size = 100, level, keyword, hours = 0 } = 
   return request(`/api/logs?${params}`, {}, '加载日志失败。')
 }
 
-export function fetchAuditEvents() {
-  return request('/api/audit-events', {}, '加载审计日志失败。')
+export function fetchAuditEvents(pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/audit-events${suffix}`, {}, '加载审计日志失败。')
 }
 
 export async function purgeAuditEvents() {

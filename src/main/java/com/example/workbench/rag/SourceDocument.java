@@ -40,6 +40,15 @@ public record SourceDocument(
                 content.length(), "text-paragraph", "SOURCE", "", "public-default", DocumentVisibility.PUBLIC, 0);
     }
 
+    public SourceDocument(String id, String content, String title, String source, String path, int chunkIndex,
+                          String documentId, String fileName, String contentHash, double score, String headingPath,
+                          int headingLevel, int startOffset, int endOffset, String chunkType, String category,
+                          String ownerUserId, String workspaceId, DocumentVisibility visibility, long pageNumber) {
+        this(id, content, title, source, path, chunkIndex, documentId, fileName, contentHash, score, headingPath,
+                headingLevel, startOffset, endOffset, chunkType, category, ownerUserId, workspaceId, visibility,
+                Math.toIntExact(pageNumber));
+    }
+
     public SourceDocument(
             String id, String content, String title, String source, String path, int chunkIndex,
             String documentId, String fileName, String contentHash, double score, String headingPath,

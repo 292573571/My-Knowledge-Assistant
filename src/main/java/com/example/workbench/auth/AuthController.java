@@ -67,7 +67,7 @@ public class AuthController {
     public CurrentUserResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest,
                                      HttpServletResponse response) {
         try {
-            AuthResponse authentication = authService.login(request);
+            AuthResponse authentication = authService.login(request, httpRequest.getRemoteAddr());
             audit(httpRequest, authentication.publicId(), AuditAction.LOGIN_SUCCESS, "AUTH", authentication.publicId(),
                     AuditOutcome.SUCCESS, "NONE");
             return authenticated(authentication, response);

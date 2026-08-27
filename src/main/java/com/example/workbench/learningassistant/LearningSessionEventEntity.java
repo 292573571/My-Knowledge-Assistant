@@ -58,6 +58,10 @@ public class LearningSessionEventEntity {
     @Comment("事件创建时间")
     private Instant createdAt;
 
+    @Column(nullable = false)
+    @Comment("学习请求 fencing generation")
+    private long generation;
+
     protected LearningSessionEventEntity() {
     }
 
@@ -73,16 +77,32 @@ public class LearningSessionEventEntity {
         this.status = "PROCESSING";
         this.createdAt = Instant.now();
         this.processingExpiresAt = createdAt.plusSeconds(300);
+        this.generation = 0;
     }
 
     public String getPayloadJson() { return payloadJson; }
     public String getEventId() { return eventId; }
     public String getRequestHash() { return requestHash; }
     public String getStatus() { return status; }
+    public Instant getProcessingExpiresAt() { return processingExpiresAt; }
+    public long getGeneration() { return generation; }
 
     public void succeed(String payloadJson) {
         this.payloadJson = payloadJson;
         this.status = "SUCCEEDED";
         this.processingExpiresAt = null;
+    }
+
+    public boolean succeed(String payloadJson, long generation) {
+        if (!"PROCESSING".equals(status) || this.generation != generation) return false;
+        succeed(payloadJson);
+        return true;
+    }
+
+    public void claim() {
+        generation++;
+        status = "PROCESSING";
+        payloadJson = null;
+        processingExpiresAt = Instant.now().plusSeconds(300);
     }
 }

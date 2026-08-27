@@ -11,8 +11,9 @@ export function setActiveWorkspaceId(workspaceId) {
   activeWorkspaceId = workspaceId || ''
 }
 
-export async function fetchWorkspaces() {
-  return request('/api/workspaces', {}, '知识空间加载失败。')
+export async function fetchWorkspaces(pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/workspaces${suffix}`, {}, '知识空间加载失败。')
 }
 
 export async function initializePersonalWorkspace() {
@@ -47,8 +48,9 @@ export function createPublicWorkspace(name) {
   }, '公共知识源创建失败。')
 }
 
-export function fetchWorkspaceMembers(workspaceId) {
-  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`, {}, '空间成员加载失败。')
+export function fetchWorkspaceMembers(workspaceId, pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/members${suffix}`, {}, '空间成员加载失败。')
 }
 
 export function addWorkspaceMember(workspaceId, account, role) {
@@ -73,8 +75,9 @@ export function removeWorkspaceMember(workspaceId, publicId) {
   }, '成员移除失败。')
 }
 
-export function fetchWorkspaceAuditEvents(workspaceId) {
-  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/audit-events`, {}, '审计记录加载失败。')
+export function fetchWorkspaceAuditEvents(workspaceId, pagination = null) {
+  const suffix = pagination ? `?page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/audit-events${suffix}`, {}, '审计记录加载失败。')
 }
 
 async function request(path, options = {}, fallbackMessage) {

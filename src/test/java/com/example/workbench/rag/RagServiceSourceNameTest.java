@@ -22,7 +22,7 @@ class RagServiceSourceNameTest {
                 "legacy-id", "storage-id.pdf", "content-hash", 0.2, "", 0, 0, 7, "pdf-page",
                 "SOURCE", "user-1", "workspace-a", DocumentVisibility.WORKSPACE, 11);
         DocumentIndexEntry indexed = new DocumentIndexEntry("legacy-id", "redis-cache.pdf", "docs/storage-id.pdf",
-                "content-hash", 1, 1L, "SOURCE", "INDEXED", "user-1", "workspace-a",
+                "content-hash", 1, java.time.Instant.ofEpochMilli(1L), "SOURCE", "INDEXED", "user-1", "workspace-a",
                 DocumentVisibility.WORKSPACE);
 
         assertThat(service.originalSourceFileName(source, List.of(indexed))).isEqualTo("redis-cache.pdf");
@@ -40,7 +40,7 @@ class RagServiceSourceNameTest {
                 "old-hash", 0.2, "", 0, 0, 7, "pdf-page", "SOURCE", "user-1", "workspace-a",
                 DocumentVisibility.WORKSPACE, 11);
         DocumentIndexEntry indexed = new DocumentIndexEntry("new-id", "redis-cache.pdf",
-                "docs/636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf", "new-hash", 1, 2L,
+                "docs/636d4aed-7851-4d3b-a0d4-0aaca09eff4b.pdf", "new-hash", 1, java.time.Instant.ofEpochMilli(2L),
                 "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
 
         assertThat(service.originalSourceFileName(source, List.of(indexed))).isEqualTo("redis-cache.pdf");
@@ -58,9 +58,9 @@ class RagServiceSourceNameTest {
                 "shared-id", storageName, "hash", 0.64, "", 0, 0, 7, "pdf-page", "SOURCE",
                 "user-1", "workspace-a", DocumentVisibility.WORKSPACE, 20);
         DocumentIndexEntry old = new DocumentIndexEntry("shared-id", storageName, "legacy/old.pdf", "old-hash",
-                1, 1L, "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
+                1, java.time.Instant.ofEpochMilli(1L), "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
         DocumentIndexEntry current = new DocumentIndexEntry("new-id", "AI-Agents-in-Depth-zh-CN.pdf", path,
-                "new-hash", 598, 2L, "SOURCE", "INDEXED", "user-1", "workspace-a",
+                "new-hash", 598, java.time.Instant.ofEpochMilli(2L), "SOURCE", "INDEXED", "user-1", "workspace-a",
                 DocumentVisibility.WORKSPACE);
 
         assertThat(service.originalSourceFileName(source, List.of(old, current)))
@@ -90,7 +90,7 @@ class RagServiceSourceNameTest {
         SourceDocument source = new SourceDocument("stale#chunk-20", "content", uuidFile,
                 uuidFile, "old/path/" + uuidFile, 20);
         DocumentIndexEntry current = new DocumentIndexEntry("current-id", "AI-Agents-in-Depth-zh-CN.pdf",
-                "docs/workspaces/workspace-a/" + uuidFile, "current-hash", 598, 10L,
+                "docs/workspaces/workspace-a/" + uuidFile, "current-hash", 598, java.time.Instant.ofEpochMilli(10L),
                 "SOURCE", "INDEXED", "user-1", "workspace-a", DocumentVisibility.WORKSPACE);
 
         assertThat(service.originalSourceFileName(source, List.of(current)))

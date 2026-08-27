@@ -1,6 +1,7 @@
 package com.example.workbench.rag;
 
 import com.example.workbench.config.ModelProviderException;
+import com.example.workbench.config.RateLimiter;
 import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.modelconfig.ModelCircuitBreaker;
 import com.example.workbench.modelconfig.ModelClientFactory;
@@ -77,6 +78,8 @@ public class LocalChatClient {
     private ModelClientFactory modelClientFactory;
     private ModelCircuitBreaker circuitBreaker;
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
+    private RateLimiter rateLimiter;
+    private int callsPerMinute = 30;
 
     /** 注入用户级模型解析依赖；测试直接构造时不提供，回退到全局默认模型。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -95,6 +98,13 @@ public class LocalChatClient {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setCircuitBreaker(ModelCircuitBreaker circuitBreaker) {
         this.circuitBreaker = circuitBreaker;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setRateLimiter(RateLimiter rateLimiter,
+                               @Value("${app.rate-limit.model-calls-per-minute:30}") int callsPerMinute) {
+        this.rateLimiter = rateLimiter;
+        this.callsPerMinute = Math.max(1, callsPerMinute);
     }
 
     public LocalChatClient(
@@ -208,6 +218,10 @@ public class LocalChatClient {
      * @return 模型文本流
      */
     public Flux<String> stream(String prompt, List<ChatMessage> history, Map<String, String> options) {
+        if (!allowModelRequest()) {
+            return Flux.error(new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "模型请求过于频繁，请稍后重试"));
+        }
         ResolvedModel resolved = resolveModel();
         if (resolved.client() == null) {
             return Flux.error(new IllegalStateException("ChatClient is not available"));
@@ -255,9 +269,9 @@ public class LocalChatClient {
         }
         Long userId = modelConfigContext.get();
         ModelSpec spec = modelConfigService.resolve(userId, modelConfigContext.getSelectedModelId(), modelConfigContext.getPublicId());
-        log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKey={}***",
+        log.info("resolveModel: userId={} name={} model={} baseUrl={} apiKeyConfigured={}",
                 userId, spec.name(), spec.model(), spec.baseUrl(),
-                spec.apiKey() != null && spec.apiKey().length() > 4 ? spec.apiKey().substring(0, 4) : "null");
+                spec.apiKey() != null && !spec.apiKey().isBlank());
         ChatClient client = modelClientFactory.clientFor(spec);
         List<String> models = new ArrayList<>();
         models.add(spec.model());
@@ -360,6 +374,10 @@ public class LocalChatClient {
     }
 
     private String callSpringAi(String prompt, List<ChatMessage> history, Map<String, String> options) {
+        if (!allowModelRequest()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "模型请求过于频繁，请稍后重试");
+        }
         ResolvedModel resolved = resolveModel();
         if (resolved.client() == null) {
             log.warn("AI model skipped reason=chatClient_not_available model={}", resolved.models().isEmpty() ? "unknown" : resolved.models().get(0));
@@ -436,6 +454,13 @@ public class LocalChatClient {
                 conversationId
         );
         return null;
+    }
+
+    private boolean allowModelRequest() {
+        if (rateLimiter == null) return true;
+        Long userId = modelConfigContext == null ? null : modelConfigContext.get();
+        return rateLimiter.tryAcquire("model-call", userId == null ? "anonymous" : String.valueOf(userId),
+                callsPerMinute, Duration.ofMinutes(1));
     }
 
     private ChatResponse callChatResponse(

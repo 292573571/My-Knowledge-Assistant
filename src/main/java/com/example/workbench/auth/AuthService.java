@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.example.workbench.config.RateLimiter;
 
 @Service
 public class AuthService {
@@ -26,6 +27,9 @@ public class AuthService {
     private final EmailVerificationService emailVerificationService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final Duration sessionDuration;
+    private final RateLimiter rateLimiter;
+    private final int loginPerIp;
+    private final int loginPerAccount;
 
     public AuthService(
             AppUserRepository userRepository,
@@ -33,10 +37,26 @@ public class AuthService {
             EmailVerificationService emailVerificationService,
             @Value("${app.auth.session-hours:168}") long sessionHours
     ) {
+        this(userRepository, sessionRepository, emailVerificationService, sessionHours, null, 10, 10);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AuthService(
+            AppUserRepository userRepository,
+            UserSessionRepository sessionRepository,
+            EmailVerificationService emailVerificationService,
+            @Value("${app.auth.session-hours:168}") long sessionHours,
+            RateLimiter rateLimiter,
+            @Value("${app.rate-limit.login-per-ip:10}") int loginPerIp,
+            @Value("${app.rate-limit.login-per-account:10}") int loginPerAccount
+    ) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.emailVerificationService = emailVerificationService;
         this.sessionDuration = Duration.ofHours(Math.max(1, sessionHours));
+        this.rateLimiter = rateLimiter;
+        this.loginPerIp = Math.max(1, loginPerIp);
+        this.loginPerAccount = Math.max(1, loginPerAccount);
     }
 
     @Transactional
@@ -61,7 +81,17 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
+        return login(request, "unknown");
+    }
+
+    @Transactional
+    public AuthResponse login(LoginRequest request, String ipAddress) {
         String account = normalizeAccount(request.account());
+        if (rateLimiter != null && (!rateLimiter.tryAcquire("login-ip", ipAddress, loginPerIp, Duration.ofMinutes(1))
+                || !rateLimiter.tryAcquire("login-account", account, loginPerAccount, Duration.ofMinutes(1)))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "登录尝试过于频繁，请稍后重试");
+        }
         if (!"admin".equals(account) && !isEmailFormat(account)) {
             AppUser existing = userRepository.findByAccount(account).orElse(null);
             if (existing == null || !existing.getSystemRole().canAdministerSystem()) {
@@ -85,8 +115,14 @@ public class AuthService {
             throw new InvalidCredentialsException("authentication is required");
         }
 
-        UserSession session = sessionRepository.findByTokenHash(tokenHash(token))
+        String hash = tokenHash(token);
+        UserSession session = sessionRepository.findByTokenHash(hash)
+                .or(() -> sessionRepository.findByLegacyToken(token))
                 .orElseThrow(() -> new InvalidCredentialsException("invalid or expired session"));
+        if (session.getTokenHash() == null) {
+            session.migrateTokenHash(hash);
+            sessionRepository.save(session);
+        }
         if (session.getExpiresAt().isBefore(Instant.now())) {
             throw new InvalidCredentialsException("invalid or expired session");
         }
@@ -100,6 +136,7 @@ public class AuthService {
     public void logout(String token) {
         if (token != null && !token.isBlank()) {
             sessionRepository.deleteByTokenHash(tokenHash(token));
+            sessionRepository.deleteByLegacyToken(token);
             log.info("User logged out");
         }
     }

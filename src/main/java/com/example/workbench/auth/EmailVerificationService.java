@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.workbench.config.RateLimiter;
 
 @Component
 public class EmailVerificationService {
@@ -24,7 +25,25 @@ public class EmailVerificationService {
     private final Duration ipWindow;
     private final int maxAttempts;
     private final int maxIpSends;
+    private final RateLimiter rateLimiter;
+    private final int distributedIpSends;
+    private final int distributedEmailSends;
 
+    public EmailVerificationService(
+            EmailService emailService,
+            EmailVerificationCodeRepository repository,
+            EmailVerificationSendRepository sendRepository,
+            long ttlMinutes,
+            long resendSeconds,
+            long ipWindowMinutes,
+            int maxAttempts,
+            int maxIpSends
+    ) {
+        this(emailService, repository, sendRepository, ttlMinutes, resendSeconds, ipWindowMinutes,
+                maxAttempts, maxIpSends, null, maxIpSends, 5);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public EmailVerificationService(
             EmailService emailService,
             EmailVerificationCodeRepository repository,
@@ -33,7 +52,10 @@ public class EmailVerificationService {
             @Value("${app.mail.verification.resend-seconds:60}") long resendSeconds,
             @Value("${app.mail.verification.ip-window-minutes:60}") long ipWindowMinutes,
             @Value("${app.mail.verification.max-attempts:5}") int maxAttempts,
-            @Value("${app.mail.verification.max-ip-sends:10}") int maxIpSends
+            @Value("${app.mail.verification.max-ip-sends:10}") int maxIpSends,
+            RateLimiter rateLimiter,
+            @Value("${app.rate-limit.verification-per-ip:10}") int distributedIpSends,
+            @Value("${app.rate-limit.verification-per-email:5}") int distributedEmailSends
     ) {
         this.repository = repository;
         this.sendRepository = sendRepository;
@@ -43,6 +65,9 @@ public class EmailVerificationService {
         this.ipWindow = Duration.ofMinutes(Math.max(1, ipWindowMinutes));
         this.maxAttempts = Math.max(1, maxAttempts);
         this.maxIpSends = Math.max(1, maxIpSends);
+        this.rateLimiter = rateLimiter;
+        this.distributedIpSends = Math.max(1, distributedIpSends);
+        this.distributedEmailSends = Math.max(1, distributedEmailSends);
     }
 
     @Transactional
@@ -50,6 +75,10 @@ public class EmailVerificationService {
         String normalized = normalize(email);
         Instant now = Instant.now();
         String normalizedIp = normalizeIp(ipAddress);
+        if (rateLimiter != null && (!rateLimiter.tryAcquire("verification-ip", normalizedIp, distributedIpSends, ipWindow)
+                || !rateLimiter.tryAcquire("verification-email", normalized, distributedEmailSends, ipWindow))) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "当前请求过于频繁，请稍后重试");
+        }
         repository.deleteByExpiresAtBefore(now);
         sendRepository.deleteBySentAtBefore(now.minus(ipWindow));
         EmailVerificationCode existing = repository.findByEmail(normalized).orElse(null);

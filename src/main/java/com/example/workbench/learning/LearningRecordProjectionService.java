@@ -32,7 +32,7 @@ public class LearningRecordProjectionService {
             if (event == null) return null;
             event.claim(workerId, Instant.now().plusSeconds(120));
             outboxRepository.save(event);
-            return new Claim(event.id(), event.ownerUserId(), event.workspaceId(), event.recordDate(), event.attemptCount());
+            return new Claim(event.id(), event.ownerUserId(), event.workspaceId(), event.recordDate(), event.attemptCount(), event.generation());
         });
         if (claim == null) return;
         try {
@@ -49,33 +49,35 @@ public class LearningRecordProjectionService {
             Files.createDirectories(target.getParent());
             if (records.isEmpty()) {
                 Files.deleteIfExists(target);
-                finish(claim.id());
+                finish(claim);
                 return;
             }
             Path temporary = target.resolveSibling(target.getFileName() + ".tmp-" + workerId);
             Files.writeString(temporary, content.toString(), StandardCharsets.UTF_8);
             Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            finish(claim.id());
+            finish(claim);
         } catch (Exception exception) {
-            fail(claim.id(), claim.attemptCount(), exception);
+            fail(claim, exception);
             throw new IllegalStateException("学习记录投影失败", exception);
         }
     }
 
-    private void finish(String eventId) {
-        transactions.executeWithoutResult(status -> outboxRepository.findById(eventId).ifPresent(event -> {
-            event.done(Instant.now());
-            outboxRepository.save(event);
-        }));
+    private void finish(Claim claim) {
+        transactions.executeWithoutResult(status -> {
+            if (outboxRepository.renewLease(claim.id(), LearningRecordOutboxEntity.Status.PROCESSING,
+                    workerId, claim.generation(), Instant.now().plusSeconds(120)) == 0) return;
+            outboxRepository.done(claim.id(),
+                LearningRecordOutboxEntity.Status.PROCESSING, LearningRecordOutboxEntity.Status.DONE,
+                workerId, claim.generation(), Instant.now());
+        });
     }
 
-    private void fail(String eventId, int attemptCount, Exception exception) {
-        transactions.executeWithoutResult(status -> outboxRepository.findById(eventId).ifPresent(event -> {
-            event.retry(Instant.now().plusSeconds(Math.min(3600, 5L * attemptCount)),
-                    exception.getClass().getSimpleName());
-            outboxRepository.save(event);
-        }));
+    private void fail(Claim claim, Exception exception) {
+        transactions.executeWithoutResult(status -> outboxRepository.retry(claim.id(),
+                LearningRecordOutboxEntity.Status.PROCESSING, LearningRecordOutboxEntity.Status.QUEUED,
+                workerId, claim.generation(), Instant.now().plusSeconds(Math.min(3600, 5L * claim.attemptCount())),
+                exception.getClass().getSimpleName()));
     }
 
     private String safeWorkspace(String workspaceId) {
@@ -83,5 +85,5 @@ public class LearningRecordProjectionService {
     }
 
     private record Claim(String id, Long ownerUserId, String workspaceId, java.time.LocalDate recordDate,
-                         int attemptCount) {}
+                         int attemptCount, long generation) {}
 }

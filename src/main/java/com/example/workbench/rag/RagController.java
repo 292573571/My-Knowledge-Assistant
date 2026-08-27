@@ -16,6 +16,7 @@ import com.example.workbench.config.AiConfig;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
+import com.example.workbench.pagination.PageResponse;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -124,8 +125,12 @@ public class RagController {
     }
 
     @GetMapping("/documents")
-    public List<DocumentIndexEntry> documents(@RequestParam(required = false) String workspaceId, HttpServletRequest request) {
-        return documentIngestionService.listWorkspaceIndexedDocuments(access(request, workspaceId));
+    public Object documents(@RequestParam(required = false) String workspaceId,
+                            @RequestParam(required = false) Integer page,
+                            @RequestParam(required = false) Integer size,
+                            HttpServletRequest request) {
+        List<DocumentIndexEntry> documents = documentIngestionService.listWorkspaceIndexedDocuments(access(request, workspaceId));
+        return page == null && size == null ? documents : PageResponse.of(documents, page, size);
     }
 
     @PostMapping(path = "/documents/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -152,11 +157,15 @@ public class RagController {
     }
 
     @GetMapping("/document-tasks")
-    public List<DocumentTaskResponse> documentTasks(@RequestParam(required = false) String workspaceId,
+    public Object documentTasks(@RequestParam(required = false) String workspaceId,
+                                                    @RequestParam(required = false) Integer page,
+                                                    @RequestParam(required = false) Integer size,
                                                     HttpServletRequest request) {
         AppUser actor = authenticatedUser(request);
-        return documentTaskService.list(workspaceService.access(actor, workspaceId),
-                adminAuthorizationService.isAdmin(actor));
+        WorkspaceAccessContext access = workspaceService.access(actor, workspaceId);
+        return page == null && size == null
+                ? documentTaskService.list(access, adminAuthorizationService.isAdmin(actor))
+                : documentTaskService.page(access, adminAuthorizationService.isAdmin(actor), page, size);
     }
 
     @GetMapping("/document-tasks/{taskId}/batches")

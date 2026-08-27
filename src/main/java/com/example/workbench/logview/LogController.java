@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -73,7 +74,8 @@ public class LogController {
         List<String> levels = level != null && !level.isBlank() ? LEVEL_ABOVE.getOrDefault(level.strip().toUpperCase(), null) : null;
         String kw = keyword != null && !keyword.isBlank() ? keyword.strip() : null;
 
-        PageRequest pageable = PageRequest.of(page, size);
+        PageRequest pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Direction.DESC, "timestamp").and(Sort.by(Sort.Direction.DESC, "id")));
         Specification<SystemLog> specification = Specification.where(null);
         if (levels != null) specification = specification.and((root, query, builder) -> root.get("level").in(levels));
         if (kw != null) specification = specification.and((root, query, builder) ->

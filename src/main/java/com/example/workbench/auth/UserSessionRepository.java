@@ -10,7 +10,11 @@ public interface UserSessionRepository extends JpaRepository<UserSession, Long> 
 
     Optional<UserSession> findByTokenHash(String tokenHash);
 
+    Optional<UserSession> findByLegacyToken(String legacyToken);
+
     void deleteByTokenHash(String tokenHash);
+
+    void deleteByLegacyToken(String legacyToken);
 
     @Modifying
     @Query("delete from UserSession session where session.user.id = :userId and session.tokenHash <> :currentTokenHash")

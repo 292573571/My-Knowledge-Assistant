@@ -95,9 +95,13 @@ public class LearningAssistantController {
     }
 
     @GetMapping
-    public List<LearningAssistantSessionResponse> list(@RequestParam(required = false) String workspaceId,
+    public Object list(@RequestParam(required = false) String workspaceId,
+                                                       @RequestParam(required = false) Integer page,
+                                                       @RequestParam(required = false) Integer size,
                                                        HttpServletRequest httpRequest) {
-        return service.listSessions(user(httpRequest), workspaceId);
+        AppUser currentUser = user(httpRequest);
+        return page == null && size == null ? service.listSessions(currentUser, workspaceId)
+                : service.pageSessions(currentUser, workspaceId, page == null ? 0 : page, size == null ? 100 : size);
     }
 
     @GetMapping("/{sessionId}")

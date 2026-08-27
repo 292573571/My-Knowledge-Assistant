@@ -36,8 +36,10 @@ async function request(path, options = {}) {
   return data && typeof data === 'object' ? { ...data, requestId } : data
 }
 
-export function fetchDocuments(workspaceId = '') {
-  return request(`/api/documents${workspaceQuery(workspaceId)}`)
+export function fetchDocuments(workspaceId = '', pagination = null) {
+  const query = workspaceQuery(workspaceId)
+  const suffix = pagination ? `${query ? '&' : '?'}page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/documents${query}${suffix}`)
 }
 
 export function fetchDocumentContent(documentId, workspaceId = '') {
@@ -55,8 +57,10 @@ export function uploadWorkspaceDocument(file, workspaceId = '', clientRequestId 
   })
 }
 
-export function fetchDocumentTasks(workspaceId = '') {
-  return request(`/api/document-tasks${workspaceQuery(workspaceId)}`)
+export function fetchDocumentTasks(workspaceId = '', pagination = null) {
+  const query = workspaceQuery(workspaceId)
+  const suffix = pagination ? `${query ? '&' : '?'}page=${pagination.page ?? 0}&size=${pagination.size ?? 100}` : ''
+  return request(`/api/document-tasks${query}${suffix}`)
 }
 
 export function fetchDocumentTaskBatches(taskId, workspaceId = '') {

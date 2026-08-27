@@ -209,6 +209,77 @@ class WorkspaceServiceTest {
         verify(memberRepository).delete(memberMembership);
     }
 
+    @Test
+    void regularUserCanCreateIndependentTeam() {
+        AppUser owner = user(1L, "alice", "usr_alice", "Alice");
+
+        WorkspaceResponse response = service.createTeam(owner,
+                new CreateWorkspaceRequest("独立团队", null));
+
+        assertThat(response.type()).isEqualTo(WorkspaceType.TEAM);
+        assertThat(response.parentId()).isNull();
+        verify(memberRepository).save(Mockito.argThat(member -> member.getRole() == WorkspaceRole.OWNER));
+    }
+
+    @Test
+    void organizationOwnerCanCreateTeamUnderRootOrganization() {
+        AppUser owner = user(1L, "alice", "usr_alice", "Alice");
+        Workspace org = new Workspace("org-1", "研发组织", WorkspaceType.ORG, owner);
+        when(workspaceRepository.findById("org-1")).thenReturn(Optional.of(org));
+        when(memberRepository.findByWorkspaceIdAndUserId("org-1", 1L))
+                .thenReturn(Optional.of(new WorkspaceMember(org, owner, WorkspaceRole.OWNER)));
+
+        WorkspaceResponse response = service.createTeamUnder(owner, " org-1 ",
+                new CreateWorkspaceRequest("组织团队", "org-1"));
+
+        assertThat(response.type()).isEqualTo(WorkspaceType.TEAM);
+        assertThat(response.parentId()).isEqualTo("org-1");
+    }
+
+    @Test
+    void systemAdminCanCreateTeamUnderRootOrganizationWithoutMembership() {
+        AppUser admin = user(1L, "ops", "usr_ops", "Ops");
+        when(admin.getSystemRole()).thenReturn(SystemRole.ADMIN);
+        Workspace org = new Workspace("org-1", "研发组织", WorkspaceType.ORG, user(2L, "alice", "usr_alice", "Alice"));
+        when(workspaceRepository.findById("org-1")).thenReturn(Optional.of(org));
+
+        WorkspaceResponse response = service.createTeamUnder(admin, "org-1",
+                new CreateWorkspaceRequest("管理员团队", "org-1"));
+
+        assertThat(response.parentId()).isEqualTo("org-1");
+        verify(memberRepository, never()).findByWorkspaceIdAndUserId("org-1", 1L);
+    }
+
+    @Test
+    void regularMemberCannotCreateTeamUnderOrganization() {
+        AppUser member = user(1L, "bob", "usr_bob", "Bob");
+        Workspace org = new Workspace("org-1", "研发组织", WorkspaceType.ORG, user(2L, "alice", "usr_alice", "Alice"));
+        when(workspaceRepository.findById("org-1")).thenReturn(Optional.of(org));
+        when(memberRepository.findByWorkspaceIdAndUserId("org-1", 1L))
+                .thenReturn(Optional.of(new WorkspaceMember(org, member, WorkspaceRole.EDITOR)));
+
+        assertThatThrownBy(() -> service.createTeamUnder(member, "org-1",
+                new CreateWorkspaceRequest("越权团队", "org-1")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("403 FORBIDDEN");
+    }
+
+    @Test
+    void teamCannotBeCreatedUnderTeamOrWithInvalidName() {
+        AppUser owner = user(1L, "alice", "usr_alice", "Alice");
+        Workspace parentTeam = new Workspace("team-1", "已有团队", WorkspaceType.TEAM, owner);
+        when(workspaceRepository.findById("team-1")).thenReturn(Optional.of(parentTeam));
+
+        assertThatThrownBy(() -> service.createTeamUnder(owner, "team-1",
+                new CreateWorkspaceRequest("子团队", "team-1")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("根组织");
+        assertThatThrownBy(() -> service.createTeam(owner,
+                new CreateWorkspaceRequest("   ", null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("团队名称");
+    }
+
     private AppUser user(Long id, String account, String publicId, String name) {
         AppUser user = Mockito.mock(AppUser.class);
         when(user.getId()).thenReturn(id);

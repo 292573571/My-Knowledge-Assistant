@@ -49,28 +49,52 @@ public class DocumentIndexStore {
         if (repository == null) {
             List<DocumentIndexEntry> nextEntries = new ArrayList<>(list());
             for (DocumentIndexEntry entry : entries) {
-                nextEntries.removeIf(existing -> existing.documentId().equals(entry.documentId()) || existing.path().equals(entry.path()) || existing.contentHash().equals(entry.contentHash()));
+                nextEntries.removeIf(existing -> sameWorkspace(existing, entry)
+                        && (existing.documentId().equals(entry.documentId()) || existing.path().equals(entry.path())
+                        || existing.contentHash().equals(entry.contentHash())));
                 nextEntries.add(entry);
             }
             replaceAll(nextEntries);
             return;
         }
         for (DocumentIndexEntry entry : entries) {
-            repository.deleteByDocumentId(entry.documentId());
-            repository.deleteByPathOrContentHash(entry.path(), entry.contentHash());
+            repository.deleteByDocumentIdAndWorkspace(entry.documentId(), entry.workspaceId());
+            repository.deleteByPathOrContentHashAndWorkspace(entry.path(), entry.contentHash(), entry.workspaceId());
             repository.save(new DocumentIndexEntity(entry));
         }
     }
 
     @Transactional
     public synchronized void delete(String documentId) {
-        if (repository == null) replaceAll(list().stream().filter(entry -> !entry.documentId().equals(documentId)).toList());
-        else repository.deleteByDocumentId(documentId);
+        if (repository == null) {
+            replaceAll(list().stream().filter(entry -> !entry.documentId().equals(documentId)).toList());
+        } else {
+            repository.findAllByDocumentId(documentId).forEach(entry ->
+                    repository.deleteByDocumentIdAndWorkspace(documentId, entry.toEntry().workspaceId()));
+        }
+    }
+
+    @Transactional
+    public synchronized void delete(String documentId, String workspaceId) {
+        if (repository == null) {
+            replaceAll(list().stream().filter(entry -> !entry.documentId().equals(documentId)
+                    || !sameWorkspace(entry.workspaceId(), workspaceId)).toList());
+        } else {
+            repository.deleteByDocumentIdAndWorkspace(documentId, workspaceId);
+        }
     }
 
     @Transactional
     public synchronized void clear() {
         if (repository == null) testEntries = new ArrayList<>();
         else repository.deleteAllInBatch();
+    }
+
+    private boolean sameWorkspace(DocumentIndexEntry left, DocumentIndexEntry right) {
+        return sameWorkspace(left.workspaceId(), right.workspaceId());
+    }
+
+    private boolean sameWorkspace(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 }
