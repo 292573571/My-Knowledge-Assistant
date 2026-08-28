@@ -125,7 +125,7 @@ const indexStatusLabels = {
   FAILED: '索引失败'
 }
 
-const supportedUploadExtensions = new Set(['md', 'txt', 'html', 'htm', 'pdf', 'docx', 'png', 'jpg', 'jpeg'])
+const supportedUploadExtensions = new Set(['md', 'txt', 'html', 'htm', 'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'csv', 'json', 'jsonl', 'xml', 'rtf', 'odt', 'png', 'jpg', 'jpeg'])
 const maxUploadBytes = 50 * 1024 * 1024
 
 function fileExtension(fileName = '') {
@@ -308,7 +308,7 @@ function chooseUploadFiles(files) {
   if (unsupportedFiles.length) {
     selectedUploadFiles.value = []
     showError(
-      `不支持 ${unsupportedFiles.map((file) => `“${file.name}”`).join('、')}。请选择 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG 文件。`,
+      `不支持 ${unsupportedFiles.map((file) => `“${file.name}”`).join('、')}。请选择 Markdown、TXT、HTML、DOCX、DOC、XLSX、XLS、PPTX、PPT、CSV、JSON、XML、RTF、ODT、PDF、PNG 或 JPEG 文件。`,
       'error',
       '文件格式不支持'
     )
@@ -577,7 +577,7 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
     </Teleport>
 
     <div v-if="loading && !documents.length" class="document-list-skeleton" role="status" aria-label="正在加载文档列表"><span></span><span></span><span></span></div>
-    <div v-else-if="!documents.length" class="muted-card document-empty-state"><strong>当前空间暂无文档</strong><span>上传 Markdown、TXT、HTML、DOCX、PDF、PNG 或 JPEG，开始构建知识库。</span><button type="button" class="document-empty-action" @click="openUploadDialog">上传第一份文档</button></div>
+    <div v-else-if="!documents.length" class="muted-card document-empty-state"><strong>当前空间暂无文档</strong><span>上传 Markdown、TXT、HTML、DOCX、DOC、XLSX、XLS、PPTX、PPT、CSV、JSON、XML、RTF、ODT、PDF、PNG 或 JPEG，开始构建知识库。</span><button type="button" class="document-empty-action" @click="openUploadDialog">上传第一份文档</button></div>
     <div v-else-if="!filteredDocuments.length && !loading" class="muted-card">没有匹配的文档</div>
     <article
       v-for="document in filteredDocuments"
