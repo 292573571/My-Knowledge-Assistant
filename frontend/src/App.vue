@@ -175,14 +175,14 @@ async function restoreWorkspace(user) {
     accountMenuOpen.value = false
     passwordFormOpen.value = false
     workspaceManagerOpen.value = false
+    currentUser.value = user
+    avatarSrc.value = user?.avatarUrl || ''
     workspaces.value = await initializePersonalWorkspace()
     activeWorkspaceId.value = workspaces.value.find(workspace => workspace.type === 'PERSONAL')?.id || ''
-    currentUser.value = user
     applyUrlState()
     syncUrlState({ replace: true })
     await nextTick()
     window.scrollTo({ top: 0, behavior: 'auto' })
-    await refreshAvatar()
   } finally {
     restoringWorkspace.value = false
     appReady.value = true
