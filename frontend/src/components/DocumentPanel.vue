@@ -622,11 +622,11 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
             @dragleave.prevent="uploadDragActive = false"
             @drop.prevent="handleUploadDrop"
           >
-            <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,.png,.jpg,.jpeg,text/markdown,text/plain,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg" @change="handleUploadInput">
+            <input ref="uploadInput" hidden multiple type="file" accept=".md,.txt,.html,.htm,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.csv,.json,.jsonl,.xml,.rtf,.odt,.png,.jpg,.jpeg,text/markdown,text/plain,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,application/json,application/xml,application/rtf,application/vnd.oasis.opendocument.text,image/png,image/jpeg" @change="handleUploadInput">
             <span class="document-dropzone-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg></span>
             <strong>{{ selectedUploadFiles.length ? `${selectedUploadFiles.length} 个文件已准备好` : '拖拽文件到这里' }}</strong>
             <span>{{ selectedUploadFiles.length ? '可以继续选择以替换文件' : '或点击选择文件' }}</span>
-            <small>支持 Markdown、TXT、HTML、DOCX、PDF、PNG 和 JPEG；扫描内容会自动 OCR，单个文件最大 50 MB</small>
+            <small>支持 Markdown、TXT、HTML、DOCX、DOC、Excel、PPT、CSV、JSON、XML、RTF、ODT、PDF、PNG 和 JPEG；扫描内容会自动 OCR，单个文件最大 50 MB</small>
           </div>
 
           <ul v-if="selectedUploadFiles.length" class="document-upload-file-list">

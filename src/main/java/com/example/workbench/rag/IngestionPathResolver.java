@@ -87,15 +87,21 @@ public final class IngestionPathResolver {
     public boolean isSupportedDocument(Path path) {
         String fileName = path.getFileName().toString().toLowerCase();
         return fileName.endsWith(".md") || fileName.endsWith(".txt")
-                || fileName.endsWith(".pdf") || fileName.endsWith(".docx")
+                || fileName.endsWith(".pdf") || fileName.endsWith(".docx") || fileName.endsWith(".doc")
+                || fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
+                || fileName.endsWith(".pptx") || fileName.endsWith(".ppt")
+                || fileName.endsWith(".csv") || fileName.endsWith(".json") || fileName.endsWith(".jsonl")
+                || fileName.endsWith(".xml") || fileName.endsWith(".rtf") || fileName.endsWith(".odt")
                 || fileName.endsWith(".html") || fileName.endsWith(".htm")
                 || fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg");
     }
 
     public boolean isBinaryDocument(String fileName) {
         String lower = fileName.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".png")
-                || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+        return lower.endsWith(".pdf") || lower.endsWith(".docx") || lower.endsWith(".doc")
+                || lower.endsWith(".xlsx") || lower.endsWith(".xls")
+                || lower.endsWith(".pptx") || lower.endsWith(".ppt")
+                || lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
     }
 
     public boolean isImageDocument(String fileName) {
@@ -143,10 +149,15 @@ public final class IngestionPathResolver {
         String fileName = originalFileName == null ? "" : Path.of(originalFileName).getFileName().toString().strip();
         String lower = fileName.toLowerCase();
         if (fileName.isBlank() || (!lower.endsWith(".md") && !lower.endsWith(".txt")
-                && !lower.endsWith(".pdf") && !lower.endsWith(".docx")
+                && !lower.endsWith(".pdf") && !lower.endsWith(".docx") && !lower.endsWith(".doc")
+                && !lower.endsWith(".xlsx") && !lower.endsWith(".xls")
+                && !lower.endsWith(".pptx") && !lower.endsWith(".ppt")
+                && !lower.endsWith(".csv") && !lower.endsWith(".json") && !lower.endsWith(".jsonl")
+                && !lower.endsWith(".xml") && !lower.endsWith(".rtf") && !lower.endsWith(".odt")
                 && !lower.endsWith(".html") && !lower.endsWith(".htm")
                 && !lower.endsWith(".png") && !lower.endsWith(".jpg") && !lower.endsWith(".jpeg"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档仅支持 Markdown、TXT、HTML、PDF、DOCX、PNG 或 JPEG");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "文档仅支持 Markdown、TXT、HTML、PDF、DOCX、DOC、XLSX、XLS、PPTX、PPT、CSV、JSON、XML、RTF、ODT、PNG 或 JPEG");
         }
         if (fileName.length() > 180) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档文件名过长");
