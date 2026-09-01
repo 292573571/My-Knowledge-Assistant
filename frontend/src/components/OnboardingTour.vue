@@ -9,6 +9,7 @@ const emit = defineEmits(['close'])
 const STORAGE_KEY = 'shihai_tour_done_v1'
 const steps = [
   { selector: '.home-hero-actions', title: '欢迎使用识海', body: '这里是你的主入口：「开始学习」进入 AI 学习助手，「先导入资料」去知识库。', placement: 'bottom' },
+  { selector: '.home-system-intro', title: '认识你的知识库', body: '资料会经过解析、OCR、切分和索引，之后 AI 只基于你有权限访问的知识回答并展示来源。', placement: 'top' },
   { selector: '.home-entry-grid', title: '三个核心能力', body: 'AI 学习助手、知识库管理、学习记录——覆盖从导入到掌握的全过程。', placement: 'top' },
   { selector: '.home-checklist', title: '跟着清单做', body: '这 4 步做完，你就能玩转系统。勾选或点「去做」会自动记录进度。', placement: 'top' },
   { selector: '.home-concepts', title: '先搞懂三个概念', body: '知识空间、两类模型、检索诊断——理解它们后面就不会迷路。', placement: 'top' },

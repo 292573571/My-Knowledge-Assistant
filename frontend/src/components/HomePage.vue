@@ -111,6 +111,27 @@ onMounted(() => {
       </div>
     </section>
 
+    <section class="home-system-intro" data-reveal>
+      <div class="home-system-intro-copy">
+        <span class="home-eyebrow">系统简介 · KNOWLEDGE BASE</span>
+        <h2>你的知识，不只是被保存，而是随时可以被调用。</h2>
+        <p>识海会把资料变成可检索、可理解、可复用的知识资产。你可以上传文档到个人或团队空间，系统自动解析、切分并建立索引，再让 AI 基于你有权限访问的内容回答问题。</p>
+      </div>
+      <div class="home-system-flow" aria-label="知识沉淀流程">
+        <div><span>01</span><strong>导入资料</strong><small>PDF、Word、Markdown、表格、图片等</small></div>
+        <b aria-hidden="true">→</b>
+        <div><span>02</span><strong>自动建立索引</strong><small>解析、OCR、切分、向量化</small></div>
+        <b aria-hidden="true">→</b>
+        <div><span>03</span><strong>提问与沉淀</strong><small>基于授权知识回答并形成学习记录</small></div>
+      </div>
+      <div class="home-system-tags" aria-label="知识库能力">
+        <span>个人 / 团队 / 组织 / 公共空间</span>
+        <span>语义 + 关键词混合检索</span>
+        <span>来源与页码追踪</span>
+        <span>异步任务与失败重试</span>
+      </div>
+    </section>
+
     <section class="home-entries" data-reveal>
       <header><h2>从这里开始</h2><p>三个核心能力，覆盖从知识导入到掌握的全过程。</p></header>
       <div class="home-entry-grid">
@@ -190,7 +211,83 @@ onMounted(() => {
 .home-checklist,
 .home-concepts,
 .home-faq {
+  margin-top: 36px;
+}
+.home-system-intro {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: 26px 46px;
+  align-items: center;
   margin-top: 64px;
+  border: 1px solid #d8e2d6;
+  border-radius: 22px;
+  padding: 30px;
+  background: linear-gradient(135deg, #f5f8ef, #fffef9 58%, #f1f5ed);
+  box-shadow: 0 18px 38px rgba(56, 64, 49, .06);
+}
+.home-system-intro-copy h2 {
+  max-width: 460px;
+  margin: 10px 0 0;
+  color: var(--site-ink, #17221b);
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.18;
+  letter-spacing: -.04em;
+}
+.home-system-intro-copy > p {
+  max-width: 520px;
+  margin: 14px 0 0;
+  color: var(--site-muted, #718074);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.home-system-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.home-system-flow > div {
+  display: grid;
+  gap: 6px;
+  min-height: 128px;
+  align-content: center;
+  border: 1px solid #dce5d8;
+  border-radius: 14px;
+  padding: 15px;
+  background: rgba(255, 255, 255, .72);
+}
+.home-system-flow span {
+  color: var(--site-green, #1d5939);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+.home-system-flow strong {
+  color: var(--site-ink-soft, #314438);
+  font-size: 14px;
+}
+.home-system-flow small {
+  color: var(--site-muted, #718074);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.home-system-flow > b {
+  color: #8aa18c;
+  font-size: 20px;
+  font-weight: 500;
+}
+.home-system-tags {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.home-system-tags span {
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #55705a;
+  background: rgba(224, 235, 220, .72);
+  font-size: 11px;
 }
 .home-checklist > header,
 .home-concepts > header,
@@ -428,6 +525,21 @@ onMounted(() => {
 }
 
 @media (max-width: 760px) {
+  .home-system-intro {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 22px;
+  }
+  .home-system-flow {
+    grid-template-columns: 1fr;
+  }
+  .home-system-flow > div {
+    min-height: 0;
+  }
+  .home-system-flow > b {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
   .home-concept-grid {
     grid-template-columns: 1fr;
   }
