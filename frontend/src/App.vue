@@ -19,6 +19,7 @@ const currentUser = ref(null)
 const checkingSession = ref(true)
 const restoringWorkspace = ref(false)
 const appReady = ref(false)
+const authOpen = ref(false)
 const activeSection = ref('home')
 const assistantMounted = ref(false)
 const accountMenuOpen = ref(false)
@@ -89,6 +90,7 @@ function handlePopState() {
 function handleAccountKeydown(event) {
   if (event.key === 'Escape') {
     accountMenuOpen.value = false
+    authOpen.value = false
   }
 }
 
@@ -104,6 +106,10 @@ function handleDocumentClick(event) {
   }
 }
 
+function scrollPublicTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 onMounted(async () => {
   setupScrollReveal()
   window.addEventListener('popstate', handlePopState)
@@ -116,6 +122,7 @@ onMounted(async () => {
   } catch {
     currentUser.value = null
     setActiveWorkspaceId('')
+    authOpen.value = false
   } finally {
     checkingSession.value = false
     appReady.value = true
@@ -299,8 +306,7 @@ async function submitPasswordChange() {
 
 <template>
   <div v-if="checkingSession || restoringWorkspace || !appReady" class="auth-page"><p>{{ currentUser ? '正在打开工作台...' : '正在恢复登录状态...' }}</p></div>
-  <AuthPage v-else-if="!currentUser" @authenticated="restoreWorkspace" />
-  <template v-else>
+  <template v-else-if="currentUser">
     <div class="learning-portal" :class="{ 'content-page': activeSection !== 'assistant' }" @keydown.esc="mobileNavOpen = false">
       <header class="portal-header">
         <button type="button" class="portal-brand" @click="navigateTo('home')">
@@ -389,6 +395,65 @@ async function submitPasswordChange() {
       <footer class="site-footer">
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">鄂ICP备2026046031号</a>
       </footer>
+    </div>
+  </template>
+  <template v-else>
+    <div class="public-site">
+      <header class="public-header">
+        <button type="button" class="public-brand" @click="scrollPublicTop">
+          <img class="public-brand-mark" src="/brand/ChatGPT%20Image%202026%E5%B9%B48%E6%9C%8817%E6%97%A5%2016_29_03.png" width="42" height="42" alt="识海" />
+          <span>识海 <small>LEARNING STUDIO</small></span>
+        </button>
+        <nav class="public-nav" aria-label="公开页面导航">
+          <a href="#features">核心能力</a>
+          <a href="#workflow">使用流程</a>
+          <button type="button" class="public-primary-button" @click="authOpen = true">开始使用</button>
+        </nav>
+      </header>
+
+      <main class="public-landing">
+        <section class="public-hero">
+          <div class="public-hero-copy">
+            <span class="public-kicker">PERSONAL KNOWLEDGE · AI LEARNING</span>
+            <h1>把散落的资料，<em>变成真正会用的知识。</em></h1>
+            <p>识海帮助你整理个人与团队资料，让 AI 基于你自己的知识空间回答问题、辅助学习，并把每一次理解沉淀成可复用的知识资产。</p>
+            <div class="public-hero-actions">
+              <button type="button" class="public-primary-button" @click="authOpen = true">免费开始使用</button>
+              <a href="#workflow" class="public-secondary-button">了解它如何工作</a>
+            </div>
+            <div class="public-trust-line"><span>无需先登录即可了解</span><i></i><span>个人、团队与公共空间</span><i></i><span>资料权限隔离</span></div>
+          </div>
+          <div class="public-hero-visual" aria-label="知识库工作流程示意图">
+            <div class="public-visual-orbit"><span>你的知识</span><strong>可检索<br>可理解<br>可复用</strong></div>
+            <div class="public-visual-card public-visual-card-top"><small>INGEST</small><strong>导入资料</strong><span>PDF · Markdown · Office</span></div>
+            <div class="public-visual-card public-visual-card-left"><small>RETRIEVE</small><strong>精准检索</strong><span>语义 + 关键词</span></div>
+            <div class="public-visual-card public-visual-card-right"><small>LEARN</small><strong>AI 学习</strong><span>回答 · 练习 · 复习</span></div>
+          </div>
+        </section>
+
+        <section id="features" class="public-section public-features">
+          <div class="public-section-heading"><span class="public-kicker">WHY SHIHAI</span><h2>让知识从“存下来”<br>走向“用起来”。</h2><p>从资料进入系统，到成为你可以随时调用的学习能力，识海负责处理复杂的底层工作。</p></div>
+          <div class="public-feature-grid">
+            <article><span class="public-feature-number">01</span><h3>属于你的知识空间</h3><p>个人空间保护隐私，团队空间促进协作，组织和公共空间承载共享知识。</p></article>
+            <article><span class="public-feature-number">02</span><h3>资料自动变得可检索</h3><p>上传文档后，系统自动解析、OCR、切分和建立索引，不需要手动整理成数据库。</p></article>
+            <article><span class="public-feature-number">03</span><h3>回答有依据，更可靠</h3><p>AI 基于你有权限访问的资料回答，并保留来源、页码和片段信息，方便回看核对。</p></article>
+          </div>
+        </section>
+
+        <section id="workflow" class="public-section public-workflow">
+          <div class="public-workflow-heading"><span class="public-kicker">HOW IT WORKS</span><h2>三步，让资料开始工作。</h2></div>
+          <div class="public-workflow-grid"><div><span>01</span><strong>导入资料</strong><p>上传 PDF、Word、Markdown、表格、演示文稿或图片。</p></div><b>→</b><div><span>02</span><strong>自动建立索引</strong><p>系统完成解析、OCR、内容切分和向量化处理。</p></div><b>→</b><div><span>03</span><strong>提问与沉淀</strong><p>AI 基于授权知识回答，学习内容还能沉淀为正式笔记。</p></div></div>
+        </section>
+
+        <section class="public-final-cta"><div><span class="public-kicker">START YOUR KNOWLEDGE JOURNEY</span><h2>让下一次提问，<br>从你的知识出发。</h2></div><button type="button" class="public-primary-button" @click="authOpen = true">进入识海</button></section>
+      </main>
+      <footer class="site-footer"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">鄂ICP备2026046031号</a></footer>
+    </div>
+    <div v-if="authOpen" class="auth-modal-backdrop" @click.self="authOpen = false">
+      <section class="auth-modal" role="dialog" aria-modal="true" aria-label="登录或注册">
+        <button type="button" class="auth-modal-close" aria-label="关闭" @click="authOpen = false">×</button>
+        <AuthPage @authenticated="restoreWorkspace" />
+      </section>
     </div>
   </template>
 </template>
