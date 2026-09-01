@@ -16,6 +16,7 @@ import {
   submitLearningPractice
 } from '../api/learningAssistantApi'
 import { createUuid } from '../utils/uuid'
+import { groupSourcesByFile } from '../utils/sources'
 import { fetchMyConfig } from '../api/modelConfigApi'
 
 const emit = defineEmits(['manage-models'])
@@ -47,17 +48,7 @@ const hoveredSource = ref(null)
 const sourceTooltipPosition = ref({ top: 0, left: 0 })
 const latestSources = computed(() => {
   const sources = [...messages.value].reverse().find(item => item.role === 'assistant' && item.sources?.length)?.sources || []
-  const groups = new Map()
-  sources.forEach((source, index) => {
-    const key = source.documentId || source.path || source.fileName || source.file || source.title || source.name || source.url || `source-${index}`
-    const page = source.pageNumber || source.page
-    const current = groups.get(key) || { ...source, pages: [], chunks: [] }
-    if (page && !current.pages.includes(page)) current.pages.push(page)
-    const chunk = source.chunkIndex ?? source.chunkId
-    if (chunk !== undefined && chunk !== null && !current.chunks.includes(chunk)) current.chunks.push(chunk)
-    groups.set(key, current)
-  })
-  return [...groups.values()]
+  return groupSourcesByFile(sources)
 })
 const closeStream = ref(null)
 const streamingRequest = ref(false)
@@ -462,7 +453,7 @@ function modelChanged(nextModelId) {
 
 function sourceLabel(source) {
   const name = source.fileName || source.file || source.title || source.name || '来源'
-  const pages = source.pages?.length ? ` · ${source.pages.map(page => `第 ${page} 页`).join('、')}` : ''
+  const pages = source.pages?.length ? ` · 第 ${source.pages.join('、')} 页` : ''
   return `${name}${pages}`
 }
 
@@ -609,7 +600,7 @@ function closeSourceOnPointerMove(event) {
             <strong>{{ sourceLabel(hoveredSource) }}</strong>
             <dl>
               <div><dt>标题</dt><dd>{{ sourceHeading(hoveredSource) }}</dd></div>
-              <div><dt>页码</dt><dd>{{ hoveredSource.pages?.length ? hoveredSource.pages.map(page => `第 ${page} 页`).join('、') : '-' }}</dd></div>
+              <div><dt>页码</dt><dd>{{ hoveredSource.pages?.length ? hoveredSource.pages.join('、') : '-' }}</dd></div>
               <div><dt>分块</dt><dd>{{ hoveredSource.chunks?.length ? hoveredSource.chunks.map(chunk => `#${chunk}`).join('、') : '-' }}</dd></div>
             </dl>
             <p>{{ sourcePreview(hoveredSource) }}</p>

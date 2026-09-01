@@ -24,3 +24,43 @@ export function deduplicateDisplayedSources(sources = []) {
     return true
   })
 }
+
+function sourceFileKey(source, index) {
+  return source.documentId
+    || source.path
+    || source.fileName
+    || source.file
+    || source.title
+    || source.name
+    || source.url
+    || `source-${index}`
+}
+
+export function groupSourcesByFile(sources = []) {
+  const groups = new Map()
+
+  ;(sources || []).forEach((source, index) => {
+    if (!source) return
+    const key = sourceFileKey(source, index)
+    const page = source.pageNumber ?? source.page
+    const chunk = source.chunkIndex ?? source.chunkId
+    let group = groups.get(key)
+    if (!group) {
+      group = { ...source, key, pages: [], chunks: [], count: 0 }
+      groups.set(key, group)
+    }
+    group.count += 1
+    if (page != null && page !== '' && !group.pages.includes(page)) group.pages.push(page)
+    if (chunk !== undefined && chunk !== null && !group.chunks.includes(chunk)) group.chunks.push(chunk)
+  })
+
+  return [...groups.values()].map((group) => ({
+    ...group,
+    pages: [...group.pages].sort((a, b) => {
+      const left = Number(a)
+      const right = Number(b)
+      if (!Number.isNaN(left) && !Number.isNaN(right)) return left - right
+      return String(a).localeCompare(String(b), 'zh-CN')
+    })
+  }))
+}

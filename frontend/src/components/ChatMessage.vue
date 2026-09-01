@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
-import { deduplicateDisplayedSources } from '../utils/sources'
+import { groupSourcesByFile } from '../utils/sources'
 
 const props = defineProps({
   message: {
@@ -21,21 +21,18 @@ const displayContent = computed(() => (props.message.content || '')
 const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
-const displayedSources = computed(() => deduplicateDisplayedSources(props.message.sources))
+const displayedSources = computed(() => groupSourcesByFile(props.message.sources))
 const isModelSupplement = computed(() => isAssistant.value && !props.message.error && !props.message.sources?.length
   && props.message.content?.includes('以上回答基于通用大模型知识'))
-function sourceLabel(source) {
-  const file = source.fileName || source.file || source.title || source.name || '来源'
-  const page = source.pageNumber ? ` / 第 ${source.pageNumber} 页` : ''
-  const heading = source.headingPath ? ` / ${source.headingPath}` : ''
+function sourceLabel(group) {
+  const file = group.fileName || group.file || group.title || group.name || '来源'
+  const pages = group.pages?.length ? ` · 第 ${group.pages.join('、')} 页` : ''
 
-  return `${file}${page}${heading}`
+  return `${file}${pages}`
 }
 
-function sourceKey(source, index) {
-  return [source.documentId, source.fileName, source.file, source.pageNumber, source.headingPath, index]
-    .filter(value => value !== undefined && value !== null && value !== '')
-    .join(':')
+function sourceKey(group) {
+  return group.key || [group.fileName, group.file, group.title, group.name].filter(Boolean).join(':')
 }
 const timeLabel = computed(() => {
   if (!props.message.createdAt) return ''
@@ -84,8 +81,8 @@ async function copyCode(event) {
       </div>
       <div v-if="!streaming && isModelSupplement" class="model-supplement-label"><strong>模型补充</strong><span>不含本地资料依据，请对关键事实进行核实。</span></div>
       <div v-if="isAssistant && displayedSources.length" class="source-chips">
-        <span v-for="(source, index) in displayedSources" :key="sourceKey(source, index)">
-          {{ sourceLabel(source) }}
+        <span v-for="group in displayedSources" :key="sourceKey(group)">
+          {{ sourceLabel(group) }}
         </span>
       </div>
     </div>
