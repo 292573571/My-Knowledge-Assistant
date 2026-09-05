@@ -88,6 +88,16 @@ public class RagService {
      */
     @Value("${workbench.rag.stream-timing.warn-ms:3000}")
     private long streamTimingWarnMs = 3000;
+
+    /**
+     * 中文切词窗口的停用词：这些碎片在任意文档里都可能出现，命中它们不代表内容相关，
+     * 否则「什么是缓存」会因为在原文里找到「什么」就被判定为知识充足。
+     */
+    private static final Set<String> WEAK_TERMS = Set.of(
+            "什么", "怎么", "怎样", "如何", "哪些", "哪个", "是否", "能否", "可以",
+            "为什", "么是", "是什", "么样", "么办", "多少", "几个", "有无", "哪有"
+    );
+
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
@@ -1445,8 +1455,9 @@ public class RagService {
         var matcher = Pattern.compile("[\\p{IsHan}]{2,}|[a-z][a-z0-9_-]{1,}", Pattern.CASE_INSENSITIVE)
                 .matcher(question.toLowerCase(Locale.ROOT));
         while (matcher.find()) {
-            if (normalizedContent.contains(matcher.group())) {
-                score += matcher.group().length() >= 3 ? 3 : 2;
+            int matchedLength = longestMatchedLength(matcher.group().toLowerCase(Locale.ROOT), normalizedContent);
+            if (matchedLength > 0) {
+                score += matchedLength >= 3 ? 3 : 2;
             }
         }
         return score;
@@ -1778,9 +1789,47 @@ public class RagService {
         var matcher = Pattern.compile("[\\p{IsHan}]{2,}|[a-z][a-z0-9_-]{2,}", Pattern.CASE_INSENSITIVE).matcher(question);
         while (matcher.find()) {
             String term = matcher.group().toLowerCase(Locale.ROOT);
-            if (term.length() >= 3 && content.contains(term)) {
+            if (longestMatchedLength(term, content) >= 2) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * 返回 term 在 content 中实际命中的最长子串长度，0 表示未命中。
+     *
+     * <p>中文没有空格分词，正则 {@code [\p{IsHan}]{2,}} 是贪婪的，会把「什么是缓存」
+     * 整句当成一个 term 去 content 里 contains，自然永远命中不了——短问题的词法判定
+     * 因此长期失效，检索到内容也被判成「知识不足」而转模型兜底。
+     * 这里对含汉字的 term 按「最长优先」切成 2..N 字窗口逐个尝试，切到「缓存」这类真词即可命中。
+     * 英文与数字保持整词匹配，避免 "is"、"at" 这类碎片造成误命中。</p>
+     */
+    private int longestMatchedLength(String term, String content) {
+        if (content.contains(term)) {
+            return term.length();
+        }
+        if (term.length() <= 2 || !containsHan(term)) {
+            return 0;
+        }
+        for (int size = term.length() - 1; size >= 2; size--) {
+            for (int start = 0; start + size <= term.length(); start++) {
+                String window = term.substring(start, start + size);
+                if (!WEAK_TERMS.contains(window) && content.contains(window)) {
+                    return size;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private boolean containsHan(String value) {
+        for (int offset = 0; offset < value.length(); ) {
+            int codePoint = value.codePointAt(offset);
+            if (Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN) {
+                return true;
+            }
+            offset += Character.charCount(codePoint);
         }
         return false;
     }
