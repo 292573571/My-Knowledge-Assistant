@@ -102,6 +102,44 @@ spring.ai.retry.max-attempts
 
 ## 七、风险与注意
 
-1. **单测覆盖不到真实启动**。项目 **0 个 `@SpringBootTest`**，全是纯单元测试。这意味着升级只要能编译通过，346 个测试就全绿，但**线上能否启动成功完全没有被测试保护**。探针虽已实证上下文可加载，仍需在服务器真实启动一次并核验日志。
+1. **单测覆盖不到真实启动**。项目原本 **0 个 `@SpringBootTest`**，全是纯单元测试。这意味着升级只要能编译通过，单测就全绿，但**线上能否启动成功完全没有被测试保护**。探针虽已实证上下文可加载，仍需在服务器真实启动一次并核验日志。
+
+   **已落地（2026-09-05）**：`src/test/java/com/example/workbench/config/SpringAiUpgradeContextTest.java`
+   - 用 `classes = SpringAiConfig.class` + `@ImportAutoConfiguration({ChatClientAutoConfiguration, OpenAiChatAutoConfiguration, OpenAiEmbeddingAutoConfiguration, ChromaVectorStoreAutoConfiguration, ToolCallingAutoConfiguration})` 切片跑 Spring AI 配置层；
+   - `@MockitoBean` 替换 ChromaApi、EmbeddingModel、`ResponseErrorHandler`、`RetryTemplate`（这三项是 1.1.8 隐含注入、1.0.0 不会引用——mock 占位让两个版本都能加载，差异在 mock 上）；
+   - 验证 ChatClient / ChromaVectorStore 可注入、tenant/database/collection 配置正确、properties 绑定到 `spring.ai.vectorstore.chroma.*`；
+   - 升级 1.1.8 时 mvn test 会提前暴露任何回归（仅 354 个测试全部通过即可信）。
+
 2. **探针未覆盖真实的 OpenAI / Chroma 网络调用路径**（需要真实凭据与服务）。上线后必须跑一次真实 RAG 问答验证。
+
 3. 升级与 MCP 落地的顺序建议：先单独升级 1.1.8 并验证线上稳定，再开始加 MCP 代码。两者混在一起出问题时难以定位。
+
+## 八、1.1.8 隐含破坏性变更（升级评估盲点，实测发现于 2026-09-05）
+
+把 `pom.xml` 的 `spring-ai.version` 临时切到 `1.1.8` 跑 `SpringAiUpgradeContextTest`，**单测 354/ 全绿之前** Spring 上下文加载曾连续报以下三项 `NoSuchBeanDefinitionException`：
+
+| 缺失 bean | 提供方（1.1.8 自动装配） | 1.0.0 是否需要 | 升级时项目应做的动作 |
+|---|---|---|---|
+| `ResponseErrorHandler` | `OpenAiChatAutoConfiguration.openAiApi(...)` 注入参数 5 | 否 | 加 `@Bean ResponseErrorHandler defaultErrorHandler() { return new DefaultResponseErrorHandler(); }` 或在 `application.properties` 用 `spring.ai.openai.chat.options.http-error-handler=` 提供 |
+| `ToolCallingManager` | `OpenAiChatAutoConfiguration.openAiChatModel(...)` 注入参数 2 | 否 | import `ToolCallingAutoConfiguration`（spring-ai-starter-model-tool 已含），或显式声明 bean |
+| `RetryTemplate` | `OpenAiChatAutoConfiguration` 用于 OpenAI API 重试 | 否 | 加 `spring-retry` 依赖 + `@Configuration RetryTemplate` bean（或保留属性 `spring.ai.retry.max-attempts` 让 Spring Boot 自动装配兜底） |
+
+> **评估文档第三/四节说「javap 逐项 diff 全无差异」是错误的**——评估只看了 Builder 显式方法，没看构造器参数。`OpenAiApi` 构造器在 1.1.8 从 4 参变 5 参（新增 `ResponseErrorHandler`），同包路径从 `org.springframework.ai.openai` 移到 `org.springframework.ai.openai.api`。本次业务代码（`SpringAiConfig` 用的是 `ChatClient.Builder`，不直接 new `OpenAiApi`）不受影响，但**自动装配链上的依赖变了**。
+
+**升级 1.1.8 的最低补丁**（仅当确实升级时再补；不升级不需要动）：
+```xml
+<!-- pom.xml -->
+<dependency>
+    <groupId>org.springframework.retry</groupId>
+    <artifactId>spring-retry</artifactId>
+</dependency>
+```
+```java
+// 新增 src/main/java/.../config/UpgradeBridgeConfig.java
+@Configuration
+class UpgradeBridgeConfig {
+    @Bean ResponseErrorHandler openAiResponseErrorHandler() {
+        return new DefaultResponseErrorHandler();
+    }
+}
+```
