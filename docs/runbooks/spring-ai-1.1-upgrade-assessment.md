@@ -126,20 +126,13 @@ spring.ai.retry.max-attempts
 
 > **评估文档第三/四节说「javap 逐项 diff 全无差异」是错误的**——评估只看了 Builder 显式方法，没看构造器参数。`OpenAiApi` 构造器在 1.1.8 从 4 参变 5 参（新增 `ResponseErrorHandler`），同包路径从 `org.springframework.ai.openai` 移到 `org.springframework.ai.openai.api`。本次业务代码（`SpringAiConfig` 用的是 `ChatClient.Builder`，不直接 new `OpenAiApi`）不受影响，但**自动装配链上的依赖变了**。
 
-**升级 1.1.8 的最低补丁**（仅当确实升级时再补；不升级不需要动）：
-```xml
-<!-- pom.xml -->
-<dependency>
-    <groupId>org.springframework.retry</groupId>
-    <artifactId>spring-retry</artifactId>
-</dependency>
-```
-```java
-// 新增 src/main/java/.../config/UpgradeBridgeConfig.java
-@Configuration
-class UpgradeBridgeConfig {
-    @Bean ResponseErrorHandler openAiResponseErrorHandler() {
-        return new DefaultResponseErrorHandler();
-    }
-}
-```
+> **2026-09-05 实测推翻本节结论**：补完 `SpringAiUpgradeContextTest` 之后，把 `<spring-ai.version>` 临时切到 1.1.8 跑 `mvn -o clean compile`、`mvn -o test`（354 用例全过）、`mvn -o package -DskipTests`（成功打包 100 MB）——**完全不需要 UpgradeBridgeConfig、不需要显式引入 spring-retry、不需要 SpringAiRetryAutoConfiguration 显式 @Import**。
+>
+> 原因：第八节只看了 `OpenAiChatAutoConfiguration.openAiApi/openAiChatModel` 构造器「需要哪些 bean」，没去看 `spring-ai-starter-model-openai-1.1.8.jar` 的传递依赖关系。1.1.8 starter 的 BOM 改了：
+> - `spring-ai-starter-model-openai-1.1.8` → 传递依赖 `spring-ai-retry` → 传递依赖 `spring-retry 2.0.13` → SpringAiRetryAutoConfiguration 自动注册 `RetryTemplate` + `ResponseErrorHandler`
+> - `spring-ai-starter-model-openai-1.1.8` → 传递依赖 `spring-ai-autoconfigure-model-tool` → ToolCallingAutoConfiguration 自动注册 `DefaultToolCallingManager`
+>
+> **业务代码实际兼容**：
+> - `ChromaVectorStore.Builder.batchingStrategy(BatchingStrategy)` 在 1.0.0 是子类方法，1.1.8 提升到父类 `AbstractVectorStoreBuilder.batchingStrategy(BatchingStrategy)`（泛型化），子类继承签名不变，**SpringAiConfig 不需要改任何一行**。
+
+**升级 1.1.8 的最小改动**：只改 `pom.xml` 一行版本号。
