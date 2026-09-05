@@ -79,7 +79,15 @@ public class RagService {
     private final DocumentTaskRepository documentTaskRepository;
     private final DocumentDisplayNameResolver displayNameResolver;
     private WorkspaceService workspaceService;
-    private final RagAnswerGuardrail answerGuardrail = new RagAnswerGuardrail();
+    private RagAnswerGuardrail answerGuardrail = new RagAnswerGuardrail();
+    /**
+     * 流式链路分段计时的告警阈值（毫秒）：准备阶段或整条链路耗时超过它时打 WARN，否则打 INFO。
+     * 这里用字段注入而不是构造器参数，是为了不改动 RagService 的构造器签名——
+     * 既有测试普遍直接 new RagService(...)，加参数会让它们全部编译失败。
+     * 手动 new 的实例取默认值 3000，不依赖 Spring 注入也能正常工作。
+     */
+    @Value("${workbench.rag.stream-timing.warn-ms:3000}")
+    private long streamTimingWarnMs = 3000;
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
@@ -455,7 +463,9 @@ public class RagService {
     public RagStreamResponse stream(AppUser user, RagChatRequest request) {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
+        StreamTiming timing = new StreamTiming(conversationId);
         List<ChatMessage> history = recentHistory(user, request, conversationId);
+        timing.mark("history");
         if (hasSameRecentUserQuestion(history, question)) {
             history = List.of();
         }
@@ -480,6 +490,7 @@ public class RagService {
         Set<String> readableWorkspaceIds = resolveReadable(user, request.workspaceId());
         List<SourceDocument> retrievedSources = retrieveCandidates(
                 question, null, ownerUserId(conversationId), readableWorkspaceIds, retrievalOptions);
+        timing.mark("retrieve");
 
         ConversationContext conversationContext;
         try {
@@ -489,6 +500,7 @@ public class RagService {
             if (cause instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException(cause);
         }
+        timing.mark("contextJoin");
         List<ChatMessage> relevantHistory = conversationContext.history();
         String standaloneQuestion = conversationContext.standaloneQuestion();
         if (standaloneQuestion != null && !standaloneQuestion.isBlank()
@@ -500,9 +512,11 @@ public class RagService {
             for (SourceDocument source : retrievedSources) merged.putIfAbsent(stableSourceKey(source), source);
             for (SourceDocument source : expanded) merged.putIfAbsent(stableSourceKey(source), source);
             retrievedSources = List.copyOf(merged.values());
+            timing.mark("expandRetrieve");
         }
 
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources, false);
+        timing.mark("filter");
         String effectiveQuestion = standaloneQuestion != null ? standaloneQuestion : question;
         if (sources.isEmpty() || !hasEnoughKnowledge(effectiveQuestion, sources)) {
             String prompt = buildModelFallbackPrompt(question);
@@ -512,14 +526,17 @@ public class RagService {
             } else {
                 fallbackStream = fallbackStream.concatWith(reactor.core.publisher.Flux.just("\n\n" + MODEL_KNOWLEDGE_DISCLAIMER));
             }
-            return new RagStreamResponse(fallbackStream, List.of());
+            logStreamTiming("prepared", timing, "path=modelFallback sources=0");
+            return new RagStreamResponse(instrument(fallbackStream, timing, "modelFallback"), List.of());
         }
 
         String context = buildContext(sources);
         List<RagSource> ragSources = toRagSources(sources);
         String prompt = buildPrompt(context, question);
+        timing.mark("prompt");
+        logStreamTiming("prepared", timing, "path=rag sources=" + sources.size());
         return new RagStreamResponse(
-                streamWithHistory(prompt, relevantHistory, conversationId),
+                instrument(streamWithHistory(prompt, relevantHistory, conversationId), timing, "rag"),
                 ragSources
         );
     }
@@ -671,6 +688,86 @@ public class RagService {
         return history == null || history.isEmpty()
                 ? chatClient.stream(prompt, options)
                 : chatClient.stream(prompt, history, options);
+    }
+
+    /**
+     * 给流式响应挂计时钩子，观测「订阅 → 首字 → 结束」三段时间。
+     * 纯观测：不修改元素序列、不改变订阅语义，只在结束时输出一条日志。
+     * 慢请求（超过 {@code workbench.rag.stream-timing.warn-ms}）自动升级为 WARN。
+     */
+    private reactor.core.publisher.Flux<String> instrument(
+            reactor.core.publisher.Flux<String> source, StreamTiming timing, String path) {
+        if (source == null) {
+            return null;
+        }
+        java.util.concurrent.atomic.AtomicLong subscribedAt = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicBoolean firstChunk = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicInteger chunks = new java.util.concurrent.atomic.AtomicInteger();
+        return source
+                .doOnSubscribe(subscription -> subscribedAt.set(System.nanoTime()))
+                .doOnNext(chunk -> {
+                    chunks.incrementAndGet();
+                    if (firstChunk.compareAndSet(false, true)) {
+                        timing.markSince("firstChunk", subscribedAt.get());
+                    }
+                })
+                .doOnComplete(() -> logStreamTiming("finished", timing, "path=" + path + " outcome=completed chunks=" + chunks.get()))
+                .doOnError(error -> logStreamTiming("finished", timing,
+                        "path=" + path + " outcome=error:" + error.getClass().getSimpleName() + " chunks=" + chunks.get()))
+                .doOnCancel(() -> logStreamTiming("finished", timing, "path=" + path + " outcome=cancelled chunks=" + chunks.get()));
+    }
+
+    /**
+     * 输出流式链路的分段耗时。超过阈值打 WARN，否则打 INFO。
+     *
+     * @param phase prepared（检索与提示词构建完成）/ finished（流结束）
+     */
+    private void logStreamTiming(String phase, StreamTiming timing, String detail) {
+        long totalMs = timing.elapsedMs();
+        String message = "RAG stream {} conversationId={} totalMs={} {} stages=[{}]";
+        Object[] arguments = new Object[]{phase, timing.conversationId(), totalMs, detail, timing.describe()};
+        if (totalMs >= streamTimingWarnMs) {
+            log.warn(message, arguments);
+        } else {
+            log.info(message, arguments);
+        }
+    }
+
+    /**
+     * 流式链路分段计时器。只用于性能排查，不参与任何业务判断，也不跨线程共享。
+     * mark 记相对上一节点的耗时，markSince 记相对任意时刻的耗时（用于首字延迟）。
+     */
+    private static final class StreamTiming {
+        private final String conversationId;
+        private final long startedAt = System.nanoTime();
+        private final List<String> stages = new ArrayList<>();
+        private long lastMarkedAt = startedAt;
+
+        private StreamTiming(String conversationId) {
+            this.conversationId = conversationId;
+        }
+
+        private void mark(String stage) {
+            markSince(stage, lastMarkedAt);
+        }
+
+        private void markSince(String stage, long sinceNanos) {
+            long now = System.nanoTime();
+            stages.add(stage + "=" + (now - sinceNanos) / 1_000_000L + "ms");
+            lastMarkedAt = now;
+        }
+
+        private long elapsedMs() {
+            return (System.nanoTime() - startedAt) / 1_000_000L;
+        }
+
+        private String conversationId() {
+            return conversationId;
+        }
+
+        private String describe() {
+            return String.join(" ", stages);
+        }
     }
 
 
