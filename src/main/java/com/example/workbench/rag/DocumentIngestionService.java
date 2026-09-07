@@ -520,8 +520,7 @@ public class DocumentIngestionService {
     }
 
     private boolean isLearningRecordEntry(DocumentIndexEntry entry) {
-        return "LEARNING_RECORD".equals(entry.category())
-                || entry.path().replace('\\', '/').startsWith("docs/learning-records/");
+        return DocumentCategory.isLearningRecord(entry.category(), entry.path());
     }
 
     public DocumentContentResponse documentContent(String documentId, String ownerUserId) {

@@ -125,7 +125,8 @@ public final class IngestionPathResolver {
     }
 
     public String ownerUserId(String path) {
-        if (!path.startsWith("docs/learning-records/") && !path.startsWith("docs/manual-notes/")) {
+        if (!path.startsWith(DocumentCategory.LEARNING_RECORD_PREFIX)
+                && !path.startsWith(DocumentCategory.MANUAL_NOTE_PREFIX)) {
             return "";
         }
         var matcher = java.util.regex.Pattern.compile("/user-([^/]+)/").matcher(path);

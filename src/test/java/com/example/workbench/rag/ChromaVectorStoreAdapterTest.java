@@ -83,6 +83,30 @@ class ChromaVectorStoreAdapterTest {
     }
 
     @Test
+    void scopedSearchExcludesLearningRecordCategoryAtQueryLevel() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<org.springframework.ai.vectorstore.VectorStore> provider = Mockito.mock(ObjectProvider.class);
+        org.springframework.ai.vectorstore.VectorStore chroma = Mockito.mock(org.springframework.ai.vectorstore.VectorStore.class);
+        InMemoryVectorStore fallback = new InMemoryVectorStore();
+        Mockito.when(provider.getIfAvailable()).thenReturn(chroma);
+        Mockito.when(chroma.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(
+                new org.springframework.ai.document.Document("result", "matching content", java.util.Map.of(
+                        "id", "result", "visibility", "PUBLIC", "workspaceId", "public-default"))));
+        ChromaVectorStoreAdapter adapter = new ChromaVectorStoreAdapter(provider, fallback);
+
+        adapter.similaritySearch("matching", 5, "user-1", "team-1");
+
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(chroma).similaritySearch(captor.capture());
+        Filter.Expression expression = captor.getValue().getFilterExpression();
+
+        assertThat(expression.toString())
+                .contains("category")
+                .contains(DocumentCategory.LEARNING_RECORD)
+                .contains("NE");
+    }
+
+    @Test
     void writesPdfPageNumberToChromaMetadata() {
         @SuppressWarnings("unchecked")
         ObjectProvider<org.springframework.ai.vectorstore.VectorStore> provider = Mockito.mock(ObjectProvider.class);

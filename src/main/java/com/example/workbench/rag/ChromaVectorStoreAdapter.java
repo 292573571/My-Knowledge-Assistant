@@ -213,7 +213,11 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
      *   <li>PUBLIC 文档对所有用户可见；</li>
      *   <li>PRIVATE 文档仅本人可见，且需在可读空间集合内；</li>
      *   <li>WORKSPACE 文档在「有效可读空间集合」内可见（组织可见其全部子孙，团队可见其自身与祖先组织）。</li>
+     *   <li>排除 LEARNING_RECORD 分类：学习记录只服务学习记录页，不是知识库事实来源。</li>
      * </ul>
+     *
+     * <p>分类排除放在查询层而非召回后，学习记录便不会占用 topK 名额稀释有效来源。
+     * RagService 仍保留召回后的二次过滤，作为向量库侧过滤不可用时的兜底。
      */
     private Filter.Expression visibilityFilter(String ownerUserId, Set<String> readableWorkspaceIds) {
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
@@ -235,7 +239,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                     workspaceEqualsAny(builder, readableWorkspaceIds));
             allowed = builder.or(allowed, workspaceFilter);
         }
-        return allowed.build();
+        return builder.and(allowed, builder.ne("category", DocumentCategory.LEARNING_RECORD)).build();
     }
 
     private FilterExpressionBuilder.Op workspaceEqualsAny(FilterExpressionBuilder builder, Set<String> readableWorkspaceIds) {

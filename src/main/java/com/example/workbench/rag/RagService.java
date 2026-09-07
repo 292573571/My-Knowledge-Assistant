@@ -1193,13 +1193,11 @@ public class RagService {
     }
 
     private boolean isLearningRecord(SourceDocument source) {
-        return "LEARNING_RECORD".equals(source.category())
-                || source.path() != null && source.path().replace('\\', '/').startsWith("docs/learning-records/");
+        return DocumentCategory.isLearningRecord(source.category(), source.path());
     }
 
     private boolean isPromotedLearningNote(SourceDocument source) {
-        String path = source.path() == null ? "" : source.path().replace('\\', '/');
-        return "FORMAL_NOTE".equals(source.category()) && path.matches(".*/\\d{4}-\\d{2}-\\d{2}-learning-note\\.md$");
+        return DocumentCategory.isPromotedLearningNote(source.category(), source.path());
     }
 
     private boolean matchesExplicitTechnicalTerm(String question, SourceDocument source) {
