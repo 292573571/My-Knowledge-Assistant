@@ -82,8 +82,12 @@ public class BochaWebSearchClient {
     List<WebSearchResult> parse(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
-            JsonNode value = root.path("webPages").path("value");
+            // 博查响应结构：{"code":200,"data":{"webPages":{"value":[...]}, ...}}
+            // 之前直接 root.path("webPages") 找不到，嵌套在 data 下面，导致 0 results。
+            JsonNode value = root.path("data").path("webPages").path("value");
             if (!value.isArray()) {
+                log.debug("Bocha web search parse: webPages.value missing or not array, rootKeys={}",
+                        collectTopLevelKeys(root));
                 return List.of();
             }
             List<WebSearchResult> results = new ArrayList<>();
@@ -116,5 +120,11 @@ public class BochaWebSearchClient {
             return "";
         }
         return value.length() > 500 ? value.substring(0, 500) : value;
+    }
+
+    private static java.util.Set<String> collectTopLevelKeys(JsonNode node) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        node.fieldNames().forEachRemaining(keys::add);
+        return keys;
     }
 }
