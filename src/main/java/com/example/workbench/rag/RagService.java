@@ -313,12 +313,24 @@ public class RagService {
         logRetrievalDebug(question, retrievedSources, sources);
 
         if (sources.isEmpty()) {
-            // 无可靠本地证据时可选模型补充，返回结果不带本地来源以避免伪造引用。
-            RagChatResponse response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+            // 完全无本地证据时：开启联网搜索则优先调用博查实时检索，否则走模型兜底。
+            String route;
+            RagChatResponse response;
+            if (webSearchEnabled) {
+                log.info(
+                        "RAG route selected route=WEB_FALLBACK reason=no_local_candidates conversationId={}",
+                        conversationId
+                );
+                response = answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources);
+                route = "WEB_FALLBACK_NO_LOCAL_MATCH";
+            } else {
+                response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+                route = modelFallbackEnabled ? "MODEL_FALLBACK_NO_LOCAL_MATCH" : "LOCAL_KNOWLEDGE_NO_MATCH";
+            }
             rememberForLegacyTests(user, conversationId, question, response.answer());
             log.info(
                     "RAG chat completed route={} conversationId={} retrieved={} sources=0 durationMs={}",
-                    modelFallbackEnabled ? "MODEL_FALLBACK_NO_LOCAL_MATCH" : "LOCAL_KNOWLEDGE_NO_MATCH",
+                    route,
                     conversationId,
                     retrievedSources.size(),
                     System.currentTimeMillis() - startedAt
