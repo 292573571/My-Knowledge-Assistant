@@ -61,7 +61,7 @@ remote_deploy() {
   backup_dir="$backups_root/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:12}"
 
   cleanup_archive() {
-    rm -f "$archive"
+    rm -f "${archive:-}"
   }
 
   print_diagnostics() {
@@ -72,12 +72,12 @@ remote_deploy() {
     echo "--- recent application log ---" >&2
     journalctl -u shihai.service -n 200 --no-pager >&2 || true
     echo "--- health response ---" >&2
-    curl -i --max-time 5 "$health_url" >&2 || true
+    curl -i --max-time 5 "${health_url:-http://127.0.0.1:8080/api/health}" >&2 || true
   }
 
   rollback() {
     local status=$?
-    if [[ $status -eq 0 || "$activated" != true ]]; then
+    if [[ $status -eq 0 || "${activated:-false}" != true ]]; then
       cleanup_archive
       exit "$status"
     fi
@@ -85,17 +85,17 @@ remote_deploy() {
     echo "发布失败，恢复上一版本" >&2
     print_diagnostics
     systemctl stop shihai || true
-    if [[ -f "$backup_dir/shihai.jar" ]]; then
-      install -m 640 "$backup_dir/shihai.jar" "$app_jar"
+    if [[ -f "${backup_dir:-}/shihai.jar" ]]; then
+      install -m 640 "${backup_dir:-}/shihai.jar" "${app_jar:-}"
     fi
-    if [[ -d "$backup_dir/frontend" ]]; then
-      rm -rf "$frontend_root"
-      mkdir -p "$frontend_root"
-      cp -a "$backup_dir/frontend/." "$frontend_root/"
-      chmod -R a+rX "$frontend_root"
-      chcon -R system_u:object_r:httpd_sys_content_t:s0 "$frontend_root" 2>/dev/null || true
+    if [[ -d "${backup_dir:-}/frontend" ]]; then
+      rm -rf "${frontend_root:-}"
+      mkdir -p "${frontend_root:-}"
+      cp -a "${backup_dir:-}/frontend/." "${frontend_root:-}/"
+      chmod -R a+rX "${frontend_root:-}"
+      chcon -R system_u:object_r:httpd_sys_content_t:s0 "${frontend_root:-}" 2>/dev/null || true
     fi
-    if [[ "$service_was_active" == true ]]; then
+    if [[ "${service_was_active:-false}" == true ]]; then
       systemctl start shihai || true
     fi
     cleanup_archive

@@ -38,6 +38,20 @@ public class RagService {
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
     private static final Pattern FALLBACK_PROMPT_LEAK_LINE = Pattern.compile(
             "(?m)^\\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)\\R?");
+
+    /**
+     * 模型礼貌拒绝模板词：触发 LOCAL_KNOWLEDGE → MODEL_ANSWER 兜底重路由到联网搜索。
+     * 仅在答案前 100 字命中且答案总长 ≤ 200 字时算"礼貌拒绝"，避免误判合法回答中
+     * 偶尔出现的"抱歉"等谦词。
+     */
+    private static final List<String> MODEL_REFUSAL_MARKERS = List.of(
+            "抱歉", "对不起", "无法提供", "无法回答",
+            "无能力", "无信息", "缺少相关", "知识库中没有",
+            "超出", "建议您", "建议开启", "无足够",
+            "无依据", "暂无", "没有足够", "无法基于"
+    );
+    private static final int MODEL_REFUSAL_MAX_LENGTH = 200;
+    private static final int MODEL_REFUSAL_HEAD_LENGTH = 100;
     private static final double WEAK_DENSE_DISTANCE = 0.72;
     private static final double STRONG_SPARSE_SCORE = 2.0;
     private static final int RECENT_CONVERSATION_ROUNDS = 4;
@@ -379,6 +393,27 @@ public class RagService {
         log.info("RAG answer generated conversationId={} sources={}", conversationId, sources.size());
 
         String answer = sanitizePresentedAnswer(generatedAnswer, question);
+
+        // 礼貌拒绝兜底：当模型被无关 PDF 误导而礼貌拒绝（"抱歉，我无法..."），且
+        // 本轮尚有联网搜索可用，让用户重定向到联网答案而不是拿到拒绝答案。
+        // 仅在 webSearchEnabled 时启用，避免在没有联网开关时增加额外延迟。
+        if (webSearchEnabled && isModelPoliteRefusal(answer)) {
+            log.warn(
+                    "RAG model-polite-refusal detected, retrying with web search conversationId={} refusedHead={}",
+                    conversationId,
+                    answer.substring(0, Math.min(answer.length(), MODEL_REFUSAL_HEAD_LENGTH))
+            );
+            RagChatResponse webResponse = answerWithWebSearch(
+                    conversationId, question, relevantHistory, retrievedSources, sources);
+            rememberForLegacyTests(user, conversationId, question, webResponse.answer());
+            log.info(
+                    "RAG chat completed route=WEB_FALLBACK_LOCAL_REFUSAL conversationId={} sources={} durationMs={}",
+                    conversationId,
+                    webResponse.sources().size(),
+                    System.currentTimeMillis() - startedAt
+            );
+            return withDebug(webResponse, includeDebug, question, retrievedSources, sources);
+        }
 
         List<RagSource> ragSources = toRagSources(sources);
 
@@ -1766,6 +1801,23 @@ public class RagService {
         return value == null ? "" : value
                 .replace("<<<BEGIN_UNTRUSTED_", "[ESCAPED_BEGIN_UNTRUSTED_")
                 .replace("<<<END_UNTRUSTED_", "[ESCAPED_END_UNTRUSTED_");
+    }
+
+    /**
+     * 判定生成答案是否属于"模型礼貌拒绝"模式：答案较短、开头包含拒绝模板词。
+     * 用于在 LOCAL_KNOWLEDGE_MODEL_ANSWER 后兜底重路由到联网搜索，避免无关 PDF 误导模型。
+     * 严格长度限制避免误判包含谦词（如"抱歉..."）的正常长答案。
+     */
+    private boolean isModelPoliteRefusal(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return false;
+        }
+        String stripped = answer.strip();
+        if (stripped.length() > MODEL_REFUSAL_MAX_LENGTH) {
+            return false;
+        }
+        String head = stripped.substring(0, Math.min(stripped.length(), MODEL_REFUSAL_HEAD_LENGTH));
+        return MODEL_REFUSAL_MARKERS.stream().anyMatch(head::contains);
     }
 
     private boolean hasEnoughKnowledge(String question, List<SourceDocument> sources) {
