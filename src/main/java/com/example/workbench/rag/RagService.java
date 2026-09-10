@@ -652,7 +652,9 @@ public class RagService {
         reactor.core.publisher.Flux<String> flux = history == null || history.isEmpty()
                 ? chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
                 : chatClient.stream(prompt, history, Map.of(ConversationMemory.CONVERSATION_ID, conversationId));
-        return new RagStreamResponse(flux, toWebSources(webResults));
+        // 联网搜索得到的 URL 引用前端不展示（用户体验上意义不大、且博查摘要本身就够明确来源），
+        // 但答案里的"来自 Web"字样仍由 prompt 保证，让用户知道答案来源是联网。
+        return new RagStreamResponse(flux, List.of());
     }
 
     /**
@@ -838,7 +840,7 @@ public class RagService {
                     + "\n\n来自 Web";
         }
 
-        return new RagChatResponse(answer, toWebSources(webResults), retrievalDebug(question, retrievedSources, contextSources));
+        return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
     }
 
     private RagChatResponse answerWithModelFallback(

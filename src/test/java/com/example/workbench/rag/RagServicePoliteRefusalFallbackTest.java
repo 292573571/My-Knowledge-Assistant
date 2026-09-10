@@ -57,7 +57,8 @@ class RagServicePoliteRefusalFallbackTest {
         verify(chatClient, atLeastOnce()).callWithWebResults(
                 Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap());
         assertThat(response.answer()).contains("基于联网搜索");
-        assertThat(response.sources()).isNotEmpty();
+        // 联网搜索答案不再透出博查 URL 引用（前端展示"Web: ..."无意义）
+        assertThat(response.sources()).isEmpty();
     }
 
     /**

@@ -18,13 +18,16 @@ import reactor.core.publisher.Flux;
  * 锁定 RagService.stream() 流式路径上的两个联网搜索路由：
  * <ul>
  *   <li><b>A</b>：sources 空 / hasEnoughKnowledge=false + webSearchEnabled=true → 切到
- *   {@code streamWithWebSearch}，流式输出 web 答案 + web sources。</li>
+ *   {@code streamWithWebSearch}，流式输出 web 答案（不返回 web 来源引用，前端不再展示 URL 列表）。</li>
  *   <li><b>B</b>：sources 非空 + hasEnoughKnowledge=true + 模型前 30 token 礼貌拒绝 →
  *   立即切到 web search 流式（丢弃本地拒绝话术），最终答案来自 web。</li>
  * </ul>
  *
  * <p>背景：学习助手前端走的是 {@code /api/learning-assistant/sessions/.../messages/stream}
  * （流式接口），之前修复 RagService.chat()（同步接口）漏掉了这条链路。
+ *
+ * <p>联网搜索产出的引用（博查返回的 8 条 URL）前端不再展示，原因是用户体验上意义不大；
+ * 答案中的"来自 Web"字样由 prompt 保证，让用户知道答案来源是联网。
  */
 class RagServiceStreamWebSearchTest {
 
@@ -52,7 +55,8 @@ class RagServiceStreamWebSearchTest {
         List<String> tokens = response.tokens().collectList().block();
         assertThat(tokens).isNotNull();
         assertThat(String.join("", tokens)).contains("来自 Web");
-        assertThat(response.sources()).isNotEmpty();
+        // 联网搜索答案不再透出博查 URL 引用（前端展示"Web: ..."无意义）
+        assertThat(response.sources()).isEmpty();
     }
 
     /**
@@ -90,12 +94,9 @@ class RagServiceStreamWebSearchTest {
         // 礼貌拒绝话术应被丢弃，web search 答案应保留
         assertThat(fullText).doesNotContain("抱歉").doesNotContain("我无法");
         assertThat(fullText).contains("来自 Web");
-        // 引用应是 web 来源（file="Web: <url>"）而不是本地 PDF（headingPath 含 "Java 面试题"）
-        assertThat(response.sources()).isNotEmpty()
-                .allSatisfy(source -> {
-                    assertThat(source.file()).startsWith("Web:");
-                    assertThat(source.headingPath()).doesNotContain("Java 面试题");
-                });
+        // 切到 web fallback 后 sources 应清空（前端不再展示博查 URL 引用）；
+        // 同时也不会留下本地 PDF 引用（避免引用与答案不匹配）
+        assertThat(response.sources()).isEmpty();
     }
 
     /**
