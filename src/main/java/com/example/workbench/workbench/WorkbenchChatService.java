@@ -149,16 +149,18 @@ public class WorkbenchChatService {
             RagStreamResponse ragResponse = ragService.stream(user,
                     new RagChatRequest(conversationId, workspace.workspaceId(), clientConversationId, request.message()));
 
-            if (onSources != null) {
-                onSources.accept(ragResponse.sources());
-            }
-
             StringBuilder content = new StringBuilder();
             AtomicBoolean firstTokenSent = new AtomicBoolean(false);
             ragResponse.tokens().doOnNext(token -> {
                         if (execution.isCancelled()) return;
                         if (token == null || token.isEmpty()) return;
                         if (firstTokenSent.compareAndSet(false, true)) {
+                            // 推迟 onSources 到第一个 token 到达时：让 RagService.stream() 内
+                            // 礼貌拒绝兜底有足够时间决定是否替换 sources；否则若 sources 在订阅前
+                            // 调用，订阅方拿到的仍是初始本地 sources（与可能的 web 答案不匹配）。
+                            if (onSources != null) {
+                                onSources.accept(ragResponse.sources());
+                            }
                             log.info("Workbench stream chat first token forwarded conversationId={} latencyMs={}",
                                     conversationId, System.currentTimeMillis() - startedAt);
                         }

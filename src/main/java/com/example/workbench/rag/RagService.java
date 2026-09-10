@@ -52,6 +52,11 @@ public class RagService {
     );
     private static final int MODEL_REFUSAL_MAX_LENGTH = 200;
     private static final int MODEL_REFUSAL_HEAD_LENGTH = 100;
+    /**
+     * 流式期间礼貌拒绝检测的探针长度：累积到约 30 个字符时做一次模板词命中判定。
+     * 设小一点能在用户还没读完拒绝话术时及时切断 + 切到 web search；设太大则错过最佳挽救时机。
+     */
+    private static final int MODEL_REFUSAL_PROBE_LENGTH = 30;
     private static final double WEAK_DENSE_DISTANCE = 0.72;
     private static final double STRONG_SPARSE_SCORE = 2.0;
     private static final int RECENT_CONVERSATION_ROUNDS = 4;
@@ -576,6 +581,21 @@ public class RagService {
         timing.mark("filter");
         String effectiveQuestion = standaloneQuestion != null ? standaloneQuestion : question;
         if (sources.isEmpty() || !hasEnoughKnowledge(effectiveQuestion, sources)) {
+            // 开启联网搜索时优先走 web search 流式；否则保留原 modelFallback 行为。
+            if (webSearchEnabled) {
+                log.info(
+                        "RAG stream route selected route=WEB_FALLBACK reason=local_context_not_enough conversationId={} retrieved={} sources={}",
+                        conversationId,
+                        retrievedSources.size(),
+                        sources.size()
+                );
+                RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, relevantHistory);
+                logStreamTiming("prepared", timing, "path=webSearch sources=" + webResponse.sources().size());
+                return new RagStreamResponse(
+                        instrument(webResponse.tokens(), timing, "webSearch"),
+                        webResponse.sources()
+                );
+            }
             String prompt = buildModelFallbackPrompt(question);
             reactor.core.publisher.Flux<String> fallbackStream = streamWithHistory(prompt, relevantHistory, conversationId);
             if (fallbackStream == null) {
@@ -591,11 +611,147 @@ public class RagService {
         List<RagSource> ragSources = toRagSources(sources);
         String prompt = buildPrompt(context, question);
         timing.mark("prompt");
+        // 在进入 LOCAL_KNOWLEDGE 流式前加礼貌拒绝兜底：前 30 token 累积期间判定，
+        // 一旦命中"抱歉/无法"等模板词立即切断 + 切到 web search 流式；未命中则继续原流。
+        // 避免无关 PDF 误导模型礼貌拒绝时用户拿到拒绝模板而非有效信息。
         logStreamTiming("prepared", timing, "path=rag sources=" + sources.size());
-        return new RagStreamResponse(
-                instrument(streamWithHistory(prompt, relevantHistory, conversationId), timing, "rag"),
-                ragSources
+        reactor.core.publisher.Flux<String> baseStream = streamWithHistory(prompt, relevantHistory, conversationId);
+        if (!webSearchEnabled) {
+            return new RagStreamResponse(instrument(baseStream, timing, "rag"), ragSources);
+        }
+        // 构造可变 RagStreamResponse；guard 触发 web fallback 时直接修改其 tokens 与 sources，
+        // 让前端订阅时拿到正确的 web 流和 web 引用而非无关 PDF。
+        RagStreamResponse response = new RagStreamResponse(baseStream, ragSources);
+        withPoliteRefusalWebSearchGuard(baseStream, response, conversationId, question, relevantHistory);
+        // 兜底计时埋点 + 直接返回 mutable response（保证 guard 后续对 sources 的替换能被订阅方拿到）。
+        response.replaceTokens(instrument(response.tokens(), timing, "rag"));
+        return response;
+    }
+
+    /**
+     * 流式版本的联网搜索：同步调用博查拿到结果，prompt 用 buildWebPrompt 生成，
+     * 然后让 chatClient.stream 流式输出；返回的 RagStreamResponse 含 web 来源链接。
+     */
+    private RagStreamResponse streamWithWebSearch(
+            String conversationId,
+            String question,
+            List<ChatMessage> history
+    ) {
+        long startedAt = System.currentTimeMillis();
+        List<WebSearchResult> webResults = webSearchService.search(question);
+        log.info(
+                "RAG stream web search completed conversationId={} results={} durationMs={}",
+                conversationId,
+                webResults.size(),
+                System.currentTimeMillis() - startedAt
         );
+        String webContext = webResults.stream()
+                .map(this::formatWebContext)
+                .collect(Collectors.joining("\n\n"));
+        String prompt = buildWebPrompt(webContext, question);
+        reactor.core.publisher.Flux<String> flux = history == null || history.isEmpty()
+                ? chatClient.stream(prompt, Map.of(ConversationMemory.CONVERSATION_ID, conversationId))
+                : chatClient.stream(prompt, history, Map.of(ConversationMemory.CONVERSATION_ID, conversationId));
+        return new RagStreamResponse(flux, toWebSources(webResults));
+    }
+
+    /**
+     * 流式期间礼貌拒绝兜底：累积前 MODEL_REFUSAL_PROBE_LENGTH 个字符判定；
+     * - 命中拒绝模板词 → 切断原流，下发 web search 流式答案（丢弃原 probe buffer），
+     *   同时替换 response 的 tokens + sources 为 web 来源（让前端展示正确的引用而非无关 PDF）
+     * - 未命中 → 下发 buffer 中已累积 token，再继续原流
+     * 流结束时若仍未达到 probe 长度，再做一次完整答案判定（应对短答案也是拒绝的情况）。
+     */
+    private void withPoliteRefusalWebSearchGuard(
+            reactor.core.publisher.Flux<String> source,
+            RagStreamResponse response,
+            String conversationId,
+            String question,
+            List<ChatMessage> history
+    ) {
+        reactor.core.publisher.Flux<String> guardedFlux = reactor.core.publisher.Flux.create(sink -> {
+            StringBuilder probe = new StringBuilder();
+            boolean[] resolved = {false};
+            boolean[] fellBack = {false};
+            List<String> probeBuffer = new ArrayList<>();
+
+            reactor.core.Disposable upstream = source.subscribe(
+                    token -> {
+                        if (resolved[0]) {
+                            if (!fellBack[0]) {
+                                sink.next(token);
+                            }
+                            return;
+                        }
+                        probeBuffer.add(token);
+                        probe.append(token);
+                        if (probe.length() < MODEL_REFUSAL_PROBE_LENGTH) {
+                            return;
+                        }
+                        resolved[0] = true;
+                        if (!isModelPoliteRefusal(probe.toString())) {
+                            for (String t : probeBuffer) {
+                                sink.next(t);
+                            }
+                            probeBuffer.clear();
+                            return;
+                        }
+                        fellBack[0] = true;
+                        log.warn(
+                                "RAG stream model-polite-refusal detected, switching to web search conversationId={} probeHead={}",
+                                conversationId,
+                                probe.substring(0, Math.min(probe.length(), MODEL_REFUSAL_HEAD_LENGTH))
+                        );
+                        RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
+                        // 替换 response 的 tokens 与 sources（让前端订阅时拿到正确的 web 数据）
+                        response.replaceTokens(webResponse.tokens());
+                        response.replaceSources(webResponse.sources());
+                        webResponse.tokens().subscribe(
+                                sink::next,
+                                sink::error,
+                                () -> sink.complete()
+                        );
+                    },
+                    err -> {
+                        if (!fellBack[0]) {
+                            sink.error(err);
+                        }
+                    },
+                    () -> {
+                        if (resolved[0]) {
+                            if (!fellBack[0]) {
+                                sink.complete();
+                            }
+                            return;
+                        }
+                        // 流完成但 probe 不足，做最终判定
+                        resolved[0] = true;
+                        if (!isModelPoliteRefusal(probe.toString())) {
+                            for (String t : probeBuffer) {
+                                sink.next(t);
+                            }
+                            sink.complete();
+                            return;
+                        }
+                        fellBack[0] = true;
+                        log.warn(
+                                "RAG stream short model-polite-refusal detected, switching to web search conversationId={} probeLength={}",
+                                conversationId,
+                                probe.length()
+                        );
+                        RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
+                        response.replaceTokens(webResponse.tokens());
+                        response.replaceSources(webResponse.sources());
+                        webResponse.tokens().subscribe(
+                                sink::next,
+                                sink::error,
+                                () -> sink.complete()
+                        );
+                    }
+            );
+            sink.onCancel(upstream::dispose);
+        });
+        response.replaceTokens(guardedFlux);
     }
 
     private List<ChatMessage> recentHistory(AppUser user, RagChatRequest request, String conversationId) {
