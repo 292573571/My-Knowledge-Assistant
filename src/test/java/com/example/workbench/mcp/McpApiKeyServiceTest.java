@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.auth.AppUserRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -15,7 +16,8 @@ import org.junit.jupiter.api.Test;
 class McpApiKeyServiceTest {
 
     private final McpApiKeyRepository repository = mock(McpApiKeyRepository.class);
-    private final McpApiKeyService service = new McpApiKeyService(repository);
+    private final AppUserRepository userRepository = mock(AppUserRepository.class);
+    private final McpApiKeyService service = new McpApiKeyService(repository, userRepository);
     private final AppUser user = new AppUser("alice", "Alice", "hash");
 
     @Test
@@ -60,6 +62,20 @@ class McpApiKeyServiceTest {
         assertThat(service.authenticate(issued.plaintext(), later)).isEmpty();
     }
 
+    /**
+     * 回归锁：MCP 工具在无事务链路里访问凭证实体的 LAZY user 代理会抛
+     * LazyInitializationException(项目关闭了 open-in-view)。认证必须返回按主键
+     * 重新加载的实体，保证下游工具能安全读取用户字段。
+     */
+    @Test
+    void returnsReloadedUserInsteadOfDetachedLazyProxy() {
+        AppUser reloaded = new AppUser("alice", "Alice", "hash");
+        McpApiKeyService.IssuedKey issued = issueAndStore();
+        when(userRepository.findById(any())).thenReturn(Optional.of(reloaded));
+
+        assertThat(service.authenticate(issued.plaintext(), Instant.now())).containsSame(reloaded);
+    }
+
     @Test
     void rejectsUnknownKey() {
         when(repository.findByKeyHash(anyString())).thenReturn(Optional.empty());
@@ -87,6 +103,8 @@ class McpApiKeyServiceTest {
         when(repository.save(any(McpApiKeyEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
         McpApiKeyService.IssuedKey issued = service.issue(user, "client", timeToLive);
         when(repository.findByKeyHash(issued.entity().getKeyHash())).thenReturn(Optional.of(issued.entity()));
+        // 生产环境这里返回的是按主键重新加载的实体(而非 LAZY 代理),测试对齐该行为。
+        when(userRepository.findById(any())).thenReturn(Optional.of(user));
         return issued;
     }
 }

@@ -1,6 +1,7 @@
 package com.example.workbench.mcp;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.auth.AppUserRepository;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -28,9 +29,11 @@ public class McpApiKeyService {
     private static final Duration LAST_USED_THROTTLE = Duration.ofMinutes(1);
 
     private final McpApiKeyRepository repository;
+    private final AppUserRepository userRepository;
 
-    public McpApiKeyService(McpApiKeyRepository repository) {
+    public McpApiKeyService(McpApiKeyRepository repository, AppUserRepository userRepository) {
         this.repository = repository;
+        this.userRepository = userRepository;
     }
 
     /** 签发新凭证，返回仅此一次可见的明文。 */
@@ -70,7 +73,10 @@ public class McpApiKeyService {
             entity.markUsed(now);
             repository.save(entity);
         }
-        return Optional.ofNullable(entity.getUser());
+        // entity.getUser() 是 LAZY 代理，本方法提交后即失效；而项目关闭了
+        // open-in-view，MCP 工具在无事务的调用链里访问该代理会抛
+        // LazyInitializationException。这里改为按主键重新加载出字段完整的实体。
+        return userRepository.findById(entity.getUser().getId());
     }
 
     @Transactional(readOnly = true)
