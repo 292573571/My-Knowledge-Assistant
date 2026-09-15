@@ -13,6 +13,7 @@ import java.util.List;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -29,10 +30,15 @@ public class KnowledgeMcpTools {
     private final DocumentIngestionService documentIngestionService;
     private final WorkspaceService workspaceService;
 
+    /**
+     * 三个依赖都懒加载：MCP 的 ToolCallbackProvider 会被 Spring AI 的 toolCallbackResolver 收集，
+     * 而 resolver 又处在 openAiChatModel → chatClient 的创建链上。若此处直接注入 RagService，
+     * 会形成 provider → tools → ragService → chatClient → resolver → provider 的循环导致启动失败。
+     */
     public KnowledgeMcpTools(
-            RagService ragService,
-            DocumentIngestionService documentIngestionService,
-            WorkspaceService workspaceService
+            @Lazy RagService ragService,
+            @Lazy DocumentIngestionService documentIngestionService,
+            @Lazy WorkspaceService workspaceService
     ) {
         this.ragService = ragService;
         this.documentIngestionService = documentIngestionService;
