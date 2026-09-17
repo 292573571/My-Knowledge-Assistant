@@ -1,8 +1,8 @@
 # My Knowledge Assistant
 
-一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答、工作空间层级隔离和评测。
+一个面向个人学习和团队知识管理的 RAG 知识助手。项目使用 Spring Boot、Spring AI、PostgreSQL、Chroma、Redis 和 Vue，支持多用户知识空间、文档异步导入、混合检索、多轮对话、流式回答、工作空间层级隔离、统一教学助手、MCP 只读知识库工具和评测。
 
-当前版本已经适合作为 RAG 应用和 Agent 学习底座，但联网搜索仍是扩展点，不应当按完整搜索产品理解。
+当前版本已经适合作为 RAG 应用和 Agent 学习底座。联网搜索已经接入博查 Web Search API，但它是本地知识库不足时的回退能力，不应当按完整搜索产品理解。
 
 ## 功能概览
 
@@ -17,10 +17,13 @@
 - 统一识海教学助手：自动区分直接回答与主题教学，支持 EXPLAIN、CHECK、PRACTICE、REVIEW 状态恢复和幂等提交。
 - PostgreSQL 持久化学习记录、正式笔记和教学学习资产，Markdown 与 RAG 索引作为可重建投影。
 - 来源页码展示、答案依据校验、模型兜底和工具调用记录。
+- RAG 回答路由和引用隔离：本地知识库、联网搜索、通用模型和无知识回答分别标记，只有最终本地回答展示本地知识库引用。
 - 模型配置 RBAC：用户自管 CHAT 模型（跟随默认 / 池模型 / 自定义），超管管理 EMBEDDING 模型和全局池默认模型。
 - 模型服务商错误中文化：`ModelProviderException` 把厂商原始错误码（限流、配额、鉴权等）统一转为面向用户的中文提示。
 - 评测题库、规则评测、检索指标、运行记录和质量门禁。
 - 前端首页引导（HomePage + OnboardingTour）、检索诊断面板（RetrievalDebug）。
+- MCP Streamable HTTP Server：提供当前用户授权范围内的 `search_knowledge`、`list_documents` 和 `get_document` 只读工具，支持会话令牌和 `mcp_` API Key 双轨鉴权。
+- 知识库维护 Agent：只读工具问答 + 待确认写操作（重试任务、增量同步、重建索引、删除文档），超级管理员可通过命令为全部知识空间重建向量索引。
 - Actuator、请求 ID、结构化日志和敏感信息脱敏。
 
 数据库日志中心通过 Log4j2 有界异步队列写入 PostgreSQL，不阻塞业务线程。队列大小可通过 `LOG_JPA_QUEUE_SIZE` 配置，默认 `8192`；队列满时优先保证业务请求和控制台/文件日志，数据库日志可能丢弃。
@@ -31,7 +34,7 @@
 
 审计日志写入独立的 `audit_events`，记录登录成功/失败、退出登录、密码修改、空间成员和角色变更、文档上传/删除、系统角色变更及模型配置修改。V17 迁移为审计表增加 PostgreSQL 只追加触发器和 SHA-256 哈希链；普通管理员只有查询权限，删除接口仅允许超级管理员调用。删除动作会写入不可删除的 `audit_purge_events` 留痕表，数据库运维也应限制直接修改审计表的权限。
 
-当前默认关闭联网搜索：`workbench.rag.web-search.enabled=false`。`WebSearchService` 是搜索扩展点，需要接入真实搜索服务后再开启。
+当前默认开启联网搜索：`workbench.rag.web-search.enabled=true`。实际调用需要配置 `BOCHA_API_KEY`；未配置时搜索自动降级为空结果，再按配置使用模型兜底。联网搜索回答不会向前端展示本地 PDF 引用。
 
 ## 知识库说明
 
@@ -60,7 +63,16 @@
 
 AI 学习助手会保留用户原始问题，并按配置执行查询改写、多查询召回、向量检索和关键词检索。Chroma 负责语义向量检索，PostgreSQL 可提供稀疏关键词检索，多个召回结果通过混合排序合并，再根据当前用户的有效空间集合、文档可见性和相似度阈值过滤。
 
-最终进入模型上下文的只能是用户有权限访问的资料。回答会尽量展示来源文件、页码或片段信息；知识库依据不足时，可以使用模型兜底，但默认不连接真实 Web 搜索。系统还会对知识片段进行不可信内容隔离，避免把文档中的指令误当成系统指令。
+最终进入模型上下文的只能是用户有权限访问的资料。回答会尽量展示来源文件、页码或片段信息；知识库依据不足时，系统优先尝试联网搜索，再按配置使用通用模型兜底。系统还会对知识片段进行不可信内容隔离，避免把文档中的指令误当成系统指令。
+
+RAG 最终回答使用四种路由标记：
+
+- `LOCAL_KNOWLEDGE`：回答基于最终通过校验的本地知识库上下文，可以展示本地来源。
+- `WEB_FALLBACK`：回答来自联网搜索，不展示本地知识库来源。
+- `MODEL_FALLBACK`：回答来自通用模型兜底，不展示本地知识库来源。
+- `NO_KNOWLEDGE`：没有可用知识依据或回答不可用，不展示本地知识库来源。
+
+流式接口先输出回答正文，回答完成后再发送最终 `route`、`source_reset` 和必要的 `source` 事件，避免把初始检索候选误当成最终引用。
 
 ### 知识沉淀闭环
 
@@ -94,9 +106,11 @@ AI 学习助手会保留用户原始问题，并按配置执行查询改写、�
 
 ## 技术栈
 
-- 后端：Java 17、Spring Boot 3.4.5、Spring AI 1.0.0、Spring Data JPA。
+- 后端：Java 17、Spring Boot 3.4.5、Spring AI 1.1.8、Spring Data JPA。
 - 数据库：PostgreSQL、Flyway、Hibernate Schema Validate。
-- 向量库：Chroma，Chroma 不可用时保留内存回退能力。
+- 向量库：Chroma，Chroma 不可用时保留内存回退能力；PostgreSQL 提供稀疏检索。
+- 流式基础设施：SSE、Redis Stream Buffer、进程内缓冲回退和模型熔断。
+- MCP：Spring AI MCP Server，Streamable HTTP。
 - 文档处理：PDFBox、Apache POI、Jsoup、Tesseract OCR。
 - 前端：Vue、Vite、Yarn、Markdown-it、highlight.js、DOMPurify。
 
@@ -105,7 +119,7 @@ AI 学习助手会保留用户原始问题，并按配置执行查询改写、�
 需要安装：
 
 - Java 17。
-- Maven 3.9+。
+- Maven 3.6.3+。
 - Node.js 20+ 和 Yarn。
 - PostgreSQL。
 - Chroma。仓库不包含 Docker Compose 或 Dockerfile，需要自行部署。
@@ -139,6 +153,8 @@ export POSTGRES_USER='postgres'
 export POSTGRES_PASSWORD='postgres'
 export OPENAI_API_KEY='聊天模型 API Key'
 export OPENAI_EMBEDDING_API_KEY='Embedding API Key'
+# 联网搜索可选；未配置时 Web fallback 会返回空结果
+export BOCHA_API_KEY='博查 Web Search API Key'
 ```
 
 默认模型和服务配置在 `src/main/resources/application.properties`。管理员可通过 `/api/model-config/pool` 管理全局模型池并设置默认模型；用户可在前端「模型配置」页面或 `/api/model-config/me` 选择自己的模型模式（跟随默认 / 使用池模型 / 自定义），运行时按用户配置动态解析 ChatClient。
@@ -146,7 +162,7 @@ export OPENAI_EMBEDDING_API_KEY='Embedding API Key'
 当前默认 Chroma 地址是配置文件中的远程地址。连接本地 Chroma 时覆盖：
 
 ```bash
-export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_HOST='http://localhost'
+export CHROMA_HOST='http://localhost'
 export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 ```
 
@@ -177,11 +193,25 @@ export SPRING_AI_VECTORSTORE_CHROMA_CLIENT_PORT='8000'
 | `OCR_MAX_PAGES` | `5000` | PDF 最大总页数 |
 | `OCR_MAX_OCR_PAGES` | `50` | 单批 OCR 页数上限 |
 | `MANAGEMENT_SERVER_PORT` | `8081` | Actuator 管理端口 |
+| `CHROMA_HOST` | `http://175.178.229.209` | Chroma 服务地址；本地调试时改为 `http://localhost` |
+| `BOCHA_API_KEY` | 空 | 博查 Web Search API Key；未配置时联网搜索自动返回空结果 |
+| `BOCHA_BASE_URL` | `https://api.bochaai.com` | 博查 Web Search API 地址 |
+| `BOCHA_SEARCH_COUNT` | `8` | 单次联网搜索返回条数 |
+| `REDIS_HOST` | 空 | 流式缓冲和熔断状态共享的 Redis 地址；为空时使用进程内实现 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+| `REDIS_PASSWORD` | 空 | Redis 密码 |
+| `AI_STREAM_BUFFER_BACKEND` | `auto` | 流式缓冲后端：`auto`、`redis` 或 `memory` |
+| `AI_STREAM_HEARTBEAT_MS` | `15000` | SSE 心跳间隔 |
+| `AI_STREAM_BUFFER_TTL_SECONDS` | `300` | 流式事件缓冲保留时间 |
+| `AI_CB_FAILURE_THRESHOLD` | `3` | 单模型连续失败后触发熔断的次数 |
+| `AI_CB_COOLDOWN_MS` | `30000` | 模型熔断冷却时间 |
+| `AI_CB_STATE_BACKEND` | `auto` | 模型熔断状态后端：`auto`、`redis` 或 `memory` |
+| `AI_KEY_ENCRYPTION_SECRET` | 空 | 模型 API Key 加密密钥；生产环境建议配置 |
 | `WORKBENCH_EVAL_GATE_ENABLED` | `false` | 是否启用评测质量门禁 |
 
 完整默认项见 `src/main/resources/application.properties`。
 
-邮箱验证码使用 SMTP 发送。未配置 `SMTP_HOST` 时不会发送邮件，也不会把验证码写入日志；本地验证流程应配置开发 SMTP 或使用测试替身。验证码哈希和发送记录保存在 PostgreSQL 中，并按邮箱、IP 和失败次数限流。使用 QQ 邮箱时的配置示例：
+邮箱验证码使用 SMTP 发送。未配置 `SMTP_HOST` 或邮件服务不可用时，发送接口会返回服务不可用错误，不会把验证码写入日志；本地验证流程应配置开发 SMTP 或使用测试替身。验证码哈希和发送记录保存在 PostgreSQL 中，并按邮箱、IP 和失败次数限流。使用 QQ 邮箱时的配置示例：
 
 ```bash
 export SMTP_HOST='smtp.qq.com'
@@ -450,7 +480,16 @@ curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
   -d '{"conversationId":"demo","workspaceId":"personal-1","message":"什么是 RAG？"}'
 ```
 
-流式接口返回 `text/event-stream`。前端会处理文本片段、来源和工具调用事件。当前 RAG 默认启用混合检索和答案依据校验；知识库没有足够依据时可以使用模型兜底，但默认不连接真实 Web 搜索。
+流式接口返回 `text/event-stream`。前端会处理文本片段、最终路由、来源清空、来源和工具调用事件。当前 RAG 默认启用混合检索、答案依据校验和博查联网搜索回退；知识库没有足够依据时不会把初始检索候选直接当作最终引用。
+
+回答路由和引用规则：
+
+- `LOCAL_KNOWLEDGE`：回答基于最终通过校验的本地知识库上下文，可以展示本地来源。
+- `WEB_FALLBACK`：回答来自联网搜索，不展示本地知识库来源。
+- `MODEL_FALLBACK`：回答来自通用模型兜底，不展示本地知识库来源。
+- `NO_KNOWLEDGE`：没有可用知识依据或回答不可用，不展示本地知识库来源。
+
+流式接口先输出回答正文，回答完成后再发送最终 `route`、`source_reset` 和必要的 `source` 事件，避免把初始检索候选误当成最终引用。
 
 检索诊断（查看某问题命中了哪些分块、得分和可见性过滤结果）：
 
@@ -565,6 +604,7 @@ POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 | 会话 | `/api/conversations/*` | 会话列表、消息、停止、删除 |
 | 模型配置 | `/api/model-config/*` | 全局模型池管理（管理员）、用户自管 CHAT 模型池、用户模型模式配置 |
 | 问答 | `/api/rag/chat`、`/api/workbench/chat*` | 普通和 SSE 流式问答 |
+| MCP | `/mcp`、`/api/mcp/keys` | Streamable HTTP 只读知识库工具和 API Key 签发、列表、吊销 |
 | 检索诊断 | `/api/rag/debug` | 输入问题查看命中分块、检索得分与可见性 |
 | 评测 | `/api/eval/*` | 题库、运行、结果和导入文件 |
 | 记录 | `/api/learning-records/*` | 学习记录和正式笔记 |
@@ -632,6 +672,7 @@ V19__add_ai_model_owner.sql         模型增加所有者（用户自管 CHAT �
 V20__create_eval_tables.sql         评测题库、运行和结果表
 V21__add_workspace_parent.sql       workspaces 增加 parent_workspace_id 自引用外键
 V22__allow_org_workspace_type.sql   放宽 workspaces.type 检查约束以包含 ORG 组织类型
+V31__create_mcp_api_keys.sql        MCP 客户端 API Key 哈希、过期和吊销状态
 ```
 
 V22 是一个修复性迁移：`workspaces.type` 列存在仅允许 `PERSONAL/TEAM/PUBLIC` 的 CHECK 约束（在 Flyway 之外手工创建），导致 `WorkspaceHierarchyInitializer` 插入 `ORG` 类型记录时触发约束冲突、应用启动失败。V22 删除旧约束并重建为包含 ORG 的四值约束。已部署环境如果存在同名约束，升级到本版本前应先备份数据库。
@@ -660,7 +701,59 @@ Actuator 默认绑定 `127.0.0.1:8081`，仅暴露健康和信息端点：
 
 ## 搜索和 Agent 扩展
 
-项目保留 `WebSearchService`、工具调用事件和任务状态接口，便于继续学习 Agent。当前联网搜索默认关闭，`WebSearchService` 不是已接入的商业搜索服务。建议在现有只读接口基础上先实现知识库维护 Agent，再逐步加入需要确认的同步、重试和删除操作。
+项目同时提供联网搜索回退、教学 Agent、维护 Agent 和 MCP 知识库工具。联网搜索通过博查 Web Search API 实现；MCP 工具保持只读，不复用聊天回答的来源展示逻辑。
+
+### 知识库维护 Agent
+
+维护 Agent 位于 `/api/agent/maintenance/*`。LLM 侧只注册只读工具（索引状态、文档任务、任务批次、文档列表），所有写操作一律走「意图识别 → 待确认令牌 → 确认执行」，不会在模型工具循环内直接执行写操作。
+
+支持的操作：
+
+| 命令示例 | 动作 | 权限要求 |
+| --- | --- | --- |
+| 重试失败任务 task-xxx | `RETRY_TASK` | 空间写权限 |
+| 增量同步当前空间 | `SYNC_WORKSPACE` | 空间写权限 |
+| 重建当前空间索引 | `REBUILD_INDEX` | 空间写权限 |
+| 重建所有向量索引 | `REBUILD_ALL_INDEX` | 仅超级管理员 |
+| 删除文档 doc-xxx | `DELETE_DOCUMENT` | 空间写权限 |
+
+`重建所有向量索引` 面向系统级运维：会遍历全部知识空间（个人、团队、组织和公共空间），为每个空间提交一个独立的异步 `REBUILD` 任务，复用现有的任务排队、进度和失败重试机制。非超级管理员发起该命令会直接返回 403；确认阶段会再次校验超管权限，避免角色被降级后旧令牌仍然可用。
+
+维护 Agent 的确认令牌默认 10 分钟有效且只能消费一次，保存在 `maintenance_pending_actions` 表中，服务重启后仍在有效期内可确认。超级管理员在维护 Agent 中可以访问自己未加入的空间，其他用户仍严格按成员关系校验。
+
+## MCP 知识库服务
+
+项目内置 Spring AI MCP Server，协议为 Streamable HTTP，默认端点为 `POST /mcp`。当前只注册三个知识库只读工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `search_knowledge` | 在当前用户授权的知识空间中进行语义检索 |
+| `list_documents` | 列出当前用户可见的已索引文档 |
+| `get_document` | 按文档 ID 读取当前用户可访问的整篇文档 |
+
+MCP 请求必须通过鉴权。服务支持两种凭证：
+
+- `Authorization: Bearer <mcp_xxx>`：MCP API Key，适合外部 MCP 客户端。
+- 现有登录会话 Cookie 或会话令牌：适合网页端调试。
+
+API Key 通过登录会话管理，明文只在签发响应中返回一次，数据库只保存 SHA-256 哈希：
+
+```bash
+# 签发 MCP API Key，ttlDays 可选，最大 3650 天
+curl -b cookies.txt -X POST http://localhost:8080/api/mcp/keys \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"我的 MCP 客户端","ttlDays":365}'
+
+# 查看当前用户的 API Key
+curl -b cookies.txt http://localhost:8080/api/mcp/keys
+
+# 吊销 API Key
+curl -b cookies.txt -X DELETE http://localhost:8080/api/mcp/keys/<keyId>
+```
+
+使用 MCP 客户端连接时，将签发的凭证作为 Bearer Token，并按工具参数传入可选的 `workspaceId`。服务端会再次校验用户、空间和文档权限，不允许通过 MCP 跨用户或跨空间读取资料。关闭 `app.mcp.enabled` 后，MCP 端点返回 404。
+
+MCP 相关数据库迁移为 `V31__create_mcp_api_keys.sql`。不要把 `mcp_` 明文凭证提交到仓库或日志中。
 
 ## 目录结构
 

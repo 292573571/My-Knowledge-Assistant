@@ -494,6 +494,51 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void uploadsOrgDocumentAsWorkspaceScopedInsteadOfGloballyVisible() throws Exception {
+        WorkspaceAccessContext orgEditor = new WorkspaceAccessContext(
+                "1", "org-1", WorkspaceRole.EDITOR, WorkspaceType.ORG
+        );
+
+        WorkspaceDocumentUploadResponse response = service.uploadWorkspaceDocument(orgEditor,
+                new MockMultipartFile("file", "org-guide.pdf", "application/pdf",
+                        PdfTestDocuments.textPdf("Org Guide", "Org only PDF knowledge.")));
+
+        assertThat(response.workspaceId()).isEqualTo("org-1");
+        assertThat(response.visibility()).isEqualTo(DocumentVisibility.WORKSPACE);
+        assertThat(indexStore.list()).singleElement().satisfies(entry -> {
+            assertThat(entry.workspaceId()).isEqualTo("org-1");
+            assertThat(entry.visibility()).isEqualTo(DocumentVisibility.WORKSPACE);
+        });
+        // 回归锁：组织文档若被标记为 PUBLIC，任何登录用户都能跨组织检索到。
+        assertThat(vectorStore.similaritySearch("Org only", 5, "2", "personal-2"))
+                .extracting(SourceDocument::documentId)
+                .doesNotContain(response.documentId());
+        // 组织成员在自己的组织空间内仍可检索到。
+        assertThat(vectorStore.similaritySearch("Org only", 5, "1", "org-1"))
+                .extracting(SourceDocument::documentId)
+                .contains(response.documentId());
+    }
+
+    @Test
+    void reimportKeepsNewManagedSourceFileInsteadOfDeletingIt() throws Exception {
+        WorkspaceAccessContext editor = new WorkspaceAccessContext(
+                "2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM
+        );
+        Path external = docsDirectory.resolve("external-guide.md");
+        Files.writeString(external, "# Guide\n\nManaged source reimport keeps the newest file.");
+
+        service.ingestDocument(external.toString(), false, editor);
+        // 强制重新导入同一内容：会复制出新的受管文件并清理旧的受管文件。
+        service.ingestDocument(external.toString(), true, editor);
+
+        assertThat(indexStore.list()).singleElement().satisfies(entry -> {
+            Path managed = docsDirectory.resolve(entry.path().substring("docs/".length()));
+            // 回归锁：若在 upsert 之后重新查询旧条目，会命中刚写入的新条目并删掉新文件。
+            assertThat(Files.exists(managed)).isTrue();
+        });
+    }
+
+    @Test
     void syncsHtmlAndHtmDocumentsFromDocsDirectory() throws Exception {
         Files.writeString(docsDirectory.resolve("guide.html"), "<h1>HTML Guide</h1><p>First source.</p>");
         Files.writeString(docsDirectory.resolve("legacy.htm"), "<h1>HTM Guide</h1><p>Second source.</p>");

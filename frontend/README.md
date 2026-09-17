@@ -1,6 +1,6 @@
 # 识海学习助手前端
 
-Vue + Vite 实现的统一学习工作台，支持普通 RAG 问答、主题教学、CHECK/PRACTICE、SSE 事件、来源引用、Markdown 渲染和服务端会话历史。
+Vue + Vite 实现的统一学习工作台，支持普通 RAG 问答、主题教学、CHECK/PRACTICE、SSE 断点续传、回答路由、来源引用、Markdown 渲染和服务端会话历史。
 
 ## 截图
 
@@ -23,7 +23,8 @@ docs/screenshots/workbench.png
 - 会话历史保存到 PostgreSQL
 - HttpOnly Cookie 会话认证，浏览器 JavaScript 不接触 Token
 - 普通回答和主题教学统一使用 `/api/learning-assistant` 接口
-- SSE 事件输出、EOF 异常检测、停止和组件卸载取消
+- SSE 事件输出、断点续传、EOF 异常检测、停止和组件卸载取消
+- `route`、`source_reset` 和最终 `source` 事件控制引用展示，联网搜索和模型兜底不会显示本地 PDF 来源
 - Sources 逐步展示和点击展开
 - Tool Calls 逐步展示和点击展开
 - Markdown 渲染
@@ -84,19 +85,23 @@ http://localhost:8080
 
 ## 接口说明
 
-### 非流式聊天
+### 统一学习助手
 
-普通聊天模式调用：
+普通回答和主题教学统一调用：
 
 ```http
-POST /api/chat
+POST /api/learning-assistant/sessions/{sessionId}/messages
 ```
 
 请求：
 
 ```json
 {
-  "message": "MCP 是什么？"
+  "workspaceId": "personal-1",
+  "message": "MCP 是什么？",
+  "mode": "AUTO",
+  "userLevel": "BEGINNER",
+  "clientRequestId": "request-001"
 }
 ```
 
@@ -104,13 +109,16 @@ POST /api/chat
 
 ```json
 {
-  "answer": "..."
+  "answer": "...",
+  "mode": "CHAT",
+  "route": "LOCAL_KNOWLEDGE",
+  "sources": []
 }
 ```
 
 ### 非流式 RAG 问答
 
-知识库模式调用：
+旧版 RAG 接口仍可用于兼容和调试：
 
 ```http
 POST /api/rag/chat
@@ -121,6 +129,7 @@ POST /api/rag/chat
 ```json
 {
   "conversationId": "default",
+  "workspaceId": "personal-1",
   "message": "MCP 和 Tool Calling 有什么区别？"
 }
 ```
@@ -138,15 +147,8 @@ POST /api/rag/chat
       "score": 0.86
     }
   ],
-  "toolCalls": [
-    {
-      "toolName": "read_file",
-      "arguments": { "path": "mcp.md" },
-      "resultPreview": "...",
-      "success": true,
-      "durationMs": 300
-    }
-  ]
+  "route": "LOCAL_KNOWLEDGE",
+  "retrievalDebug": []
 }
 ```
 
@@ -161,17 +163,23 @@ Content-Type: application/json
 {"conversationId":"default","mode":"rag","message":"..."}
 ```
 
-前端监听事件：
+工作台 SSE 前端监听事件（事件是否出现取决于回答路径）：
 
 ```text
 start
-token
-source
 tool_call_start
 tool_call_result
+token
+route
+source_reset
+source
 done
 error
 ```
+
+`route` 的取值为 `LOCAL_KNOWLEDGE`、`WEB_FALLBACK`、`MODEL_FALLBACK` 或 `NO_KNOWLEDGE`。只有 `LOCAL_KNOWLEDGE` 回答会展示最终通过校验的本地知识库来源；其他路由会清空本地来源。`source_reset` 用于覆盖旧来源，防止当前回答无引用时继续显示上一条回答的来源。
+
+统一学习助手的断点续传 SSE 还会发送 `session` 和 `stream_init` 事件，并通过 `streamId` 与 `Last-Event-ID` 支持断线重连。两条流式链路都遵循先输出正文、再发送最终路由和来源的规则。
 
 `token` 事件示例：
 

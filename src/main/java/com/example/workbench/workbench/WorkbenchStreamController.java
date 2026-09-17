@@ -11,6 +11,7 @@ import com.example.workbench.modelconfig.ModelConfigContext;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
+import com.example.workbench.rag.RagSource;
 import com.example.workbench.rag.RagQualityAuditService;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
@@ -154,35 +155,42 @@ public class WorkbenchStreamController {
                         "resultPreview", "正在生成回答"
                 ));
 
-                for (Object source : answer.sources()) {
-                    send(emitter, "source", source);
-                }
-
                 StringBuilder content = new StringBuilder();
                 AtomicBoolean firstTokenSent = new AtomicBoolean(false);
                 answer.tokens()
-                        .takeWhile(token -> !execution.isCancelled() && !Thread.currentThread().isInterrupted())
-                        .doOnNext(token -> {
-                            content.append(token);
-                            if (firstTokenSent.compareAndSet(false, true)) {
-                                log.info("Workbench stream first token forwarded conversationId={} latencyMs={}", scopedConversationId, System.currentTimeMillis() - startedAt);
-                            }
+                         .takeWhile(token -> !execution.isCancelled() && !Thread.currentThread().isInterrupted())
+                         .doOnNext(token -> {
+                             content.append(token);
+                             if (firstTokenSent.compareAndSet(false, true)) {
+                                 log.info("Workbench stream first token forwarded conversationId={} latencyMs={}", scopedConversationId, System.currentTimeMillis() - startedAt);
+                             }
                             try {
                                 send(emitter, "token", Map.of("text", token));
                             } catch (IOException ignored) {
                                 Thread.currentThread().interrupt();
                             }
-                        })
+                         })
                         .blockLast();
+                if (execution.isCancelled()) {
+                    emitter.complete();
+                    return;
+                }
+                List<RagSource> finalSources = answer.route() == com.example.workbench.rag.RagAnswerRoute.LOCAL_KNOWLEDGE
+                        ? answer.finalSources(content.toString()) : List.of();
+                send(emitter, "route", Map.of("route", answer.route().name()));
+                send(emitter, "source_reset", Map.of("sources", List.of()));
+                for (Object source : finalSources) {
+                    send(emitter, "source", source);
+                }
                 if (!execution.isCancelled()) {
                     workspaceService.access(user, workspace.workspaceId());
                     String answerContent = ragService.sanitizePresentedAnswer(content.toString(), message);
                     boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
-                            normalizedMode, answerContent, answer.sources(), List.of());
+                            normalizedMode, answerContent, finalSources, List.of());
                         if (recorded) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
-                            learningRecordService.record(user, workspace.workspaceId(), message, answerContent, answer.sources());
-                            ragQualityAuditService.audit(scopedConversationId, message, answerContent, answer.sources());
+                            learningRecordService.record(user, workspace.workspaceId(), message, answerContent, finalSources);
+                            ragQualityAuditService.audit(scopedConversationId, message, answerContent, finalSources);
                     }
                 }
                 send(emitter, "done", Map.of());

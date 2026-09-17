@@ -359,7 +359,11 @@ public class DocumentTaskService {
         } catch (RuntimeException exception) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "任务创建者已不存在");
         }
-        WorkspaceAccessContext access = workspaceService.access(actor, task.getWorkspaceId());
+        // 超管可以维护自己并未加入的空间（系统级全量重建场景），需要走超管旁路；
+        // 普通用户仍按成员关系解析。
+        WorkspaceAccessContext access = adminAuthorizationService.isSuperAdmin(actor)
+                ? workspaceService.systemAccess(actor, task.getWorkspaceId())
+                : workspaceService.access(actor, task.getWorkspaceId());
         if (!access.canWrite()) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "任务创建者已失去空间写权限");
         }

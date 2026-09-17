@@ -197,17 +197,36 @@ public class RagController {
         AppUser actor = authenticatedUser(request);
         DocumentSourceFile source = documentTaskService.sourceFile(
                 taskId, workspaceService.access(actor, workspaceId));
-        org.springframework.http.MediaType mediaType = org.springframework.http.MediaTypeFactory
+        // 源文件是用户上传的任意内容。前端会把它转成 blob URL 后直接导航打开，
+        // 因此若按原始 MIME 返回 text/html，脚本将在应用同源下执行（存储型 XSS）。
+        // 只允许可安全内联预览的类型保留原 MIME，其余一律降级为附件 + octet-stream。
+        org.springframework.http.MediaType detected = org.springframework.http.MediaTypeFactory
                 .getMediaType(source.fileName())
                 .orElse(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM);
+        boolean inlineSafe = isInlineSafeSource(detected);
+        org.springframework.http.MediaType mediaType = inlineSafe
+                ? detected
+                : org.springframework.http.MediaType.APPLICATION_OCTET_STREAM;
+        org.springframework.http.ContentDisposition disposition = (inlineSafe
+                ? org.springframework.http.ContentDisposition.inline()
+                : org.springframework.http.ContentDisposition.attachment())
+                .filename(source.fileName(), java.nio.charset.StandardCharsets.UTF_8)
+                .build();
         return org.springframework.http.ResponseEntity.ok()
                 .contentType(mediaType)
                 .contentLength(source.content().length)
-                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
-                        org.springframework.http.ContentDisposition.inline()
-                                .filename(source.fileName(), java.nio.charset.StandardCharsets.UTF_8)
-                                .build().toString())
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Content-Type-Options", "nosniff")
                 .body(source.content());
+    }
+
+    /** 仅 PDF、常见位图和纯文本允许内联预览；HTML/SVG/XML 等主动内容必须强制下载。 */
+    static boolean isInlineSafeSource(org.springframework.http.MediaType mediaType) {
+        return org.springframework.http.MediaType.APPLICATION_PDF.isCompatibleWith(mediaType)
+                || org.springframework.http.MediaType.IMAGE_PNG.isCompatibleWith(mediaType)
+                || org.springframework.http.MediaType.IMAGE_JPEG.isCompatibleWith(mediaType)
+                || org.springframework.http.MediaType.IMAGE_GIF.isCompatibleWith(mediaType)
+                || org.springframework.http.MediaType.TEXT_PLAIN.isCompatibleWith(mediaType);
     }
 
     @GetMapping("/documents/{documentId}/content")

@@ -18,6 +18,7 @@ import com.example.workbench.workspace.WorkspaceService;
 import com.example.workbench.workbench.WorkbenchChatRequest;
 import com.example.workbench.workbench.WorkbenchChatResponse;
 import com.example.workbench.rag.RagSource;
+import com.example.workbench.rag.RagAnswerRoute;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -152,6 +153,7 @@ public class LearningAssistantService {
      */
     public LearningAssistantResponse streamMessage(AppUser user, String sessionId, LearningAssistantMessageRequest request,
                                                    Consumer<String> onToken,
+                                                   Consumer<RagAnswerRoute> onRoute,
                                                    Consumer<List<RagSource>> onSources,
                                                    ConversationExecutionRegistry.Execution execution) {
         WorkspaceAccessContext access = access(user, request.workspaceId());
@@ -179,11 +181,14 @@ public class LearningAssistantService {
                 sessionRepository.save(session);
                 conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
                         result.answer(), result.sources(), result.traces());
-                return LearningAssistantResponse.teaching(result, intent);
+                LearningAssistantResponse response = LearningAssistantResponse.teaching(result, intent);
+                if (onRoute != null) onRoute.accept(response.route());
+                if (onSources != null) onSources.accept(response.sources() == null ? List.of() : response.sources());
+                return response;
             }
             WorkbenchChatResponse result = chatService.streamChat(user,
-                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()),
-                    onToken, onSources);
+                     new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()),
+                     onToken, onRoute, onSources);
             requireRunning(execution);
             workspaceService.access(user, access.workspaceId());
             session.touch(LearningMode.CHAT, null, "CHAT", "ACTIVE");
@@ -191,6 +196,13 @@ public class LearningAssistantService {
             sessionRepository.save(session);
             return LearningAssistantResponse.chat(sessionId, result);
         });
+    }
+
+    public LearningAssistantResponse streamMessage(AppUser user, String sessionId, LearningAssistantMessageRequest request,
+                                                   Consumer<String> onToken,
+                                                   Consumer<List<RagSource>> onSources,
+                                                   ConversationExecutionRegistry.Execution execution) {
+        return streamMessage(user, sessionId, request, onToken, null, onSources, execution);
     }
 
     public LearningAssistantResponse check(AppUser user, String sessionId, LearningAssistantCheckRequest request) {

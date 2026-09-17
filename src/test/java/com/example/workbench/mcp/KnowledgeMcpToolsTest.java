@@ -21,10 +21,13 @@ import com.example.workbench.workspace.WorkspaceRole;
 import com.example.workbench.workspace.WorkspaceService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class KnowledgeMcpToolsTest {
 
@@ -51,28 +54,38 @@ class KnowledgeMcpToolsTest {
     @Test
     void searchScopesRetrievalToCurrentUser() {
         McpRequestContext.set(user);
-        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<String>any(), anyInt()))
+        WorkspaceAccessContext access = new WorkspaceAccessContext(UserConversationScope.ownerId(user),
+                "personal-1", WorkspaceRole.OWNER);
+        when(workspaceService.access(user, "personal-1")).thenReturn(access);
+        when(workspaceService.effectiveReadableWorkspaceIds(user, "personal-1"))
+                .thenReturn(Set.of("personal-1"));
+        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<Set<String>>any(), anyInt()))
                 .thenReturn(List.of(new RagSource("手册.pdf", 2, "季度报销流程", 0.87, "第三章 > 报销", "/docs/手册.pdf", null)));
 
-        List<KnowledgeMcpTools.KnowledgeHit> hits = tools.searchKnowledge("报销流程", null, 3);
+        List<KnowledgeMcpTools.KnowledgeHit> hits = tools.searchKnowledge("报销流程", "personal-1", 3);
 
         assertThat(hits).hasSize(1);
         assertThat(hits.get(0).file()).isEqualTo("手册.pdf");
         assertThat(hits.get(0).snippet()).contains("报销");
         org.mockito.Mockito.verify(ragService).retrieveForAgent(eq("报销流程"),
-                eq(UserConversationScope.ownerId(user)), ArgumentMatchers.<String>any(), eq(3));
+                eq(UserConversationScope.ownerId(user)), eq(Set.of("personal-1")), eq(3));
     }
 
     @Test
     void searchClampsLimitIntoSupportedRange() {
         McpRequestContext.set(user);
-        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<String>any(), anyInt()))
+        WorkspaceAccessContext access = new WorkspaceAccessContext(UserConversationScope.ownerId(user),
+                "personal-1", WorkspaceRole.OWNER);
+        when(workspaceService.access(user, "personal-1")).thenReturn(access);
+        when(workspaceService.effectiveReadableWorkspaceIds(user, "personal-1"))
+                .thenReturn(Set.of("personal-1"));
+        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<Set<String>>any(), anyInt()))
                 .thenReturn(List.of());
 
         tools.searchKnowledge("任意", "personal-1", 99);
 
         org.mockito.Mockito.verify(ragService).retrieveForAgent("任意", UserConversationScope.ownerId(user),
-                "personal-1", 10);
+                Set.of("personal-1"), 10);
     }
 
     @Test
@@ -136,25 +149,49 @@ class KnowledgeMcpToolsTest {
     }
 
     @Test
-    void searchPassesWorkspaceThroughUnusedArgumentMatcher() {
+    void searchRejectsWorkspaceTheCallerCannotAccess() {
         McpRequestContext.set(user);
-        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<String>any(), anyInt()))
+        when(workspaceService.access(user, "team-9"))
+                .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "空间不存在"));
+
+        // 回归锁：MCP 客户端传入的 workspaceId 必须先过成员校验，不能越权检索他人空间。
+        assertThatThrownBy(() -> tools.searchKnowledge("问题", "team-9", null))
+                .isInstanceOf(ResponseStatusException.class);
+        org.mockito.Mockito.verify(ragService, org.mockito.Mockito.never())
+                .retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<Set<String>>any(), anyInt());
+    }
+
+    @Test
+    void searchExpandsReadableWorkspacesFromAuthorizedContext() {
+        McpRequestContext.set(user);
+        WorkspaceAccessContext access = new WorkspaceAccessContext(UserConversationScope.ownerId(user),
+                "org-1", WorkspaceRole.OWNER);
+        when(workspaceService.access(user, "org-1")).thenReturn(access);
+        when(workspaceService.effectiveReadableWorkspaceIds(user, "org-1"))
+                .thenReturn(Set.of("org-1", "team-1", "team-2"));
+        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<Set<String>>any(), anyInt()))
                 .thenReturn(List.of());
 
-        tools.searchKnowledge("问题", "ws-9", null);
+        tools.searchKnowledge("组织制度", "org-1", 5);
 
-        org.mockito.Mockito.verify(ragService).retrieveForAgent("问题", UserConversationScope.ownerId(user), "ws-9", 5);
+        org.mockito.Mockito.verify(ragService).retrieveForAgent("组织制度",
+                UserConversationScope.ownerId(user), Set.of("org-1", "team-1", "team-2"), 5);
     }
 
     @Test
     void searchHandlesEmptyRetrievalResult() {
         McpRequestContext.set(user);
-        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<String>any(), anyInt()))
+        WorkspaceAccessContext access = new WorkspaceAccessContext(UserConversationScope.ownerId(user),
+                "personal-1", WorkspaceRole.OWNER);
+        when(workspaceService.access(user, null)).thenReturn(access);
+        when(workspaceService.effectiveReadableWorkspaceIds(user, "personal-1"))
+                .thenReturn(Set.of("personal-1"));
+        when(ragService.retrieveForAgent(anyString(), anyString(), ArgumentMatchers.<Set<String>>any(), anyInt()))
                 .thenReturn(List.of());
 
         assertThat(tools.searchKnowledge("无命中", null, null)).isEmpty();
         org.mockito.Mockito.verify(ragService).retrieveForAgent(eq("无命中"),
-                eq(UserConversationScope.ownerId(user)), ArgumentMatchers.<String>any(), eq(5));
+                eq(UserConversationScope.ownerId(user)), eq(Set.of("personal-1")), eq(5));
     }
 
     @Test

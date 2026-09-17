@@ -10,6 +10,7 @@ import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import com.example.workbench.rag.RagChatRequest;
 import com.example.workbench.rag.RagChatResponse;
+import com.example.workbench.rag.RagAnswerRoute;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagStreamResponse;
 import com.example.workbench.rag.RagSource;
@@ -88,7 +89,8 @@ public class WorkbenchChatService {
                     ragResponse.sources().size(),
                     System.currentTimeMillis() - startedAt
             );
-            WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), ragResponse.answer(), ragResponse.sources(), List.of());
+            WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), ragResponse.answer(), ragResponse.sources(),
+                    List.of(), ragResponse.route());
             if (execution.isCancelled()) {
                 // 模型返回期间会话可能已停止或删除，此时绝不能把迟到结果写回数据库。
                 log.info("Workbench chat result discarded because conversation was stopped or deleted userId={} conversationId={}", user.getId(), conversationId);
@@ -119,7 +121,9 @@ public class WorkbenchChatService {
      * 流式问答：RAG 检索后逐 token 输出回答，消息持久化和学习记录在回答输出完成后执行，
      * 使首字延迟不再被完整回答生成和数据库写操作阻塞。
      */
-    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request, Consumer<String> onToken, Consumer<List<RagSource>> onSources) {
+    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request, Consumer<String> onToken,
+                                             Consumer<RagAnswerRoute> onRoute,
+                                             Consumer<List<RagSource>> onSources) {
         long startedAt = System.currentTimeMillis();
         String mode = request.normalizedMode();
         String clientConversationId = request.normalizedConversationId();
@@ -155,12 +159,6 @@ public class WorkbenchChatService {
                         if (execution.isCancelled()) return;
                         if (token == null || token.isEmpty()) return;
                         if (firstTokenSent.compareAndSet(false, true)) {
-                            // 推迟 onSources 到第一个 token 到达时：让 RagService.stream() 内
-                            // 礼貌拒绝兜底有足够时间决定是否替换 sources；否则若 sources 在订阅前
-                            // 调用，订阅方拿到的仍是初始本地 sources（与可能的 web 答案不匹配）。
-                            if (onSources != null) {
-                                onSources.accept(ragResponse.sources());
-                            }
                             log.info("Workbench stream chat first token forwarded conversationId={} latencyMs={}",
                                     conversationId, System.currentTimeMillis() - startedAt);
                         }
@@ -170,23 +168,31 @@ public class WorkbenchChatService {
                     .blockLast();
 
             if (execution.isCancelled()) {
-                log.info("Workbench stream chat result discarded because conversation was stopped or deleted userId={} conversationId={}",
-                        user.getId(), conversationId);
-                return new WorkbenchChatResponse(newMessageId(), content.toString(), ragResponse.sources(), List.of());
+                return new WorkbenchChatResponse(newMessageId(), content.toString(), List.of(),
+                        List.of(), RagAnswerRoute.NO_KNOWLEDGE);
+            }
+            List<RagSource> finalSources = ragResponse.route() == RagAnswerRoute.LOCAL_KNOWLEDGE
+                    ? ragResponse.finalSources(content.toString()) : List.of();
+            if (onRoute != null) {
+                onRoute.accept(ragResponse.route());
+            }
+            if (onSources != null) {
+                onSources.accept(finalSources);
             }
 
             workspaceService.access(user, workspace.workspaceId());
             String answerContent = ragService.sanitizePresentedAnswer(content.toString(), request.message());
-            WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), answerContent, ragResponse.sources(), List.of());
+            WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), answerContent, finalSources,
+                    List.of(), ragResponse.route());
             boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
                     mode, answerContent, response.sources(), response.toolCalls());
             if (recorded) {
-                learningRecordService.record(user, workspace.workspaceId(), request.message(), answerContent, ragResponse.sources());
+                learningRecordService.record(user, workspace.workspaceId(), request.message(), answerContent, finalSources);
             }
             log.info(
                     "Workbench stream chat completed route=RAG_LOCAL_KNOWLEDGE conversationId={} sources={} durationMs={}",
                     conversationId,
-                    ragResponse.sources().size(),
+                    finalSources.size(),
                     System.currentTimeMillis() - startedAt
             );
             return response;
@@ -196,5 +202,10 @@ public class WorkbenchChatService {
             }
             executionRegistry.finish(conversationId, execution);
         }
+    }
+
+    public WorkbenchChatResponse streamChat(AppUser user, WorkbenchChatRequest request,
+                                             Consumer<String> onToken, Consumer<List<RagSource>> onSources) {
+        return streamChat(user, request, onToken, null, onSources);
     }
 }

@@ -298,7 +298,8 @@ public class RagService {
             // 身份和能力介绍是确定性产品信息，直接返回固定文案，避免模型偶发生成异常内容。
             rememberForLegacyTests(user, conversationId, question, LEARNING_ASSISTANT_INTRODUCTION);
             log.info("RAG chat completed route=LEARNING_ASSISTANT_INTRODUCTION conversationId={} durationMs={}", conversationId, System.currentTimeMillis() - startedAt);
-            return new RagChatResponse(LEARNING_ASSISTANT_INTRODUCTION, List.of(), retrievalDebug(includeDebug, question, List.of(), List.of()));
+            return new RagChatResponse(LEARNING_ASSISTANT_INTRODUCTION, List.of(),
+                    retrievalDebug(includeDebug, question, List.of(), List.of()), RagAnswerRoute.NO_KNOWLEDGE);
         }
 
         if (shouldAnswerNoKnowledge(question)) {
@@ -310,7 +311,8 @@ public class RagService {
                     conversationId,
                     System.currentTimeMillis() - startedAt
             );
-            return new RagChatResponse(answer, List.of(), retrievalDebug(includeDebug, question, List.of(), List.of()));
+            return new RagChatResponse(answer, List.of(),
+                    retrievalDebug(includeDebug, question, List.of(), List.of()), RagAnswerRoute.NO_KNOWLEDGE);
         }
 
         ConversationContext conversationContext = resolveConversationContext(conversationId, question, history);
@@ -399,6 +401,19 @@ public class RagService {
 
         String answer = sanitizePresentedAnswer(generatedAnswer, question);
 
+        if (!qualityGate.approvesAnswer(question, answer, sources)) {
+            log.info(
+                    "RAG local answer grounding failed conversationId={} action=use_fallback sources={}",
+                    conversationId,
+                    sources.size()
+            );
+            RagChatResponse fallback = webSearchEnabled
+                    ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
+                    : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+            rememberForLegacyTests(user, conversationId, question, fallback.answer());
+            return withDebug(fallback, includeDebug, question, retrievedSources, sources);
+        }
+
         // 礼貌拒绝兜底：当模型被无关 PDF 误导而礼貌拒绝（"抱歉，我无法..."），且
         // 本轮尚有联网搜索可用，让用户重定向到联网答案而不是拿到拒绝答案。
         // 仅在 webSearchEnabled 时启用，避免在没有联网开关时增加额外延迟。
@@ -430,7 +445,8 @@ public class RagService {
                 ragSources.size(),
                 System.currentTimeMillis() - startedAt
         );
-        return new RagChatResponse(answer, ragSources, retrievalDebug(includeDebug, question, retrievedSources, sources));
+        return new RagChatResponse(answer, ragSources,
+                retrievalDebug(includeDebug, question, retrievedSources, sources), RagAnswerRoute.LOCAL_KNOWLEDGE);
         } finally {
             // 防止在线程池复用场景下 ThreadLocal 跨请求泄漏（内存泄漏 + ownerUserId 越权读取风险）。
             retrievalTrace.remove();
@@ -451,7 +467,7 @@ public class RagService {
             return response;
         }
         return new RagChatResponse(response.answer(), response.sources(),
-                retrievalDebug(true, question, retrievedSources, contextSources));
+                retrievalDebug(true, question, retrievedSources, contextSources), response.route());
     }
 
     public List<SourceDocument> retrieve(String query, int topK) {
@@ -523,6 +539,17 @@ public class RagService {
     }
 
     public RagStreamResponse stream(AppUser user, RagChatRequest request) {
+        try {
+            return streamInternal(user, request);
+        } finally {
+            // streamInternal 内部的 retrieveCandidates 会写入这两个 ThreadLocal；
+            // 必须在同一线程清理，否则 streamTaskExecutor 线程复用时会残留上一轮的候选快照。
+            retrievalTrace.remove();
+            retrievalScope.remove();
+        }
+    }
+
+    private RagStreamResponse streamInternal(AppUser user, RagChatRequest request) {
         String conversationId = request.normalizedConversationId();
         String question = request.message();
         StreamTiming timing = new StreamTiming(conversationId);
@@ -535,10 +562,12 @@ public class RagService {
         final List<ChatMessage> contextHistory = history;
 
         if (isLearningAssistantIntroductionQuestion(question)) {
-            return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION), List.of());
+            return new RagStreamResponse(reactor.core.publisher.Flux.just(LEARNING_ASSISTANT_INTRODUCTION),
+                    List.of(), RagAnswerRoute.NO_KNOWLEDGE);
         }
         if (shouldAnswerNoKnowledge(question)) {
-            return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER), List.of());
+            return new RagStreamResponse(reactor.core.publisher.Flux.just(NO_CONTEXT_ANSWER),
+                    List.of(), RagAnswerRoute.NO_KNOWLEDGE);
         }
 
         // 指代/上下文改写（多轮对话时含一次同步 LLM）与向量检索并行执行，
@@ -577,7 +606,7 @@ public class RagService {
             timing.mark("expandRetrieve");
         }
 
-        List<SourceDocument> sources = filterByThreshold(question, retrievedSources, false);
+        List<SourceDocument> sources = filterByThreshold(question, retrievedSources, qualityGate.isEnabled());
         timing.mark("filter");
         String effectiveQuestion = standaloneQuestion != null ? standaloneQuestion : question;
         if (sources.isEmpty() || !hasEnoughKnowledge(effectiveQuestion, sources)) {
@@ -593,7 +622,7 @@ public class RagService {
                 logStreamTiming("prepared", timing, "path=webSearch sources=" + webResponse.sources().size());
                 return new RagStreamResponse(
                         instrument(webResponse.tokens(), timing, "webSearch"),
-                        webResponse.sources()
+                        List.of(), RagAnswerRoute.WEB_FALLBACK
                 );
             }
             String prompt = buildModelFallbackPrompt(question);
@@ -604,7 +633,8 @@ public class RagService {
                 fallbackStream = fallbackStream.concatWith(reactor.core.publisher.Flux.just("\n\n" + MODEL_KNOWLEDGE_DISCLAIMER));
             }
             logStreamTiming("prepared", timing, "path=modelFallback sources=0");
-            return new RagStreamResponse(instrument(fallbackStream, timing, "modelFallback"), List.of());
+            return new RagStreamResponse(instrument(fallbackStream, timing, "modelFallback"),
+                    List.of(), RagAnswerRoute.MODEL_FALLBACK);
         }
 
         String context = buildContext(sources);
@@ -617,15 +647,34 @@ public class RagService {
         logStreamTiming("prepared", timing, "path=rag sources=" + sources.size());
         reactor.core.publisher.Flux<String> baseStream = streamWithHistory(prompt, relevantHistory, conversationId);
         if (!webSearchEnabled) {
-            return new RagStreamResponse(instrument(baseStream, timing, "rag"), ragSources);
+            RagStreamResponse response = new RagStreamResponse(instrument(baseStream, timing, "rag"), ragSources,
+                    RagAnswerRoute.LOCAL_KNOWLEDGE);
+            response.setFinalSourceResolver(answer -> finalLocalSources(response, question, sources, ragSources, answer));
+            return response;
         }
         // 构造可变 RagStreamResponse；guard 触发 web fallback 时直接修改其 tokens 与 sources，
         // 让前端订阅时拿到正确的 web 流和 web 引用而非无关 PDF。
-        RagStreamResponse response = new RagStreamResponse(baseStream, ragSources);
+        RagStreamResponse response = new RagStreamResponse(baseStream, ragSources, RagAnswerRoute.LOCAL_KNOWLEDGE);
+        response.setFinalSourceResolver(answer -> finalLocalSources(response, question, sources, ragSources, answer));
         withPoliteRefusalWebSearchGuard(baseStream, response, conversationId, question, relevantHistory);
         // 兜底计时埋点 + 直接返回 mutable response（保证 guard 后续对 sources 的替换能被订阅方拿到）。
         response.replaceTokens(instrument(response.tokens(), timing, "rag"));
         return response;
+    }
+
+    private List<RagSource> finalLocalSources(
+            RagStreamResponse response,
+            String question,
+            List<SourceDocument> contextSources,
+            List<RagSource> ragSources,
+            String answer
+    ) {
+        if (response.route() != RagAnswerRoute.LOCAL_KNOWLEDGE
+                || (qualityGate.isEnabled() && !qualityGate.approvesAnswer(question, answer, contextSources))) {
+            response.replaceRoute(RagAnswerRoute.NO_KNOWLEDGE);
+            return List.of();
+        }
+        return ragSources;
     }
 
     /**
@@ -654,7 +703,7 @@ public class RagService {
                 : chatClient.stream(prompt, history, Map.of(ConversationMemory.CONVERSATION_ID, conversationId));
         // 联网搜索得到的 URL 引用前端不展示（用户体验上意义不大、且博查摘要本身就够明确来源），
         // 但答案里的"来自 Web"字样仍由 prompt 保证，让用户知道答案来源是联网。
-        return new RagStreamResponse(flux, List.of());
+        return new RagStreamResponse(flux, List.of(), RagAnswerRoute.WEB_FALLBACK);
     }
 
     /**
@@ -707,7 +756,8 @@ public class RagService {
                         RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
                         // 替换 response 的 tokens 与 sources（让前端订阅时拿到正确的 web 数据）
                         response.replaceTokens(webResponse.tokens());
-                        response.replaceSources(webResponse.sources());
+                         response.replaceSources(List.of());
+                         response.replaceRoute(RagAnswerRoute.WEB_FALLBACK);
                         webResponse.tokens().subscribe(
                                 sink::next,
                                 sink::error,
@@ -743,7 +793,8 @@ public class RagService {
                         );
                         RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
                         response.replaceTokens(webResponse.tokens());
-                        response.replaceSources(webResponse.sources());
+                         response.replaceSources(List.of());
+                         response.replaceRoute(RagAnswerRoute.WEB_FALLBACK);
                         webResponse.tokens().subscribe(
                                 sink::next,
                                 sink::error,
@@ -840,7 +891,8 @@ public class RagService {
                     + "\n\n来自 Web";
         }
 
-        return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
+        return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources),
+                RagAnswerRoute.WEB_FALLBACK);
     }
 
     private RagChatResponse answerWithModelFallback(
@@ -851,7 +903,8 @@ public class RagService {
             List<SourceDocument> contextSources
     ) {
         if (!modelFallbackEnabled) {
-            return new RagChatResponse(NO_CONTEXT_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
+            return new RagChatResponse(NO_CONTEXT_ANSWER, List.of(),
+                    retrievalDebug(question, retrievedSources, contextSources), RagAnswerRoute.NO_KNOWLEDGE);
         }
 
         String prompt = buildModelFallbackPrompt(question);
@@ -865,7 +918,8 @@ public class RagService {
         }
         if (answer == null || answer.isBlank()) {
             log.warn("RAG model fallback answer rejected reason=empty_or_unavailable action=safety_answer conversationId={}", conversationId);
-            return new RagChatResponse(MODEL_FALLBACK_SAFETY_ANSWER, List.of(), retrievalDebug(question, retrievedSources, contextSources));
+            return new RagChatResponse(MODEL_FALLBACK_SAFETY_ANSWER, List.of(),
+                    retrievalDebug(question, retrievedSources, contextSources), RagAnswerRoute.MODEL_FALLBACK);
         }
         if (!answerGuardrail.isUsableModelFallbackAnswer(question, answer)) {
             // 模型请求成功但内容异常时，再尝试一次；这与网络错误重试是不同的保护层。
@@ -881,7 +935,8 @@ public class RagService {
             // 明确标注来源边界，避免用户将通用模型知识误认为本地资料结论。
             answer = sanitizePresentedAnswer(answer, question).strip() + "\n\n" + MODEL_KNOWLEDGE_DISCLAIMER;
         }
-        return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources));
+        return new RagChatResponse(answer, List.of(), retrievalDebug(question, retrievedSources, contextSources),
+                RagAnswerRoute.MODEL_FALLBACK);
     }
 
 

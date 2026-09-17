@@ -6,6 +6,7 @@ import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.DocumentTaskResponse;
 import com.example.workbench.rag.DocumentTaskService;
 import com.example.workbench.rag.DocumentTaskType;
+import com.example.workbench.workspace.WorkspaceService;
 import java.util.ArrayList;
 import java.util.List;
 import java.time.Duration;
@@ -41,26 +42,30 @@ public class MaintenanceAgentService {
     private final DocumentTaskService taskService;
     private final DocumentIngestionService ingestionService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final WorkspaceService workspaceService;
     private final MaintenancePendingActionStore pendingActionStore;
 
     @org.springframework.beans.factory.annotation.Autowired
     public MaintenanceAgentService(ChatClient chatClient, MaintenanceReadOnlyService readOnlyService,
                                    DocumentTaskService taskService, DocumentIngestionService ingestionService,
                                    AdminAuthorizationService adminAuthorizationService,
+                                   WorkspaceService workspaceService,
                                    MaintenancePendingActionStore pendingActionStore) {
         this.chatClient = chatClient;
         this.readOnlyService = readOnlyService;
         this.taskService = taskService;
         this.ingestionService = ingestionService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.workspaceService = workspaceService;
         this.pendingActionStore = pendingActionStore;
     }
 
     public MaintenanceAgentService(ChatClient chatClient, MaintenanceReadOnlyService readOnlyService,
                                    DocumentTaskService taskService, DocumentIngestionService ingestionService,
-                                   AdminAuthorizationService adminAuthorizationService) {
+                                   AdminAuthorizationService adminAuthorizationService,
+                                   WorkspaceService workspaceService) {
         this(chatClient, readOnlyService, taskService, ingestionService, adminAuthorizationService,
-                new InMemoryMaintenancePendingActionStore());
+                workspaceService, new InMemoryMaintenancePendingActionStore());
     }
 
     /**
@@ -124,6 +129,17 @@ public class MaintenanceAgentService {
                     DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.REBUILD, null);
                     yield new MaintenanceWriteResult("索引重建任务已提交。", pending.action, task.taskId(), false);
                 }
+                case REBUILD_ALL_INDEX -> {
+                    // 全量重建是系统级写操作：确认时再校验一次超管，避免角色被降级后旧令牌仍然可用。
+                    adminAuthorizationService.requireSuperAdmin(user);
+                    List<com.example.workbench.workspace.WorkspaceAccessContext> accesses =
+                            workspaceService.allWorkspaceAccesses(user);
+                    for (com.example.workbench.workspace.WorkspaceAccessContext access : accesses) {
+                        taskService.createMaintenance(access, DocumentTaskType.REBUILD, null);
+                    }
+                    yield new MaintenanceWriteResult("已为 " + accesses.size() + " 个知识空间提交索引重建任务。",
+                            pending.action, null, false);
+                }
                 case DELETE_DOCUMENT -> {
                     ingestionService.deleteDocument(pending.targetId, context, admin);
                     yield new MaintenanceWriteResult("文档已删除。", pending.action, pending.targetId, false);
@@ -139,9 +155,15 @@ public class MaintenanceAgentService {
         MaintenanceAction action = null;
         if (text.matches(".*(重试|重新处理).*(任务|文档处理).*")) action = MaintenanceAction.RETRY_TASK;
         else if (text.matches(".*(增量同步|同步当前空间|同步知识库).*")) action = MaintenanceAction.SYNC_WORKSPACE;
-        else if (text.matches(".*(重建索引|索引重建).*")) action = MaintenanceAction.REBUILD_INDEX;
+        else if (isRebuildAllIntent(text)) action = MaintenanceAction.REBUILD_ALL_INDEX;
+        else if (text.matches(".*(重建索引|索引重建|重建.*(向量|索引)).*")) action = MaintenanceAction.REBUILD_INDEX;
         else if (text.matches(".*删除.*文档.*")) action = MaintenanceAction.DELETE_DOCUMENT;
         if (action == null) return null;
+
+        // 全量重建属于系统级操作，只有超级管理员可以发起。
+        if (action == MaintenanceAction.REBUILD_ALL_INDEX && !adminAuthorizationService.isSuperAdmin(user)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "重建全部知识空间的向量索引仅限超级管理员操作");
+        }
 
         String targetId = action == MaintenanceAction.RETRY_TASK || action == MaintenanceAction.DELETE_DOCUMENT
                 ? extractId(text) : "";
@@ -154,6 +176,8 @@ public class MaintenanceAgentService {
             case RETRY_TASK -> "即将重试失败任务 " + targetId + "。系统会重新排队处理，是否确认？";
             case SYNC_WORKSPACE -> "即将在“" + context.workspaceId() + "”执行增量同步，是否确认？";
             case REBUILD_INDEX -> "即将在“" + context.workspaceId() + "”重建索引。该操作会重新整理当前空间索引，是否确认？";
+            case REBUILD_ALL_INDEX -> "即将为全部 " + workspaceService.allWorkspaceAccesses(user).size()
+                    + " 个知识空间重建向量索引。系统会为每个空间提交独立的异步重建任务，是否确认？";
             case DELETE_DOCUMENT -> "即将删除文档 " + targetId + " 及其索引，是否确认？此操作不可撤销。";
         };
         return pending(user, context, action, targetId, description);
@@ -173,6 +197,19 @@ public class MaintenanceAgentService {
     private String extractId(String text) {
         Matcher matcher = ID_PATTERN.matcher(text);
         return matcher.find() ? matcher.group() : "";
+    }
+
+    /**
+     * 识别「全部 / 所有空间」的全量索引重建意图。
+     *
+     * <p>必须优先于单空间的「重建索引」匹配，否则「重建所有向量索引」会被当成当前空间重建。</p>
+     */
+    private boolean isRebuildAllIntent(String text) {
+        boolean allScope = text.contains("所有") || text.contains("全部")
+                || text.contains("全量") || text.contains("整个系统");
+        boolean indexTarget = text.contains("索引") || text.contains("向量");
+        boolean rebuild = text.contains("重建") || text.contains("重跑") || text.contains("刷新");
+        return allScope && indexTarget && rebuild;
     }
 
     private List<MaintenanceAgentTrace> traces(MaintenanceAgentTools tools, long startedAt) {

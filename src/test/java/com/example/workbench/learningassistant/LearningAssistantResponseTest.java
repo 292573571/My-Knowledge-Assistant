@@ -3,6 +3,7 @@ package com.example.workbench.learningassistant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.workbench.agent.TeachingCheckPrompt;
+import com.example.workbench.agent.TeachingAgentResult;
 import com.example.workbench.agent.TeachingNextAction;
 import com.example.workbench.agent.TeachingStage;
 import com.example.workbench.agent.TeachingUserLevel;
@@ -35,5 +36,17 @@ class LearningAssistantResponseTest {
         assertThat(TeachingStage.EXPLAIN.name()).isEqualTo("EXPLAIN");
         assertThat(TeachingNextAction.CHECK.name()).isEqualTo("CHECK");
         assertThat(TeachingUserLevel.BEGINNER.name()).isEqualTo("BEGINNER");
+    }
+
+    @Test
+    void mapsTeachingSourcesToLocalKnowledgeRoute() {
+        RagSource source = new RagSource("guide.md", 1, "正文", 0.9, "");
+        TeachingAgentResult result = new TeachingAgentResult("讲解", "session-1", "主题",
+                TeachingStage.EXPLAIN, TeachingNextAction.CHECK, null, null, List.of(source), List.of(), 1, true);
+
+        LearningAssistantResponse response = LearningAssistantResponse.teaching(result, LearningIntent.START_LESSON);
+
+        assertThat(response.route()).isEqualTo(com.example.workbench.rag.RagAnswerRoute.LOCAL_KNOWLEDGE);
+        assertThat(response.sources()).containsExactly(source);
     }
 }

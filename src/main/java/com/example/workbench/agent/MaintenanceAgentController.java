@@ -1,7 +1,9 @@
 package com.example.workbench.agent;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AuthFilter;
+import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -21,10 +23,13 @@ public class MaintenanceAgentController {
 
     private final MaintenanceAgentService agentService;
     private final WorkspaceService workspaceService;
+    private final AdminAuthorizationService adminAuthorizationService;
 
-    public MaintenanceAgentController(MaintenanceAgentService agentService, WorkspaceService workspaceService) {
+    public MaintenanceAgentController(MaintenanceAgentService agentService, WorkspaceService workspaceService,
+                                      AdminAuthorizationService adminAuthorizationService) {
         this.agentService = agentService;
         this.workspaceService = workspaceService;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @PostMapping("/chat")
@@ -32,7 +37,7 @@ public class MaintenanceAgentController {
                                        HttpServletRequest httpRequest) {
         AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
-        return agentService.chat(user, workspaceService.access(user, request.workspaceId()), request.message());
+        return agentService.chat(user, access(user, request.workspaceId()), request.message());
     }
 
     @PostMapping("/confirm")
@@ -40,6 +45,13 @@ public class MaintenanceAgentController {
                                            HttpServletRequest httpRequest) {
         AppUser user = (AppUser) httpRequest.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
-        return agentService.confirm(user, workspaceService.access(user, request.workspaceId()), request.confirmationToken());
+        return agentService.confirm(user, access(user, request.workspaceId()), request.confirmationToken());
+    }
+
+    /** 超管可以维护自己并未加入的空间（系统级批量操作）；普通用户仍按成员关系解析。 */
+    private WorkspaceAccessContext access(AppUser user, String workspaceId) {
+        return adminAuthorizationService.isSuperAdmin(user)
+                ? workspaceService.systemAccess(user, workspaceId)
+                : workspaceService.access(user, workspaceId);
     }
 }

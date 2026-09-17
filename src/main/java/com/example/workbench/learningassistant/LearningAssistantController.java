@@ -8,6 +8,7 @@ import com.example.workbench.config.HttpRequestLoggingFilter;
 import com.example.workbench.config.ModelProviderException;
 import com.example.workbench.modelconfig.ModelConfigContext;
 import com.example.workbench.rag.RagSource;
+import com.example.workbench.rag.RagAnswerRoute;
 import com.example.workbench.streaming.StreamChunk;
 import com.example.workbench.streaming.StreamSession;
 import com.example.workbench.streaming.StreamSessionStore;
@@ -260,23 +261,29 @@ public class LearningAssistantController {
                         "arguments", Map.of("message", request.message()),
                         "status", "running"));
                 LearningAssistantResponse response = service.streamMessage(user, sessionId, request,
-                        token -> {
-                            if (execution.isCancelled() || Thread.currentThread().isInterrupted()) return;
-                            session.append("token", Map.of("text", token));
-                        },
-                        sources -> {
-                            if (execution.isCancelled()) return;
-                            session.append("tool_call_result", Map.of(
-                                    "id", "tool-rag-retrieve",
-                                    "toolName", "rag_retrieve",
-                                    "success", true,
-                                    "status", "success",
-                                    "resultPreview", "已检索到 " + (sources == null ? 0 : sources.size()) + " 个相关片段"));
-                            if (sources != null) {
-                                for (Object source : sources) session.append("source", source);
-                            }
-                        },
-                        execution);
+                         token -> {
+                             if (execution.isCancelled() || Thread.currentThread().isInterrupted()) return;
+                             session.append("token", Map.of("text", token));
+                         },
+                         route -> {
+                             if (execution.isCancelled()) return;
+                             session.append("route", Map.of("route", route == null
+                                     ? RagAnswerRoute.NO_KNOWLEDGE.name() : route.name()));
+                             session.append("source_reset", Map.of("sources", List.of()));
+                         },
+                         sources -> {
+                             if (execution.isCancelled()) return;
+                             session.append("tool_call_result", Map.of(
+                                     "id", "tool-rag-retrieve",
+                                     "toolName", "rag_retrieve",
+                                     "success", true,
+                                     "status", "success",
+                                     "resultPreview", "已检索到 " + (sources == null ? 0 : sources.size()) + " 个相关片段"));
+                             if (sources != null) {
+                                 for (Object source : sources) session.append("source", source);
+                             }
+                         },
+                         execution);
                 if (execution.isCancelled()) throw new CancellationException("学习请求已停止");
                 StreamChunk done = session.append("done", Map.of("response", response));
                 session.markDone(done);

@@ -70,6 +70,7 @@ public class AiModelService {
     @Transactional
     public AiModelResponse create(AppUser actor, AiModelRequest request) {
         adminAuthorizationService.requireSuperAdmin(actor);
+        validateModelBaseUrl(request.baseUrl());
         AiModelType type = request.modelType() != null ? request.modelType() : AiModelType.CHAT;
         AiModel entity = new AiModel(request.name().strip(), request.baseUrl().strip(),
                 request.apiKey().strip(), request.model().strip());
@@ -97,6 +98,7 @@ public class AiModelService {
 
     @Transactional
     public AiModelResponse createPersonal(AppUser actor, AiModelRequest request) {
+        validateModelBaseUrl(request.baseUrl());
         AiModel entity = new AiModel(request.name().strip(), request.baseUrl().strip(),
                 request.apiKey().strip(), request.model().strip());
         entity.update(request.name().strip(), request.baseUrl().strip(), request.apiKey().strip(),
@@ -114,6 +116,7 @@ public class AiModelService {
         if (!actor.getPublicId().equals(entity.getOwnerPublicId()) || entity.getModelType() != AiModelType.CHAT) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只能修改自己配置的对话模型");
         }
+        validateModelBaseUrl(request.baseUrl());
         String oldBaseUrl = entity.getBaseUrl();
         String oldApiKey = entity.getApiKey();
         entity.update(request.name().strip(), request.baseUrl().strip(), request.apiKey().strip(),
@@ -283,33 +286,56 @@ public class AiModelService {
     }
 
     private void validateEndpoint(URI uri, boolean allowLocalhostEndpoint) {
+        validateEndpoint(uri, allowLocalhostEndpoint, "连接测试失败");
+    }
+
+    private void validateEndpoint(URI uri, boolean allowLocalhostEndpoint, String action) {
         if (uri == null || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
                 || (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无效");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": API 地址无效");
         }
         if (requireHttps && !"https".equalsIgnoreCase(uri.getScheme())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: 生产环境仅允许 HTTPS 地址");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": 生产环境仅允许 HTTPS 地址");
         }
 
         String host = uri.getHost().toLowerCase(Locale.ROOT);
         boolean localHost = isLocalhost(host);
         if (localHost && !allowLocalhostEndpoint) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: localhost 仅允许在显式配置后使用");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": localhost 仅允许在显式配置后使用");
         }
         boolean allowedHost = allowedHosts.contains(host) || (localHost && allowLocalhostEndpoint);
         try {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             if (addresses.length == 0) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无法解析");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": API 地址无法解析");
             }
             if (!allowedHost && Arrays.stream(addresses).anyMatch(this::isRestrictedAddress)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址指向受限网络地址");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": API 地址指向受限网络地址");
             }
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "连接测试失败: API 地址无法解析");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, action + ": API 地址无法解析");
         }
+    }
+
+    /**
+     * 校验模型 baseUrl，防止把服务端变成 SSRF 跳板。
+     *
+     * <p>写入路径（超管池模型、个人模型的新增与修改）必须与「连接测试」使用同一套
+     * 校验，否则可以保存一个指向内网或云元数据地址的 baseUrl，随后由聊天链路发起请求。</p>
+     */
+    private void validateModelBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "模型 API 地址不能为空");
+        }
+        URI uri;
+        try {
+            uri = URI.create(baseUrl.strip().replaceAll("/+$", "") + "/models");
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "模型 API 地址无效");
+        }
+        validateEndpoint(uri, allowLocalhost, "模型 API 地址无效");
     }
 
     private boolean isLocalhost(String host) {

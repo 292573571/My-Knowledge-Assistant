@@ -2,6 +2,7 @@ package com.example.workbench.rag;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
 /**
@@ -22,10 +23,18 @@ import reactor.core.publisher.Flux;
 public final class RagStreamResponse {
     private final AtomicReference<Flux<String>> tokens;
     private final AtomicReference<List<RagSource>> sources;
+    private final AtomicReference<RagAnswerRoute> route;
+    private final AtomicReference<Function<String, List<RagSource>>> finalSourceResolver = new AtomicReference<>();
 
     public RagStreamResponse(Flux<String> tokens, List<RagSource> sources) {
+        this(tokens, sources, sources == null || sources.isEmpty()
+                ? RagAnswerRoute.NO_KNOWLEDGE : RagAnswerRoute.LOCAL_KNOWLEDGE);
+    }
+
+    public RagStreamResponse(Flux<String> tokens, List<RagSource> sources, RagAnswerRoute route) {
         this.tokens = new AtomicReference<>(tokens);
         this.sources = new AtomicReference<>(sources == null ? List.of() : List.copyOf(sources));
+        this.route = new AtomicReference<>(route == null ? RagAnswerRoute.NO_KNOWLEDGE : route);
     }
 
     public Flux<String> tokens() {
@@ -34,6 +43,17 @@ public final class RagStreamResponse {
 
     public List<RagSource> sources() {
         return sources.get();
+    }
+
+    public RagAnswerRoute route() {
+        return route.get();
+    }
+
+    public List<RagSource> finalSources(String answer) {
+        Function<String, List<RagSource>> resolver = finalSourceResolver.get();
+        List<RagSource> resolved = resolver == null ? sources() : resolver.apply(answer == null ? "" : answer);
+        replaceSources(resolved);
+        return sources();
     }
 
     /**
@@ -49,4 +69,13 @@ public final class RagStreamResponse {
     void replaceSources(List<RagSource> newSources) {
         sources.set(newSources == null ? List.of() : List.copyOf(newSources));
     }
+
+    void replaceRoute(RagAnswerRoute newRoute) {
+        route.set(newRoute == null ? RagAnswerRoute.NO_KNOWLEDGE : newRoute);
+    }
+
+    void setFinalSourceResolver(Function<String, List<RagSource>> resolver) {
+        finalSourceResolver.set(resolver);
+    }
+
 }

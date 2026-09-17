@@ -7,9 +7,11 @@ import com.example.workbench.rag.DocumentIndexEntry;
 import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.RagService;
 import com.example.workbench.rag.RagSource;
+import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -54,8 +56,12 @@ public class KnowledgeMcpTools {
     ) {
         AppUser user = requireUser();
         int safeLimit = limit == null ? 5 : Math.max(1, Math.min(10, limit));
+        // 必须先把客户端传入的 workspaceId 换成经过成员校验的授权上下文，
+        // 再展开「有效可读空间集合」。否则调用者可传入任意空间 ID 越权检索。
+        WorkspaceAccessContext access = workspaceService.access(user, normalize(workspaceId));
+        Set<String> readableWorkspaceIds = workspaceService.effectiveReadableWorkspaceIds(user, access.workspaceId());
         return ragService
-                .retrieveForAgent(query, UserConversationScope.ownerId(user), normalize(workspaceId), safeLimit)
+                .retrieveForAgent(query, UserConversationScope.ownerId(user), readableWorkspaceIds, safeLimit)
                 .stream()
                 .map(KnowledgeHit::from)
                 .toList();

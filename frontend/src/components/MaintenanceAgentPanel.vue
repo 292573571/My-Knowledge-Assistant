@@ -53,6 +53,12 @@ async function confirmAction() {
     confirming.value = false
   }
 }
+
+function confirmationHint(action) {
+  if (action === 'DELETE_DOCUMENT') return '这是不可撤销的删除操作。'
+  if (action === 'REBUILD_ALL_INDEX') return '将为全部知识空间提交索引重建任务，可能耗时较长。'
+  return '请确认后才会执行。'
+}
 </script>
 
 <template>
@@ -85,7 +91,7 @@ async function confirmAction() {
       <header><span>助手回答</span><small>{{ answer.readOnly ? '只读' : '请核对执行状态' }} · {{ answer.steps }} 步</small></header>
       <p>{{ answer.answer }}</p>
       <div v-if="answer.pendingAction?.confirmationToken" class="maintenance-agent-confirmation">
-        <strong>{{ answer.pendingAction.action === 'DELETE_DOCUMENT' ? '这是不可撤销的删除操作。' : '请确认后才会执行。' }}</strong>
+        <strong>{{ confirmationHint(answer.pendingAction.action) }}</strong>
         <button type="button" :disabled="confirming" @click="confirmAction">{{ confirming ? '执行中...' : '确认执行' }}</button>
       </div>
       <div v-if="answer.toolCalls?.length || answer.traces?.length" class="maintenance-agent-trace">

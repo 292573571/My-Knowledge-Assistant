@@ -103,6 +103,40 @@ public class WorkspaceService {
                 membership.getWorkspace().getType());
     }
 
+    /**
+     * 超级管理员跨空间访问上下文，用于系统级维护操作（例如重建全部向量索引）。
+     *
+     * <p>普通 {@link #access} 只对空间成员或 PUBLIC 空间放行，超管无法管理自己未加入的空间。
+     * 系统级批量操作需要显式走这条旁路，并且只允许 SUPER_ADMIN 调用。</p>
+     */
+    @Transactional
+    public WorkspaceAccessContext systemAccess(AppUser admin, String workspaceId) {
+        if (!isSuperAdmin(admin)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "该操作仅限超级管理员");
+        }
+        if (workspaceId == null || workspaceId.isBlank()) {
+            // 未指定空间时与普通入口保持一致：回退到超管自己的个人空间。
+            return access(admin, null);
+        }
+        Workspace workspace = workspaceRepository.findById(workspaceId.strip())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "知识空间不存在"));
+        return new WorkspaceAccessContext(UserConversationScope.ownerId(admin), workspace.getId(),
+                WorkspaceRole.OWNER, workspace.getType());
+    }
+
+    /** 列出全部知识空间的超管访问上下文，供系统级维护遍历使用。 */
+    @Transactional(readOnly = true)
+    public List<WorkspaceAccessContext> allWorkspaceAccesses(AppUser admin) {
+        if (!isSuperAdmin(admin)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "该操作仅限超级管理员");
+        }
+        return workspaceRepository.findAll().stream()
+                .sorted(java.util.Comparator.comparing(Workspace::getId))
+                .map(workspace -> new WorkspaceAccessContext(UserConversationScope.ownerId(admin),
+                        workspace.getId(), WorkspaceRole.OWNER, workspace.getType()))
+                .toList();
+    }
+
     @Transactional
     public WorkspaceAccessContext ownerAccess(AppUser user, String workspaceId) {
         ensurePersonalWorkspace(user);

@@ -39,6 +39,27 @@ class AiModelServiceTest {
                 .hasMessageContaining("无法解析");
     }
 
+    @Test
+    void rejectsRestrictedBaseUrlBeforeSavingPersonalModel() {
+        AiModelService service = service("development", "false", false, "");
+
+        // 回归锁：写入路径必须与连接测试同样校验，否则 baseUrl 会成为 SSRF 跳板。
+        assertThatThrownBy(() -> service.createPersonal(null,
+                request("http://169.254.169.254/latest/meta-data", "key")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("受限网络地址");
+    }
+
+    @Test
+    void rejectsLocalhostBaseUrlBeforeSavingPersonalModel() {
+        AiModelService service = service("development", "", false, "");
+
+        assertThatThrownBy(() -> service.createPersonal(null,
+                request("http://localhost:8080", "key")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("localhost");
+    }
+
     private AiModelService service(String environment, String requireHttps, boolean allowLocalhost,
                                    String allowedHosts) {
         return new AiModelService(mock(AiModelRepository.class), mock(AdminAuthorizationService.class),

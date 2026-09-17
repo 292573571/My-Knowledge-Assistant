@@ -47,7 +47,10 @@ const isLearningMode = computed(() => ['GUIDED', 'REVIEW', 'PRACTICE'].includes(
 const hoveredSource = ref(null)
 const sourceTooltipPosition = ref({ top: 0, left: 0 })
 const latestSources = computed(() => {
-  const sources = [...messages.value].reverse().find(item => item.role === 'assistant' && item.sources?.length)?.sources || []
+  const latestAssistant = [...messages.value].reverse().find(item => item.role === 'assistant')
+  const sources = latestAssistant?.route && latestAssistant.route !== 'LOCAL_KNOWLEDGE'
+    ? []
+    : latestAssistant?.sources || []
   return groupSourcesByFile(sources)
 })
 const closeStream = ref(null)
@@ -75,6 +78,8 @@ let inspirationObserver = null
 let inspirationTimer = null
 let activeRequestId = 0
 let sessionOperationId = 0
+let retryTimer = null
+let disposed = false
 
 onMounted(() => {
   loadSessions()
@@ -89,9 +94,10 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
+  disposed = true
   cancelLocalStream()
   const sessionId = activeSessionId.value
-  if (sessionId) void stopLearningSession(sessionId, props.workspaceId)
+  if (sessionId) void stopLearningSession(sessionId, props.workspaceId).catch(() => {})
   activeRequestId += 1
   loading.value = false
   inspirationObserver?.disconnect()
@@ -209,6 +215,9 @@ async function deleteSession(sessionId) {
       progress.value = null
       pendingCheck.value = null
       pendingPractice.value = null
+      // 必须先释放删除标记，否则 selectSession 的守卫会直接返回，
+      // 导致删除当前会话后下一个会话永远不会被加载。
+      deletingSessionId.value = ''
       if (sessions.value.length) await selectSession(sessions.value[0].sessionId)
       else await newSession()
     }
@@ -241,7 +250,7 @@ async function send(content) {
   const requestId = ++activeRequestId
   error.value = ''
   messages.value.push({ id: createUuid(), role: 'user', content: text, createdAt: new Date().toISOString(), streaming: false })
-  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], toolCalls: [], streaming: true, retrieving: false, createdAt: new Date().toISOString(), streamId: null, lastEventId: 0, interrupted: false, _aborted: false, _needsReset: false, prompt: text })
+  const assistant = reactive({ id: createUuid(), role: 'assistant', content: '', sources: [], route: null, toolCalls: [], streaming: true, retrieving: false, createdAt: new Date().toISOString(), streamId: null, lastEventId: 0, interrupted: false, _aborted: false, _needsReset: false, prompt: text })
   messages.value.push(assistant)
   try {
     const response = await streamMessage(activeSessionId.value, {
@@ -252,8 +261,11 @@ async function send(content) {
        clientRequestId: createUuid()
     }, assistant)
     if (requestId !== activeRequestId) return
-    assistant.content = assistant.content || response.answer || '本次请求没有返回正文。'
-    assistant.sources = response.sources || assistant.sources || []
+     assistant.content = assistant.content || response.answer || '本次请求没有返回正文。'
+     assistant.route = response.route || assistant.route
+     assistant.sources = assistant.route === 'LOCAL_KNOWLEDGE'
+       ? (response.sources || assistant.sources || [])
+       : []
     assistant.learning = response
     progress.value = response.progress || progress.value
     if (response.check) pendingCheck.value = response.check
@@ -281,8 +293,8 @@ function streamMessage(sessionId, payload, assistant) {
     let retries = 0
     const MAX_AUTO_RETRIES = 1
     let activeClose = null
-    let retryTimer = null
     function open() {
+      if (disposed) return
       const close = streamLearningMessage(sessionId, payload, (type, data, meta) => {
         if (meta?.seq != null) assistant.lastEventId = meta.seq
         if (meta?.streamId) assistant.streamId = meta.streamId
@@ -292,7 +304,12 @@ function streamMessage(sessionId, payload, assistant) {
           assistant.retrieving = false
           assistant.content += data.text || ''
         } else if (type === 'source') {
-          assistant.sources.push(data)
+          assistant.sources = [...(assistant.sources || []), data]
+        } else if (type === 'route') {
+          assistant.route = data.route || null
+          if (assistant.route !== 'LOCAL_KNOWLEDGE') assistant.sources = []
+        } else if (type === 'source_reset') {
+          assistant.sources = Array.isArray(data.sources) ? data.sources : []
         } else if (type === 'tool_call_start') {
           assistant.retrieving = true
         } else if (type === 'tool_call_result') {
@@ -301,6 +318,8 @@ function streamMessage(sessionId, payload, assistant) {
           // 重建重生成(真实失败后的重试)以完整新答案替换旧半截, 避免重复拼接。
           if (assistant._needsReset) {
             assistant.content = ''
+            assistant.sources = []
+            assistant.route = null
             assistant.lastEventId = 0
             assistant._needsReset = false
           }
@@ -396,6 +415,10 @@ async function stop() {
 }
 
 function cancelLocalStream() {
+  if (retryTimer) {
+    window.clearTimeout(retryTimer)
+    retryTimer = null
+  }
   const current = closeStream.value
   closeStream.value = null
   current?.cancel()

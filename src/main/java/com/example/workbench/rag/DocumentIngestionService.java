@@ -1237,7 +1237,7 @@ public class DocumentIngestionService {
                     "skipped", 0, "Document is empty");
         }
 
-        boolean deleteStaleSource = false;
+        DocumentIndexEntry staleSource = null;
         ingestionLock.lock();
         try {
             DocumentIndexEntry existing = findExistingWorkspaceEntry(ingested.indexEntry(), access.workspaceId());
@@ -1246,8 +1246,12 @@ public class DocumentIngestionService {
                         "skipped", existing.chunkCount(), "Duplicate document skipped");
             }
             if (existing != null) {
-                // 仅当路径变化时才需要清理旧受管源文件，文件删除放到锁外执行。
-                deleteStaleSource = !existing.path().equals(ingested.indexEntry().path());
+                // 仅当路径变化时才需要清理旧受管源文件。这里必须先持有旧条目引用，
+                // 因为文件删除在锁外执行，而 upsert 之后重新查询会命中刚写入的新条目，
+                // 导致刚导入的源文件被误删。
+                if (!existing.path().equals(ingested.indexEntry().path())) {
+                    staleSource = existing;
+                }
                 removeIndexedDocument(existing);
             }
             documents.removeIf(document -> document.documentId().equals(ingested.indexEntry().documentId()));
@@ -1257,8 +1261,8 @@ public class DocumentIngestionService {
         } finally {
             ingestionLock.unlock();
         }
-        if (deleteStaleSource) {
-            deleteWorkspaceUploadSource(/* existing */ findExistingWorkspaceEntry(ingested.indexEntry(), access.workspaceId()));
+        if (staleSource != null) {
+            deleteWorkspaceUploadSource(staleSource);
         }
         return new IngestDocumentResult(ingested.indexEntry().fileName(), ingested.indexEntry().path(),
                 ingested.indexEntry().documentId(), "imported", ingested.chunkCount(),
@@ -1382,10 +1386,13 @@ public class DocumentIngestionService {
             progress.accept(ingestionPathResolver.isImageDocument(originalFileName) ? "OCR" : "PARSING", 25);
             DocumentParser parser = documentParserRouter.parserFor(originalFileName);
             boolean pdf = originalFileName.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
+            // ORG 文档必须按 WORKSPACE 可见性存储：组织文档对下属团队可见依赖
+            // effectiveReadableWorkspaceIds 的祖先/子孙展开，而不是 PUBLIC 的全局放行。
+            // 若标记为 PUBLIC，任何登录用户都能跨组织检索到这些文档。
             DocumentVisibility visibility = switch (access.type()) {
                 case PERSONAL -> DocumentVisibility.PRIVATE;
                 case TEAM -> DocumentVisibility.WORKSPACE;
-                case ORG -> DocumentVisibility.PUBLIC;
+                case ORG -> DocumentVisibility.WORKSPACE;
                 case PUBLIC -> DocumentVisibility.PUBLIC;
             };
             String contentHash = ingestionPathResolver.isBinaryDocument(originalFileName) ? ingestionPathResolver.sha256(sourceContent)

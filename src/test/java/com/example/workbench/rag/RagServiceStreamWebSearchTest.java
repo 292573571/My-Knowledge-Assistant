@@ -14,26 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import reactor.core.publisher.Flux;
 
-/**
- * 锁定 RagService.stream() 流式路径上的两个联网搜索路由：
- * <ul>
- *   <li><b>A</b>：sources 空 / hasEnoughKnowledge=false + webSearchEnabled=true → 切到
- *   {@code streamWithWebSearch}，流式输出 web 答案（不返回 web 来源引用，前端不再展示 URL 列表）。</li>
- *   <li><b>B</b>：sources 非空 + hasEnoughKnowledge=true + 模型前 30 token 礼貌拒绝 →
- *   立即切到 web search 流式（丢弃本地拒绝话术），最终答案来自 web。</li>
- * </ul>
- *
- * <p>背景：学习助手前端走的是 {@code /api/learning-assistant/sessions/.../messages/stream}
- * （流式接口），之前修复 RagService.chat()（同步接口）漏掉了这条链路。
- *
- * <p>联网搜索产出的引用（博查返回的 8 条 URL）前端不再展示，原因是用户体验上意义不大；
- * 答案中的"来自 Web"字样由 prompt 保证，让用户知道答案来源是联网。
- */
 class RagServiceStreamWebSearchTest {
 
-    /**
-     * A 场景：sources 空 + webSearchEnabled=true → 流式走 web search 而非 modelFallback。
-     */
     @Test
     void streamRoutesToWebSearchWhenSourcesEmptyAndWebSearchEnabled() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
@@ -50,19 +32,12 @@ class RagServiceStreamWebSearchTest {
         RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", "今天的热点新闻"));
 
         verify(webSearchService).search("今天的热点新闻");
-        // 不应走 modelFallback / LOCAL_KNOWLEDGE 流式
         verify(chatClient, never()).generate(Mockito.anyString());
-        List<String> tokens = response.tokens().collectList().block();
-        assertThat(tokens).isNotNull();
-        assertThat(String.join("", tokens)).contains("来自 Web");
-        // 联网搜索答案不再透出博查 URL 引用（前端展示"Web: ..."无意义）
+        assertThat(String.join("", response.tokens().collectList().block())).contains("来自 Web");
         assertThat(response.sources()).isEmpty();
+        assertThat(response.route()).isEqualTo(RagAnswerRoute.WEB_FALLBACK);
     }
 
-    /**
-     * B 场景：sources 非空 + hasEnoughKnowledge=true + 前 30 token 礼貌拒绝 →
-     * withPoliteRefusalWebSearchGuard 切断原流 → 切到 web search 流式。
-     */
     @Test
     void streamSwitchesToWebSearchWhenModelEmitsPoliteRefusalUpfront() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
@@ -77,32 +52,20 @@ class RagServiceStreamWebSearchTest {
         when(webSearchService.search(Mockito.anyString())).thenReturn(List.of(
                 new WebSearchResult("今日热点示例", "https://example.com/news", "今日热点摘要内容")
         ));
-        // 第一次 stream() 是 LOCAL_KNOWLEDGE 路径返回礼貌拒绝
-        // 第二次 stream() 是 streamWithWebSearch 返回 web 流式答案
         when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
                 .thenReturn(Flux.just("抱歉，", "我无法", "提供今天的", "热点新闻。"))
                 .thenReturn(Flux.just("今日热点包括科技、", "教育等领域。来自 Web。"));
         RagService service = serviceWithWebSearch(vectorStore, chatClient, webSearchService, true);
 
         RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", "今天的热点新闻"));
-        List<String> tokens = response.tokens().collectList().block();
-        // 先 block() 触发完整订阅与 fallback，再做 verify
+
+        String fullText = String.join("", response.tokens().collectList().block());
         verify(webSearchService, atLeastOnce()).search("今天的热点新闻");
-        verify(chatClient, atLeastOnce()).stream(Mockito.anyString(), Mockito.anyMap());
-        assertThat(tokens).isNotNull();
-        String fullText = String.join("", tokens);
-        // 礼貌拒绝话术应被丢弃，web search 答案应保留
-        assertThat(fullText).doesNotContain("抱歉").doesNotContain("我无法");
-        assertThat(fullText).contains("来自 Web");
-        // 切到 web fallback 后 sources 应清空（前端不再展示博查 URL 引用）；
-        // 同时也不会留下本地 PDF 引用（避免引用与答案不匹配）
+        assertThat(fullText).doesNotContain("抱歉").doesNotContain("我无法").contains("来自 Web");
         assertThat(response.sources()).isEmpty();
+        assertThat(response.route()).isEqualTo(RagAnswerRoute.WEB_FALLBACK);
     }
 
-    /**
-     * B 场景反例：模型正常输出（不命中拒绝模板词）→ 礼貌拒绝兜底不应触发，
-     * 不调 webSearchService.search()，web sources 为空。
-     */
     @Test
     void streamDoesNotTriggerWebFallbackWhenModelAnswerIsNormal() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
@@ -112,24 +75,51 @@ class RagServiceStreamWebSearchTest {
                 "src-1", "今天我们就 Java 集合的应用场景做系统讲解", "Java 面试题整理",
                 "doc.pdf", "doc.pdf", 0
         ).withScore(0.3);
-        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt()))
-                .thenReturn(List.of(localSource));
-        // 正常流式答案（≥30 字符且不含拒绝模板词）
+        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt())).thenReturn(List.of(localSource));
         when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
                 .thenReturn(Flux.just("Java 集合框架主要包括 ", "List、Set、Map ", "三大接口类型。"));
         RagService service = serviceWithWebSearch(vectorStore, chatClient, webSearchService, true);
 
         RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", "今天讲讲 Java 集合"));
-        List<String> tokens = response.tokens().collectList().block();
+
+        String fullText = String.join("", response.tokens().collectList().block());
         verify(webSearchService, never()).search(Mockito.anyString());
-        assertThat(tokens).isNotNull();
-        assertThat(String.join("", tokens)).contains("Java 集合框架");
-        // 引用应是本地 PDF（headingPath 含 "Java 面试题"），不是 web
-        assertThat(response.sources()).isNotEmpty()
-                .allSatisfy(source -> {
-                    assertThat(source.headingPath()).contains("Java 面试题");
-                    assertThat(source.file()).doesNotStartWith("Web:");
-                });
+        assertThat(fullText).contains("Java 集合框架");
+        assertThat(response.sources()).isNotEmpty().allSatisfy(source -> {
+            assertThat(source.headingPath()).contains("Java 面试题");
+            assertThat(source.file()).doesNotStartWith("Web:");
+        });
+        assertThat(response.route()).isEqualTo(RagAnswerRoute.LOCAL_KNOWLEDGE);
+    }
+
+    @Test
+    void completedLocalAnswerThatFailsGroundingHasNoCitation() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        WebSearchService webSearchService = Mockito.mock(WebSearchService.class);
+        RagQualityGate qualityGate = Mockito.mock(RagQualityGate.class);
+        SourceDocument localSource = new SourceDocument(
+                "src-1", "SSL 用于保护网络通信。", "网络安全", "security.pdf", "docs/security.pdf", 1
+        ).withScore(0.1);
+        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt())).thenReturn(List.of(localSource));
+        when(chatClient.stream(Mockito.anyString(), Mockito.anyMap()))
+                .thenReturn(Flux.just("这是一个无法由资料支持的回答。"));
+        when(qualityGate.isEnabled()).thenReturn(true);
+        when(qualityGate.relevantSources(Mockito.anyString(), Mockito.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(qualityGate.approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList()))
+                .thenReturn(false);
+        RagService service = new RagService(
+                Mockito.mock(DocumentIngestionService.class), vectorStore, chatClient,
+                new ConversationMemory(), webSearchService, qualityGate,
+                false, 5, 0.45, "distance", false, false, 4, true, false);
+
+        RagStreamResponse response = service.stream(new RagChatRequest("conversation-1", "SSL 是什么？"));
+
+        assertThat(String.join("", response.tokens().collectList().block()))
+                .isEqualTo("这是一个无法由资料支持的回答。");
+        assertThat(response.finalSources("这是一个无法由资料支持的回答。")).isEmpty();
+        assertThat(response.route()).isEqualTo(RagAnswerRoute.NO_KNOWLEDGE);
     }
 
     private RagService serviceWithWebSearch(
@@ -143,21 +133,8 @@ class RagServiceStreamWebSearchTest {
         when(qualityGate.approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList()))
                 .thenReturn(true);
         return new RagService(
-                Mockito.mock(DocumentIngestionService.class),
-                vectorStore,
-                chatClient,
-                new ConversationMemory(),
-                webSearchService,
-                qualityGate,
-                false,
-                5,
-                0.45,
-                "distance",
-                false,
-                false,
-                4,
-                true,
-                webSearchEnabled
-        );
+                Mockito.mock(DocumentIngestionService.class), vectorStore, chatClient,
+                new ConversationMemory(), webSearchService, qualityGate,
+                false, 5, 0.45, "distance", false, false, 4, true, webSearchEnabled);
     }
 }

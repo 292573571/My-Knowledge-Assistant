@@ -379,6 +379,8 @@ async function retryTask(task) {
   }
 }
 
+const INLINE_PREVIEW_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'text/plain']
+
 async function openTaskSource(task) {
   openingTaskId.value = task.taskId
   clearError()
@@ -386,13 +388,24 @@ async function openTaskSource(task) {
   try {
     const blob = await fetchDocumentTaskSource(task.taskId, props.workspace?.id)
     const url = URL.createObjectURL(blob)
-    if (previewWindow) {
-      previewWindow.opener = null
-      previewWindow.location.replace(url)
+    if (INLINE_PREVIEW_TYPES.some(type => blob.type.startsWith(type))) {
+      if (previewWindow) {
+        previewWindow.opener = null
+        previewWindow.location.replace(url)
+      } else {
+        const link = document.createElement('a')
+        link.href = url
+        link.target = '_blank'
+        link.rel = 'noopener'
+        link.click()
+      }
     } else {
+      // 后端对 HTML/SVG 等主动内容强制返回 octet-stream，这里关闭预开窗口改为直接下载，
+      // 避免留下空白标签页，也避免浏览器把上传内容当作页面执行。
+      previewWindow?.close()
       const link = document.createElement('a')
       link.href = url
-      link.target = '_blank'
+      link.download = task.fileName || ''
       link.rel = 'noopener'
       link.click()
     }
