@@ -59,9 +59,13 @@ public class JpaLogAppender extends AbstractAppender {
             if (level.equals("TRACE")) return;
             String logger = event.getLoggerName();
             if (logger != null && logger.startsWith("org.springframework.") && !level.equals("WARN") && !level.equals("ERROR")) return;
+            // 第三方库默认丢弃以控制噪声,但 ERROR 必须保留:数据库/ORM 的真实故障
+            // (SQLState、约束冲突、连接中断)正是靠它们的 ERROR 记录暴露;无条件丢弃会造成
+            // 「业务日志界面上看不到任何数据库错误」,排查时只能靠猜。
             if (logger != null && (logger.startsWith("org.apache.")
                     || logger.startsWith("org.hibernate.")
-                    || logger.startsWith("org.postgresql."))) return;
+                    || logger.startsWith("org.postgresql."))
+                    && !level.equals("ERROR")) return;
             String message = event.getMessage().getFormattedMessage();
             if (message != null && message.length() > 4000) {
                 message = message.substring(0, 4000);

@@ -94,18 +94,20 @@ public class ConversationService {
     @Transactional(readOnly = true)
     public List<MessageResponse> messages(AppUser user, String workspaceId, String conversationId) {
         ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
+        List<DocumentIndexEntry> indexEntries = indexedEntriesFor(workspaceId);
         return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
-                .map(message -> messageResponse(message, workspaceId))
+                .map(message -> messageResponse(message, workspaceId, indexEntries))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public PageResponse<MessageResponse> pageMessages(AppUser user, String workspaceId, String conversationId, int page, int size) {
         ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
+        List<DocumentIndexEntry> indexEntries = indexedEntriesFor(workspaceId);
         var result = messageRepository.findByConversationId(conversation.getId(),
                 PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
                         Sort.by(Sort.Direction.ASC, "createdAt").and(Sort.by(Sort.Direction.ASC, "id"))));
-        return new PageResponse<>(result.getContent().stream().map(message -> messageResponse(message, workspaceId)).toList(),
+        return new PageResponse<>(result.getContent().stream().map(message -> messageResponse(message, workspaceId, indexEntries)).toList(),
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(), result.hasNext());
     }
 
@@ -222,21 +224,34 @@ public class ConversationService {
         return new ConversationResponse(conversation.getClientConversationId(), conversation.getTitle(), conversation.getMode(), conversation.getUpdatedAt());
     }
 
-    private MessageResponse messageResponse(ChatMessageEntity message, String workspaceId) {
+    private MessageResponse messageResponse(ChatMessageEntity message, String workspaceId, List<DocumentIndexEntry> indexEntries) {
         return new MessageResponse(message.getId(), message.getRole(), message.getContent(),
-                normalizeSources(readJson(message.getSourcesJson()), workspaceId), readJson(message.getToolCallsJson()),
+                normalizeSources(readJson(message.getSourcesJson()), workspaceId, indexEntries), readJson(message.getToolCallsJson()),
                 message.getCreatedAt());
+    }
+
+    /**
+     * 一次读取本会话全部消息共用同一份文档索引。
+     *
+     * <p>原先每条消息各自调一次 {@code listIndexedDocuments()}：消息数 × 索引全表扫描，
+     * 且每次都去抢索引 store 的同一把 synchronized 锁（与文档入库写入互斥），
+     * 会话越长 / 入库越频繁，互相拖慢越明显。索引未变化时重复查询没有任何收益，
+     * 因此在进入循环前查一次并复用。</p>
+     */
+    private List<DocumentIndexEntry> indexedEntriesFor(String workspaceId) {
+        if (documentIngestionService == null || displayNameResolver == null) return List.of();
+        return documentIngestionService.listIndexedDocuments().stream()
+                .filter(entry -> workspaceId == null || workspaceId.isBlank() || workspaceId.equals(entry.workspaceId()))
+                .toList();
     }
 
     /**
      * 历史消息可能保存了旧版向量 metadata 中的 UUID 存储文件名。
      * 读取历史时按当前索引表的路径恢复原始文件名，避免旧引用永久显示 UUID。
      */
-    private JsonNode normalizeSources(JsonNode sources, String workspaceId) {
+    private JsonNode normalizeSources(JsonNode sources, String workspaceId, List<DocumentIndexEntry> indexEntries) {
         if (sources == null || !sources.isArray() || documentIngestionService == null || displayNameResolver == null) return sources;
-        List<DocumentIndexEntry> entries = documentIngestionService.listIndexedDocuments().stream()
-                .filter(entry -> workspaceId == null || workspaceId.isBlank() || workspaceId.equals(entry.workspaceId()))
-                .toList();
+        List<DocumentIndexEntry> entries = indexEntries;
         ArrayNode normalized = objectMapper.createArrayNode();
         for (JsonNode source : sources) {
             if (!source.isObject()) {

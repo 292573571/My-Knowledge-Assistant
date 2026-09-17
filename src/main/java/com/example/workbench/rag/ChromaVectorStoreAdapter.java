@@ -32,6 +32,11 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     private final InMemoryVectorStore fallbackVectorStore;
     private final Optional<PostgresSparseRetriever> sparseRetriever;
 
+    /** 连通性探测结果的缓存时长；见 {@link #chromaReachable()}。 */
+    private static final long REACHABILITY_CACHE_MILLIS = 10_000L;
+    private volatile boolean reachabilityCached;
+    private volatile long reachabilityCheckedAtMillis;
+
     @Autowired
     public ChromaVectorStoreAdapter(
             ObjectProvider<org.springframework.ai.vectorstore.VectorStore> chromaVectorStoreProvider,
@@ -57,6 +62,41 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
 
     public boolean isChromaConfigured() {
         return chromaVectorStoreProvider.getIfAvailable() != null;
+    }
+
+    /**
+     * Chroma 真实连通性探测，区别于 {@link #isChromaConfigured()} 的「Bean 是否存在」。
+     *
+     * <p>健康检查必须回答「现在能不能用」，而不是「有没有配」。{@code isChromaConfigured()}
+     * 只判断 Bean 是否创建成功 —— Chroma 进程挂掉后它依然返回 true，于是 /api/health
+     * 与 readiness 会一起给出「一切正常」的假象（故障期间 health 仍返回 200）。</p>
+     *
+     * <p>探测取集合条数：一次计数查询，代价最小，同时能确认 tenant / database / collection
+     * 三者真实存在。结果缓存 {@value #REACHABILITY_CACHE_MILLIS} 毫秒 —— 健康检查被轮询时
+     * 不必每次打网络，Chroma 故障期间也顺带把探测频率限制住（失败探测要等超时，代价更高）。</p>
+     */
+    public boolean chromaReachable() {
+        ChromaApi api = chromaApiProvider.getIfAvailable();
+        ChromaVectorStoreProperties properties = chromaPropertiesProvider.getIfAvailable();
+        if (api == null || properties == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (now - reachabilityCheckedAtMillis < REACHABILITY_CACHE_MILLIS) {
+            return reachabilityCached;
+        }
+        boolean reachable;
+        try {
+            api.countEmbeddings(properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName());
+            reachable = true;
+        } catch (RuntimeException exception) {
+            log.warn("Chroma 连通性探测失败 tenant={} database={} collection={}",
+                    properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName(), exception);
+            reachable = false;
+        }
+        reachabilityCached = reachable;
+        reachabilityCheckedAtMillis = now;
+        return reachable;
     }
 
     @Override

@@ -240,16 +240,27 @@ public class RagController {
     public WorkbenchStatus health() {
         List<DocumentIndexEntry> documents = documentIngestionService.listPublicIndexedDocuments();
         boolean chromaConfigured = vectorStore.isChromaConfigured();
+        // 配置存在 ≠ 可用：Chroma 挂掉时 Bean 仍在，必须实测连通性，否则故障期间 health 依旧一脸健康。
+        boolean chromaReachable = chromaConfigured && vectorStore.chromaReachable();
 
         return new WorkbenchStatus(
                 aiConfig.provider(),
                 aiConfig.model(),
                 chatClientProvider.getIfAvailable() != null,
-                chromaConfigured ? "Chroma" : "内存回退",
+                vectorStoreLabel(chromaConfigured, chromaReachable),
                 chromaConfigured,
+                chromaReachable,
                 documents.size(),
                 documents.stream().mapToInt(DocumentIndexEntry::chunkCount).sum()
         );
+    }
+
+    /** 区分「未配置」「已配置且可用」「已配置但连不上」——故障时不能只显示 "Chroma"。 */
+    private String vectorStoreLabel(boolean chromaConfigured, boolean chromaReachable) {
+        if (!chromaConfigured) {
+            return "内存回退";
+        }
+        return chromaReachable ? "Chroma" : "Chroma(不可达)";
     }
 
     @DeleteMapping("/documents/{documentId}")

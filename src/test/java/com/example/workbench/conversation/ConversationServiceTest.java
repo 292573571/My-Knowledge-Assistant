@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.UserConversationScope;
 import com.example.workbench.memory.ConversationMemory;
+import com.example.workbench.rag.DocumentDisplayNameResolver;
+import com.example.workbench.rag.DocumentIngestionService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 import java.util.List;
@@ -180,5 +182,30 @@ class ConversationServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("404 NOT_FOUND");
         verify(messages, never()).findByConversationIdOrderByCreatedAtAsc("conversation-a");
+    }
+
+    @Test
+    void readsDocumentIndexOnlyOnceForAllMessages() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        DocumentIngestionService ingestion = Mockito.mock(DocumentIngestionService.class);
+        DocumentDisplayNameResolver resolver = Mockito.mock(DocumentDisplayNameResolver.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper(), ingestion, resolver);
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation conversation = new ChatConversation("conversation-a", user, "测试", "rag", "team-1");
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        when(messages.findByConversationIdOrderByCreatedAtAsc("conversation-a")).thenReturn(List.of(
+                new ChatMessageEntity(conversation, "user", "问题一", "[{\"file\":\"a.pdf\"}]", "[]"),
+                new ChatMessageEntity(conversation, "assistant", "回答一", "[{\"file\":\"a.pdf\"}]", "[]"),
+                new ChatMessageEntity(conversation, "user", "问题二", "[{\"file\":\"b.pdf\"}]", "[]")));
+        when(ingestion.listIndexedDocuments()).thenReturn(List.of());
+
+        service.messages(user, "team-1", "conversation-a");
+
+        // 修复前每条消息各查一次索引：消息数 × 索引全表扫描，且每次都抢同一把 synchronized 锁
+        //（与文档入库写入互斥）。这里锁死「整段会话只读一次索引」。
+        Mockito.verify(ingestion, Mockito.times(1)).listIndexedDocuments();
     }
 }

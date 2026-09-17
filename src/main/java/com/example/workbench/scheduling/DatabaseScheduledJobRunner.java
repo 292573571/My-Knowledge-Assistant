@@ -77,7 +77,8 @@ class DatabaseScheduledJobRunner {
                 runIfDue(AUDIT_EVENT_OUTBOX_RETRY, auditOutboxService::projectOne);
             }
         } catch (Exception e) {
-            log.warn("Scheduled poll error (will retry next cycle): {}", e.getMessage());
+            // 必须把异常对象交给日志框架：只打 getMessage() 会丢掉堆栈，数据库类故障将无法定位。
+            log.warn("Scheduled poll error (will retry next cycle)", e);
         }
     }
 
@@ -87,7 +88,7 @@ class DatabaseScheduledJobRunner {
         try {
             claimed = jobRepository.claim(jobKey, workerId, now, now.plusSeconds(LEASE_SECONDS));
         } catch (Exception e) {
-            log.warn("Scheduled job claim failed jobKey={} error={}", jobKey, e.getMessage());
+            log.warn("Scheduled job claim failed jobKey={}", jobKey, e);
             return;
         }
         if (claimed == 0) return;
@@ -97,12 +98,12 @@ class DatabaseScheduledJobRunner {
             task.run();
         } catch (RuntimeException exception) {
             error = exception.getClass().getSimpleName();
-            log.error("数据库定时任务执行失败 jobKey={} errorType={}", jobKey, error);
+            log.error("数据库定时任务执行失败 jobKey={}", jobKey, exception);
         } finally {
             try {
                 jobRepository.finish(jobKey, workerId, Instant.now(), error);
             } catch (Exception e) {
-                log.warn("Scheduled job finish failed jobKey={} error={}", jobKey, e.getMessage());
+                log.warn("Scheduled job finish failed jobKey={}", jobKey, e);
             }
         }
     }

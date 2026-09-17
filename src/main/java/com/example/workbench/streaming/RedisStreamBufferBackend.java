@@ -112,7 +112,7 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
                     "userId", userId == null ? "" : userId.toString()));
             redis.expire(metaKey(streamId), ttl);
         } catch (RuntimeException exception) {
-            log.warn("流式会话初始化 Redis 失败 streamId={} error={}", streamId, exception.getMessage());
+            log.warn("流式会话初始化 Redis 失败 streamId={}", streamId, exception);
         }
     }
 
@@ -141,7 +141,7 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
             Object userId = redis.opsForHash().get(metaKey(streamId), "userId");
             return new SessionState(StreamSession.Status.valueOf(status.toString()), parseLong(terminalSeq), parseLongOrNull(userId));
         } catch (RuntimeException exception) {
-            log.warn("流式会话状态读取 Redis 失败 streamId={} error={}", streamId, exception.getMessage());
+            log.warn("流式会话状态读取 Redis 失败 streamId={}", streamId, exception);
             return null;
         }
     }
@@ -151,7 +151,7 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
         try {
             redis.delete(List.of(seqKey(streamId), chunksKey(streamId), metaKey(streamId)));
         } catch (RuntimeException exception) {
-            log.warn("流式会话清理 Redis 失败 streamId={} error={}", streamId, exception.getMessage());
+            log.warn("流式会话清理 Redis 失败 streamId={}", streamId, exception);
         }
     }
 
@@ -179,7 +179,7 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
                     try {
                         listener.accept(streamId);
                     } catch (RuntimeException exception) {
-                        log.warn("处理远端流式通知失败 streamId={} error={}", streamId, exception.getMessage());
+                        log.warn("处理远端流式通知失败 streamId={}", streamId, exception);
                     }
                 }
             }
@@ -206,7 +206,7 @@ public class RedisStreamBufferBackend implements StreamBufferBackend {
         try {
             return objectMapper.readValue(raw, StreamChunk.class);
         } catch (Exception exception) {
-            log.warn("无法反序列化流式片段,已跳过 error={}", exception.getMessage());
+            log.warn("无法反序列化流式片段,已跳过", exception);
             return null;
         }
     }
