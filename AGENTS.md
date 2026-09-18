@@ -49,5 +49,5 @@ DEPLOY_HOST=<服务器地址> ./deploy/deploy-shihai --yes
 - 不添加注释，除非用户要求
 - API Key 等敏感信息不硬编码，通过环境变量传入
 - 数据库变更通过 Flyway migration 脚本（非 ddl-auto）
-- 测试必须通过：`mvn test` 427 个测试全过
+- 测试必须通过：`mvn test` 455 个测试全过
 - 前端构建必须通过：`yarn build`

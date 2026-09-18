@@ -673,6 +673,8 @@ V20__create_eval_tables.sql         评测题库、运行和结果表
 V21__add_workspace_parent.sql       workspaces 增加 parent_workspace_id 自引用外键
 V22__allow_org_workspace_type.sql   放宽 workspaces.type 检查约束以包含 ORG 组织类型
 V31__create_mcp_api_keys.sql        MCP 客户端 API Key 哈希、过期和吊销状态
+V32__add_pending_action_payload.sql  待确认动作增加结构化参数列
+V33__add_system_agent_audit_actions.sql  审计动作约束增加 DOCUMENT_REBUILD 等取值
 ```
 
 V22 是一个修复性迁移：`workspaces.type` 列存在仅允许 `PERSONAL/TEAM/PUBLIC` 的 CHECK 约束（在 Flyway 之外手工创建），导致 `WorkspaceHierarchyInitializer` 插入 `ORG` 类型记录时触发约束冲突、应用启动失败。V22 删除旧约束并重建为包含 ORG 的四值约束。已部署环境如果存在同名约束，升级到本版本前应先备份数据库。
@@ -720,6 +722,43 @@ Actuator 默认绑定 `127.0.0.1:8081`，仅暴露健康和信息端点：
 `重建所有向量索引` 面向系统级运维：会遍历全部知识空间（个人、团队、组织和公共空间），为每个空间提交一个独立的异步 `REBUILD` 任务，复用现有的任务排队、进度和失败重试机制。非超级管理员发起该命令会直接返回 403；确认阶段会再次校验超管权限，避免角色被降级后旧令牌仍然可用。
 
 维护 Agent 的确认令牌默认 10 分钟有效且只能消费一次，保存在 `maintenance_pending_actions` 表中，服务重启后仍在有效期内可确认。超级管理员在维护 Agent 中可以访问自己未加入的空间，其他用户仍严格按成员关系校验。
+
+### 系统管家 Agent
+
+系统管家位于 `/api/agent/system`，面向 `ADMIN` 及以上角色，把维护助手的范围从「单个知识空间」扩展到全系统。它复用维护助手的安全模型：LLM 只能调用只读工具，写操作一律走待确认令牌。
+
+只读工具覆盖 6 个领域：
+
+| 领域 | 只读工具 |
+| --- | --- |
+| 知识库与文档任务 | `getIndexStatus`、`listDocumentTasks`、`getDocumentTaskBatches`、`listIndexedDocuments` |
+| 用户与角色 | `listUsers`（邮箱掩码） |
+| 模型配置 | `listModels`（API Key 掩码） |
+| 审计与系统日志 | `recentAuditEvents`、`recentSystemLogs`（日志正文裁剪并脱敏） |
+| 空间与成员 | `listWorkspaces` |
+| 评测 | `listEvalRuns` |
+
+系统级只读工具在 Java 层校验 `ADMIN` 权限，不依赖 Prompt 约束。所有返回结构都是窄化的 record，不会把含密码哈希、明文 API Key 的实体交给模型。系统日志正文在返回前会做密钥/令牌脱敏并截断。
+
+系统级写操作（全部需要确认令牌）：
+
+| 动作 | 权限 | 说明 |
+| --- | --- | --- |
+| `REBUILD_ALL_INDEX` | 超级管理员 | 为全部知识空间提交索引重建任务 |
+| `SET_DEFAULT_MODEL` | 超级管理员 | 设置全局默认对话模型 |
+| `SET_USER_ROLE` | 超级管理员 | 调整用户系统角色（不能授予超级管理员） |
+| `CLEAR_SYSTEM_LOGS` | 管理员 | 清理普通运行日志，不影响审计日志 |
+| `REBUILD_INDEX` / `SYNC_WORKSPACE` / `RETRY_TASK` / `DELETE_DOCUMENT` | 空间写权限 | 与维护助手一致 |
+
+每个写操作在执行后都会写入审计事件（如 `DOCUMENT_REBUILD`、`USER_ROLE_CHANGE`、`SYSTEM_LOG_CLEAR`）。待确认令牌的动作参数保存在 `maintenance_pending_actions.payload`，可表达「目标 + 期望值」这类多参数动作。
+
+### 使用客服 Agent
+
+使用客服位于 `/api/agent/support`，面向所有登录用户，作为独立入口（前端「使用帮助」）。
+
+它只做两件事：从**公共知识空间**的帮助文档里检索答案（问题中提到的功能怎么用），以及解释调用者**自己**的文档任务状态（为什么上传没成功）。全程只读，没有待确认写操作，不会读取他人空间的数据，也不会返回内部存储路径。
+
+把产品文档或 FAQ 放进任意 `PUBLIC` 知识空间，客服即可检索到。若没有配置公共空间，检索会直接返回空并如实告知用户"帮助文档里暂时没有说明"。
 
 ## MCP 知识库服务
 

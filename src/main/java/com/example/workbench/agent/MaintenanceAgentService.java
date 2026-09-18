@@ -144,6 +144,9 @@ public class MaintenanceAgentService {
                     ingestionService.deleteDocument(pending.targetId, context, admin);
                     yield new MaintenanceWriteResult("文档已删除。", pending.action, pending.targetId, false);
                 }
+                // 以下动作由系统管家负责，维护助手不生成这些令牌。
+                case SET_DEFAULT_MODEL, SET_USER_ROLE, CLEAR_SYSTEM_LOGS ->
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该动作请通过系统管家确认");
             };
         });
     }
@@ -179,6 +182,9 @@ public class MaintenanceAgentService {
             case REBUILD_ALL_INDEX -> "即将为全部 " + workspaceService.allWorkspaceAccesses(user).size()
                     + " 个知识空间重建向量索引。系统会为每个空间提交独立的异步重建任务，是否确认？";
             case DELETE_DOCUMENT -> "即将删除文档 " + targetId + " 及其索引，是否确认？此操作不可撤销。";
+            case SET_DEFAULT_MODEL -> "即将设置默认模型，是否确认？";
+            case SET_USER_ROLE -> "即将调整用户角色，是否确认？";
+            case CLEAR_SYSTEM_LOGS -> "即将清理运行日志，是否确认？";
         };
         return pending(user, context, action, targetId, description);
     }

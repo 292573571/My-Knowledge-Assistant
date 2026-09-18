@@ -1,0 +1,32 @@
+import { apiErrorFromException, apiErrorFromResponse } from './apiError'
+import { authHeaders } from './authApi'
+
+export async function chatWithSystemAgent(message, workspaceId = '') {
+  try {
+    const response = await fetch('/api/agent/system/chat', {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ workspaceId, message })
+    })
+    if (!response.ok) throw await apiErrorFromResponse(response, '系统管家请求失败。')
+    return response.json()
+  } catch (error) {
+    throw apiErrorFromException(error, '无法连接系统管家，请检查后端服务。')
+  }
+}
+
+export async function confirmSystemAgentAction(confirmationToken, workspaceId = '') {
+  try {
+    const response = await fetch('/api/agent/system/confirm', {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ confirmationToken, workspaceId })
+    })
+    if (!response.ok) throw await apiErrorFromResponse(response, '系统操作执行失败。')
+    return response.json()
+  } catch (error) {
+    throw apiErrorFromException(error, '无法执行系统操作，请稍后重试。')
+  }
+}

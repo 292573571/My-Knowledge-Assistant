@@ -137,6 +137,27 @@ public class WorkspaceService {
                 .toList();
     }
 
+    /** 全部公共知识空间 ID，供面向所有用户的帮助/客服检索使用（PUBLIC 文档本身对全员可见）。 */
+    @Transactional(readOnly = true)
+    public Set<String> publicWorkspaceIds() {
+        return workspaceRepository.findAllByTypeOrderByCreatedAtAsc(WorkspaceType.PUBLIC).stream()
+                .map(Workspace::getId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /** 超级管理员视角的全部知识空间（带名称与层级），用于系统管家只读展示。 */
+    @Transactional(readOnly = true)
+    public List<WorkspaceResponse> listAll(AppUser admin) {        if (!isSuperAdmin(admin)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "该操作仅限超级管理员");
+        }
+        return workspaceRepository.findAll().stream()
+                .sorted(java.util.Comparator.comparing(Workspace::getId))
+                .map(workspace -> new WorkspaceResponse(workspace.getId(), workspace.getName(), workspace.getType(),
+                        WorkspaceRole.OWNER, workspace.getCreatedAt(),
+                        workspace.getParent() == null ? null : workspace.getParent().getId()))
+                .toList();
+    }
+
     @Transactional
     public WorkspaceAccessContext ownerAccess(AppUser user, String workspaceId) {
         ensurePersonalWorkspace(user);

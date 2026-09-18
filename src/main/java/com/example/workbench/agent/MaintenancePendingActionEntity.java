@@ -36,6 +36,10 @@ class MaintenancePendingActionEntity {
     @Comment("动作目标标识")
     private String targetId;
 
+    @Column(length = 1000)
+    @Comment("待确认动作的结构化参数")
+    private String payload;
+
     @Column(nullable = false, length = 1000)
     @Comment("确认提示描述")
     private String description;
@@ -53,12 +57,13 @@ class MaintenancePendingActionEntity {
         this.workspaceId = state.workspaceId;
         this.action = state.action;
         this.targetId = state.targetId;
+        this.payload = state.payload;
         this.description = state.description;
         this.expiresAt = state.expiresAt;
     }
 
     MaintenancePendingActionState state() {
         return new MaintenancePendingActionState(confirmationToken, userId, workspaceId, action,
-                targetId, description, expiresAt);
+                targetId, payload, description, expiresAt);
     }
 }

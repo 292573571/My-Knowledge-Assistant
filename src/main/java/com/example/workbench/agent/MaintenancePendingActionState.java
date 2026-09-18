@@ -9,18 +9,24 @@ final class MaintenancePendingActionState {
     final String workspaceId;
     final MaintenanceAction action;
     final String targetId;
+    final String payload;
     final String description;
     final Instant expiresAt;
 
-    MaintenancePendingActionState(String token, String userId, String workspaceId,
-                                  MaintenanceAction action, String targetId,
-                                  String description, Instant expiresAt) {
+    MaintenancePendingActionState(String token, String userId, String workspaceId, MaintenanceAction action,
+                                  String targetId, String payload, String description, Instant expiresAt) {
         this.token = token;
         this.userId = userId;
         this.workspaceId = workspaceId;
         this.action = action;
         this.targetId = targetId;
+        this.payload = payload;
         this.description = description;
         this.expiresAt = expiresAt;
+    }
+
+    MaintenancePendingActionState(String token, String userId, String workspaceId, MaintenanceAction action,
+                                  String targetId, String description, Instant expiresAt) {
+        this(token, userId, workspaceId, action, targetId, null, description, expiresAt);
     }
 }
