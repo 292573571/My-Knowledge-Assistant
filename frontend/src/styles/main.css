@@ -5061,7 +5061,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .floating-agent-launcher {
   position: fixed;
   right: 24px;
-  bottom: 24px;
+  bottom: 80px;
   z-index: 1000;
 }
 
@@ -5102,7 +5102,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .floating-agent-dialog {
   position: fixed;
   right: 24px;
-  bottom: 96px;
+  bottom: 152px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
