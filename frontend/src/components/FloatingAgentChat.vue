@@ -10,6 +10,8 @@ const props = defineProps({
   sendLabel: { type: String, default: '发送' },
   loadingLabel: { type: String, default: '思考中…' },
   send: { type: Function, required: true },
+  confirm: { type: Function, default: null },
+  confirmHint: { type: Function, default: null },
   // 悬浮入口专属
   label: { type: String, default: '打开智能客服' }
 })
@@ -76,6 +78,8 @@ function close() {
         :placeholder="placeholder"
         :send-label="sendLabel"
         :loading-label="loadingLabel"
+        :confirm="confirm"
+        :confirm-hint="confirmHint"
         :send="send"
       />
     </div>
