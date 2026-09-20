@@ -1,6 +1,8 @@
 package com.example.workbench.agent;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.conversation.ConversationContextStore;
+import com.example.workbench.memory.ChatMessage;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.modelconfig.ModelClientFactory;
 import com.example.workbench.modelconfig.ModelConfigContext;
@@ -26,6 +28,9 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -34,6 +39,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TeachingAgentService {
     private static final Logger log = LoggerFactory.getLogger(TeachingAgentService.class);
+
+    /** 讲解正文较长，教学历史只取最近几轮并逐条截断，避免挤占生成窗口。 */
+    private static final int TEACHING_HISTORY_ROUNDS = 3;
+    private static final int TEACHING_HISTORY_MAX_CHARS = 1200;
 
     private static final String SYSTEM_PROMPT = """
             你是当前知识空间的教学 Agent，目标是帮助用户真正理解一个知识点，而不是一次输出完整课程。
@@ -66,6 +75,7 @@ public class TeachingAgentService {
             """;
 
     private final ChatClient chatClient;
+    private final ConversationContextStore conversationContextStore;
     private final ObjectMapper objectMapper;
     private final TeachingReadOnlyService readOnlyService;
     private final TeachingCheckService checkService;
@@ -82,8 +92,10 @@ public class TeachingAgentService {
                                  TeachingCheckService checkService, LearningRecordService learningRecordService,
                                  ObjectMapper objectMapper, WorkspaceService workspaceService,
                                  ModelConfigContext modelConfigContext, ModelConfigService modelConfigService,
-                                 ModelClientFactory modelClientFactory) {
+                                 ModelClientFactory modelClientFactory,
+                                 ConversationContextStore conversationContextStore) {
         this.chatClient = chatClient;
+        this.conversationContextStore = conversationContextStore;
         this.readOnlyService = readOnlyService;
         this.checkService = checkService;
         this.learningRecordService = learningRecordService;
@@ -105,6 +117,48 @@ public class TeachingAgentService {
             return chatClient;
         }
         return modelClientFactory.clientFor(modelConfigService.resolve(modelConfigContext.get()));
+    }
+
+    /**
+     * 读取学习会话最近几轮对话，让讲解能承接前文。
+     *
+     * <p>用户消息在调用本服务前已落库，末尾那条与当前问题相同的 user 消息会被剔除，
+     * 避免与本次 userPrompt 重复。读取失败时降级为不带历史，不阻断讲解。
+     */
+    private List<Message> teachingHistory(AppUser user, String workspaceId, String sessionId, String currentQuestion) {
+        if (conversationContextStore == null || sessionId == null || sessionId.isBlank()) {
+            return List.of();
+        }
+        List<ChatMessage> recent;
+        try {
+            recent = conversationContextStore.recent(user, workspaceId, sessionId, TEACHING_HISTORY_ROUNDS);
+        } catch (RuntimeException exception) {
+            log.warn("Teaching Agent 读取会话历史失败 sessionId={} message={}", sessionId, exception.getMessage());
+            return List.of();
+        }
+        if (recent == null || recent.isEmpty()) {
+            return List.of();
+        }
+        ChatMessage last = recent.get(recent.size() - 1);
+        String lastContent = last.content() == null ? "" : last.content().strip();
+        if (currentQuestion != null && "user".equalsIgnoreCase(last.role())
+                && currentQuestion.strip().equals(lastContent)) {
+            recent = recent.subList(0, recent.size() - 1);
+        }
+        List<Message> messages = new ArrayList<>();
+        for (ChatMessage message : recent) {
+            String content = message.content() == null ? "" : message.content().strip();
+            if (content.isEmpty()) {
+                continue;
+            }
+            if (content.length() > TEACHING_HISTORY_MAX_CHARS) {
+                content = content.substring(0, TEACHING_HISTORY_MAX_CHARS) + "…";
+            }
+            messages.add("user".equalsIgnoreCase(message.role())
+                    ? new UserMessage(content)
+                    : new AssistantMessage(content));
+        }
+        return messages;
     }
 
     public TeachingAgentResult chat(AppUser user, WorkspaceAccessContext access, TeachingAgentRequest request) {
@@ -134,6 +188,7 @@ public class TeachingAgentService {
             requireRunning(cancelled);
             rawAnswer = resolveClient().prompt()
                     .system(SYSTEM_PROMPT)
+                    .messages(teachingHistory(user, access.workspaceId(), context.sessionId(), request.message()))
                     .user(userPrompt)
                     .tools(tools)
                     .call()
@@ -201,6 +256,7 @@ public class TeachingAgentService {
             requireRunning(cancelled);
             resolveClient().prompt()
                     .system(EXPLAIN_SYSTEM_PROMPT)
+                    .messages(teachingHistory(user, access.workspaceId(), context.sessionId(), request.message()))
                     .user(userPrompt)
                     .tools(tools)
                     .stream()

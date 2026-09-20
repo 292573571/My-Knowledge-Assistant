@@ -1340,11 +1340,15 @@ public class RagService {
             return new ConversationContext(ContextRelation.INDEPENDENT, List.of(), null);
         }
 
-        boolean likelyRelated = containsAny(question, List.of(
+        List<ChatMessage> relevantHistory = sanitizeHistory(history);
+        // 指代词只用于判断「是否需要把当前问题改写成独立问题以改善检索」，不再用于丢弃历史。
+        // 历史一律带入本次回答，由模型自行判断相关性，避免自然追问被误判成无关问题而丢失上下文。
+        boolean needsStandaloneQuestion = containsAny(question, List.of(
                 "它", "这个", "那个", "刚才", "上面", "前面", "继续", "上一", "其中", "该方案", "还有呢", "然后呢"));
-        if (!likelyRelated) {
-            log.info("RAG conversation context skipped (no deictic terms) conversationId={}", conversationId);
-            return new ConversationContext(ContextRelation.INDEPENDENT, List.of(), null);
+        if (!needsStandaloneQuestion) {
+            log.info("RAG conversation context kept without rewrite conversationId={} historyMessages={}",
+                    conversationId, relevantHistory.size());
+            return new ConversationContext(ContextRelation.RELATED, relevantHistory, null);
         }
 
         String prompt = """
@@ -1362,15 +1366,18 @@ public class RagService {
         if (standaloneQuestion != null) {
             log.info("RAG conversation context resolved conversationId={} related=true standaloneLength={}",
                     conversationId, standaloneQuestion.length());
-            return new ConversationContext(ContextRelation.RELATED, sanitizeHistory(history), standaloneQuestion);
+            return new ConversationContext(ContextRelation.RELATED, relevantHistory, standaloneQuestion);
         }
         if (generated != null && generated.strip().equalsIgnoreCase("INDEPENDENT")) {
-            log.info("RAG conversation context resolved conversationId={} related=false", conversationId);
-            return new ConversationContext(ContextRelation.INDEPENDENT, List.of(), null);
+            // 模型判定与前文无关时仍保留历史：判定可能出错，丢上下文的代价远大于多带几条消息。
+            log.info("RAG conversation context rewrite judged independent conversationId={} historyKept={}",
+                    conversationId, relevantHistory.size());
+            return new ConversationContext(ContextRelation.RELATED, relevantHistory, null);
         }
 
-        log.info("RAG conversation context fallback (llm unclear) conversationId={} related={}", conversationId, true);
-        return new ConversationContext(ContextRelation.RELATED, sanitizeHistory(history), null);
+        log.info("RAG conversation context fallback (llm unclear) conversationId={} historyKept={}",
+                conversationId, relevantHistory.size());
+        return new ConversationContext(ContextRelation.RELATED, relevantHistory, null);
     }
 
     private String parseStandaloneQuestion(String generated, String originalQuestion) {
