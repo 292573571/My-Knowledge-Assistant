@@ -10,6 +10,7 @@ const props = defineProps({
   badge: { type: String, default: '只读' },
   icon: { type: String, default: 'bot' },
   suggestions: { type: Array, default: () => [] },
+  welcome: { type: String, default: '' },
   placeholder: { type: String, default: '描述你的问题…' },
   sendLabel: { type: String, default: '发送' },
   loadingLabel: { type: String, default: '思考中…' },
@@ -34,7 +35,7 @@ const showTrace = ref(false)
 const threadEl = ref(null)
 
 const answerHtml = computed(() => renderMarkdown(answer.value?.answer || ''))
-const hasThread = computed(() => Boolean(question.value || answer.value || loading.value))
+const hasThread = computed(() => Boolean(question.value || answer.value || loading.value || props.welcome))
 const traces = computed(() => answer.value?.toolCalls || answer.value?.traces || [])
 const pending = computed(() => answer.value?.pendingAction?.confirmationToken
   ? answer.value.pendingAction : null)
@@ -113,6 +114,13 @@ function reset() {
       <div v-if="!hasThread" class="agent-chat-empty">
         <strong>{{ emptyTitle }}</strong>
         <span>{{ emptyHint }}</span>
+      </div>
+
+      <div v-if="props.welcome" class="agent-msg agent-msg-bot">
+        <div class="agent-avatar">AI</div>
+        <div class="agent-bubble">
+          <div class="markdown-body"><p>{{ props.welcome }}</p></div>
+        </div>
       </div>
 
       <div v-if="question" class="agent-msg agent-msg-user">
