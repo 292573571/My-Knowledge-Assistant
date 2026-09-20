@@ -87,8 +87,16 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
         }
         boolean reachable;
         try {
-            api.countEmbeddings(properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName());
-            reachable = true;
+            // Chroma 的计数接口收的是集合 UUID，不是集合名；直接传名字会被判为 InvalidArgumentError。
+            ChromaApi.Collection collection = api.getCollection(
+                    properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName());
+            if (collection == null || collection.id() == null || collection.id().isBlank()) {
+                log.warn("Chroma 连通性探测失败：集合不存在 collection={}", properties.getCollectionName());
+                reachable = false;
+            } else {
+                api.countEmbeddings(properties.getTenantName(), properties.getDatabaseName(), collection.id());
+                reachable = true;
+            }
         } catch (RuntimeException exception) {
             log.warn("Chroma 连通性探测失败 tenant={} database={} collection={}",
                     properties.getTenantName(), properties.getDatabaseName(), properties.getCollectionName(), exception);
