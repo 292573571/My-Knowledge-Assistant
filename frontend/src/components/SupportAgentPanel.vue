@@ -20,7 +20,7 @@ const send = (message) => chatWithSupportAgent(message, props.workspace?.id)
 <template>
   <FloatingAgentChat
     kicker="SUPPORT AGENT"
-    title="使用帮助"
+    title="智能客服"
     description="基于公共知识空间的帮助文档回答，只读。"
     badge="只读"
     icon="help"

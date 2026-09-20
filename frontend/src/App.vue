@@ -5,7 +5,6 @@ import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
 import HomePage from './components/HomePage.vue'
 import ModelConfig from './components/ModelConfig.vue'
-import SupportHelpPage from './components/SupportHelpPage.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
@@ -47,7 +46,7 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['home', 'assistant', 'help', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
@@ -330,10 +329,6 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 4.5A2.5 2.5 0 0 1 8 2h9.5a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L15 17l-2.7 1.9a.5.5 0 0 1-.6 0L9 17l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z"/><path d="M9 6.5h5.5M9 10h5.5"/></svg>
             <span>学习记录</span>
           </button>
-          <button :class="{ active: activeSection === 'help' }" type="button" @click="navigateTo('help')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.25-.9.75-.9 1.4v.3"/><path d="M12 17h.01"/></svg>
-            <span>使用帮助</span>
-          </button>
           <button :class="{ active: activeSection === 'knowledge' }" type="button" @click="navigateTo('knowledge')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
             <span>知识库管理</span>
@@ -394,7 +389,6 @@ async function submitPasswordChange() {
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
-      <SupportHelpPage v-else-if="activeSection === 'help'" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />

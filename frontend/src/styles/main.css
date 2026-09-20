@@ -5042,13 +5042,6 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .agent-chat .maintenance-agent-trace li span.succeeded { color: #2d8a62; }
 .agent-chat .maintenance-agent-trace li span.failed, .agent-chat .maintenance-agent-trace li span.rejected { color: #b24d57; }
 
-/* 使用帮助独立页面 */
-.agent-page { display: grid; gap: 20px; }
-.agent-page-hero { border: 1px solid var(--site-line); border-radius: 22px; padding: 30px 28px; background: linear-gradient(150deg, #f7f5ec 0%, #eef4ea 100%); box-shadow: var(--site-shadow); }
-.agent-page-hero-kicker { margin: 0; color: var(--site-muted); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
-.agent-page-hero h1 { margin: 7px 0 0; color: var(--site-ink); font-size: 27px; letter-spacing: -.02em; }
-.agent-page-hero p { margin: 10px 0 0; max-width: 640px; color: var(--site-muted); font-size: 13px; line-height: 1.8; }
-
 @media (max-width: 760px) {
   .agent-chat { padding: 16px; border-radius: 16px; }
   .agent-chat-header { flex-direction: column; }
@@ -5057,7 +5050,6 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
   .agent-chat-composer { grid-template-columns: 1fr; }
   .agent-chat-composer button { width: 100%; }
   .agent-chat .maintenance-agent-confirmation { flex-direction: column; align-items: stretch; }
-  .agent-page-hero { padding: 22px 18px; }
 }
 
 .agent-chat-footer { display: flex; justify-content: flex-end; }
