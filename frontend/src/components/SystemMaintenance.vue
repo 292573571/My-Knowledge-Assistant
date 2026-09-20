@@ -6,7 +6,6 @@ import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
-import MaintenanceAgentPanel from './MaintenanceAgentPanel.vue'
 import SystemAgentPanel from './SystemAgentPanel.vue'
 import ToastContainer from './ToastContainer.vue'
 
@@ -520,7 +519,6 @@ async function handleTestModel(model) {
     </section>
 
     <div v-if="activeTool === 'maintenance'" class="maintenance-sections">
-      <MaintenanceAgentPanel :workspace="workspace" :current-user="currentUser" />
       <section class="maintenance-section maintenance-index-section">
         <header class="maintenance-section-heading">
           <div>
