@@ -5,6 +5,7 @@ import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
 import HomePage from './components/HomePage.vue'
 import ModelConfig from './components/ModelConfig.vue'
+import SupportHelpPage from './components/SupportHelpPage.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
@@ -393,11 +394,12 @@ async function submitPasswordChange() {
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
-      <SupportAgentPanel v-else-if="activeSection === 'help'" :key="`help-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+      <SupportHelpPage v-else-if="activeSection === 'help'" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
         <ModelConfig v-if="modelConfigOpen" :current-user="currentUser" @close="modelConfigOpen = false" @saved="modelConfigVersion += 1" />
+      <SupportAgentPanel v-if="currentUser" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <footer class="site-footer">
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">鄂ICP备2026046031号</a>
       </footer>
