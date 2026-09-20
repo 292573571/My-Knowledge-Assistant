@@ -38,7 +38,7 @@ DEPLOY_HOST=<服务器地址> ./deploy/deploy-shihai --yes
 
 - **后端**：Spring Boot 3.4.5, Spring AI 1.1.8, PostgreSQL, Chroma, Redis, Log4j2
 - **前端**：Vue 3.5, Vite, markdown-it, DOMPurify, highlight.js
-- **数据库迁移**：Flyway（V1-V31，`ddl-auto=validate`）
+- **数据库迁移**：Flyway（V1-V34，`ddl-auto=validate`）
 - **AI 模型**：OpenAI 兼容接口（硅基流动 SiliconFlow）
 - **流式**：SSE + StreamSession 断点续传，Redis 缓冲（不可用时降级进程内）+ 模型熔断
 - **MCP**：Spring AI MCP Server（Streamable HTTP），仅暴露只读知识库工具
@@ -49,5 +49,5 @@ DEPLOY_HOST=<服务器地址> ./deploy/deploy-shihai --yes
 - 不添加注释，除非用户要求
 - API Key 等敏感信息不硬编码，通过环境变量传入
 - 数据库变更通过 Flyway migration 脚本（非 ddl-auto）
-- 测试必须通过：`mvn test` 455 个测试全过
+- 测试必须通过：`mvn test` 469 个测试全过
 - 前端构建必须通过：`yarn build`

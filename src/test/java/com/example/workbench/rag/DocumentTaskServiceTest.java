@@ -129,6 +129,23 @@ class DocumentTaskServiceTest {
     }
 
     @Test
+    void createsMaintenanceTaskForOrgWorkspace() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        DocumentTaskService service = service(repository, Mockito.mock(DocumentIngestionService.class));
+
+        DocumentTaskResponse response = service.createMaintenance(
+                new WorkspaceAccessContext("admin", "org-1", WorkspaceRole.OWNER, WorkspaceType.ORG),
+                DocumentTaskType.REBUILD, null);
+
+        assertThat(response.taskId()).isNotBlank();
+        org.mockito.ArgumentCaptor<DocumentTaskEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(DocumentTaskEntity.class);
+        Mockito.verify(repository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getWorkspaceType()).isEqualTo(WorkspaceType.ORG);
+    }
+
+    @Test
     void uploaderCanReadPendingUploadSourceFile() {
         DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);

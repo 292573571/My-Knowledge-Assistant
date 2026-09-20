@@ -17,8 +17,10 @@ const props = defineProps({
   emptyHint: { type: String, default: '试试下面的常见问题，或直接描述你的问题。' },
   send: { type: Function, required: true },
   confirm: { type: Function, default: null },
-  confirmHint: { type: Function, default: null }
+  confirmHint: { type: Function, default: null },
+  showHeader: { type: Boolean, default: true }
 })
+
 
 const uid = Math.random().toString(36).slice(2, 8)
 const titleId = `agent-title-${uid}`
@@ -91,7 +93,7 @@ function reset() {
 
 <template>
   <section class="agent-chat" :aria-labelledby="titleId">
-    <header class="agent-chat-header">
+    <header v-if="showHeader" class="agent-chat-header">
       <div class="agent-chat-identity">
         <span class="agent-chat-mark" aria-hidden="true">
           <svg v-if="icon === 'help'" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.25-.9.75-.9 1.4v.3"/><path d="M12 17h.01"/></svg>

@@ -675,6 +675,8 @@ V22__allow_org_workspace_type.sql   放宽 workspaces.type 检查约束以包含
 V31__create_mcp_api_keys.sql        MCP 客户端 API Key 哈希、过期和吊销状态
 V32__add_pending_action_payload.sql  待确认动作增加结构化参数列
 V33__add_system_agent_audit_actions.sql  审计动作约束增加 DOCUMENT_REBUILD 等取值
+V34__allow_org_document_task_workspace_type.sql
+  放宽 document_tasks.workspace_type 检查约束以包含 ORG 组织类型
 ```
 
 V22 是一个修复性迁移：`workspaces.type` 列存在仅允许 `PERSONAL/TEAM/PUBLIC` 的 CHECK 约束（在 Flyway 之外手工创建），导致 `WorkspaceHierarchyInitializer` 插入 `ORG` 类型记录时触发约束冲突、应用启动失败。V22 删除旧约束并重建为包含 ORG 的四值约束。已部署环境如果存在同名约束，升级到本版本前应先备份数据库。

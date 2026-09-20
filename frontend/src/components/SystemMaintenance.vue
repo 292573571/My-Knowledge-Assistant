@@ -520,7 +520,6 @@ async function handleTestModel(model) {
     </section>
 
     <div v-if="activeTool === 'maintenance'" class="maintenance-sections">
-      <MaintenanceAgentPanel :workspace="workspace" :current-user="currentUser" />
       <section class="maintenance-section maintenance-index-section">
         <header class="maintenance-section-heading">
           <div>
@@ -780,6 +779,8 @@ async function handleTestModel(model) {
         </div>
       </div>
     </div>
+
+    <MaintenanceAgentPanel :workspace="workspace" :current-user="currentUser" />
 
     <ToastContainer ref="toast" />
   </main>

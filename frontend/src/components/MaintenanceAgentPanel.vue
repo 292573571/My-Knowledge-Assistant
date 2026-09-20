@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import AgentChatPanel from './AgentChatPanel.vue'
+import FloatingAgentChat from './FloatingAgentChat.vue'
 import { chatWithMaintenanceAgent, confirmMaintenanceAgentAction } from '../api/maintenanceAgentApi'
 
 const props = defineProps({
@@ -32,12 +32,12 @@ function confirmationHint(action) {
 </script>
 
 <template>
-  <AgentChatPanel
+  <FloatingAgentChat
     kicker="KNOWLEDGE MAINTENANCE"
     title="知识库维护助手"
     :description="`检查「${workspaceName}」的索引、任务和批次状态。`"
     :badge="isSuperAdmin ? '只读问答 + 待确认操作' : '只读模式'"
-    icon="bot"
+    icon="wrench"
     send-label="询问助手"
     loading-label="检查中…"
     placeholder="例如：检查当前空间是否有失败任务，并告诉我原因和建议。"
