@@ -78,6 +78,27 @@ class SystemAgentServiceTest {
     }
 
     @Test
+    void answersGreetingWithoutCallingSystemTools() {
+        MaintenanceAgentResult result = service.chat(plainAdmin, context(plainAdmin), "你好！");
+
+        assertThat(result.answer()).startsWith("你好，我是识海系统管家");
+        assertThat(result.traces()).isEmpty();
+        assertThat(result.steps()).isEqualTo(1);
+        verifyNoInteractions(taskService, aiModelService, adminUserService, appUserRepository,
+                systemLogRepository, workspaceService);
+    }
+
+    @Test
+    void explainsCapabilitiesWithoutCallingSystemTools() {
+        MaintenanceAgentResult result = service.chat(plainAdmin, context(plainAdmin), "你能做什么？");
+
+        assertThat(result.answer()).contains("系统管家", "查询系统运行状态", "所有写操作都会先让你确认");
+        assertThat(result.traces()).isEmpty();
+        verifyNoInteractions(taskService, aiModelService, adminUserService, appUserRepository,
+                systemLogRepository, workspaceService);
+    }
+
+    @Test
     void proposesDefaultModelChangeForSuperAdmin() {
         MaintenanceAgentResult result = service.chat(superAdmin, context(superAdmin), "把模型 3 设为默认模型");
 

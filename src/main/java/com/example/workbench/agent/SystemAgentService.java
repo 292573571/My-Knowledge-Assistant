@@ -64,6 +64,10 @@ public class SystemAgentService {
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\b(\\d{1,12})\\b");
     private static final Pattern SET_USER_ROLE_PATTERN = Pattern.compile(
             "用户\\s*([A-Za-z0-9@._-]{2,64})\\s*(?:设为|设置成|设置|改成|变成|调整为)\\s*(超级管理员|管理员|普通用户|ADMIN|USER)");
+    private static final Pattern GREETING_PATTERN = Pattern.compile("^(你好|您好|嗨|哈喽|hello|hi|hey)$",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern CAPABILITY_PATTERN = Pattern.compile(
+            "^(你能做什么|你会什么|你可以做什么|能帮我做什么|介绍一下你自己|你是谁)$");
 
     private final ChatClient chatClient;
     private final MaintenanceReadOnlyService knowledgeReadOnly;
@@ -113,6 +117,16 @@ public class SystemAgentService {
             return new MaintenanceAgentResult(pending.description() + "\n\n请点击确认后执行。确认有效期 10 分钟。",
                     List.of(), 1, false, pending);
         }
+        if (isGreeting(message)) {
+            return new MaintenanceAgentResult(
+                    "你好，我是识海系统管家。可以帮你查看用户、知识空间、文档任务、模型、日志和审计状态；涉及同步、重建、删除等操作时，我会先向你确认。你可以直接告诉我想了解什么，例如“最近有哪些失败任务？”。",
+                    List.of(), 1, true, null);
+        }
+        if (isCapabilityQuestion(message)) {
+            return new MaintenanceAgentResult(
+                    "我是识海系统管家，主要负责三类事情：\n\n- 查询系统运行状态、知识空间、用户、模型、文档任务、日志和审计记录。\n- 帮你定位失败任务、异常日志和索引问题。\n- 执行同步、重建、重试、删除等维护操作，但所有写操作都会先让你确认。\n\n你可以直接说“查看最近失败的任务”或“重建当前空间索引”。",
+                    List.of(), 1, true, null);
+        }
         SystemAgentTools tools = new SystemAgentTools(knowledgeReadOnly, systemReadOnly,
                 new MaintenanceAgentContext(user, context));
         long startedAt = System.nanoTime();
@@ -134,6 +148,18 @@ public class SystemAgentService {
             }
             throw exception;
         }
+    }
+
+    private boolean isGreeting(String message) {
+        if (message == null) return false;
+        String normalized = message.strip().replaceAll("[\\p{P}\\p{Z}\\s]+", "");
+        return GREETING_PATTERN.matcher(normalized).matches();
+    }
+
+    private boolean isCapabilityQuestion(String message) {
+        if (message == null) return false;
+        String normalized = message.strip().replaceAll("[\\p{P}\\p{Z}\\s]+", "");
+        return CAPABILITY_PATTERN.matcher(normalized).matches();
     }
 
     public MaintenanceWriteResult confirm(AppUser user, WorkspaceAccessContext context, String token) {

@@ -337,7 +337,8 @@ function reset() {
       </div>
     </div>
 
-    <div v-if="suggestions.length" class="agent-chat-suggestions" aria-label="常见问题">
+    <div v-if="suggestions.length && !question && !answer && !loading && !confirming"
+         class="agent-chat-suggestions" aria-label="常见问题">
       <button v-for="suggestion in suggestions" :key="suggestion" type="button"
               :disabled="busy" @click="ask(suggestion)">{{ suggestion }}</button>
     </div>

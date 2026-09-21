@@ -36,6 +36,8 @@ public class MaintenanceAgentService {
             """;
     private static final Duration CONFIRMATION_TTL = Duration.ofMinutes(10);
     private static final Pattern ID_PATTERN = Pattern.compile("\\b(?:[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}|(?:task|doc)[-_][A-Za-z0-9-]+)\\b");
+    private static final Pattern GREETING_PATTERN = Pattern.compile("^(你好|您好|嗨|哈喽|hello|hi|hey)$",
+            Pattern.CASE_INSENSITIVE);
 
     private final ChatClient chatClient;
     private final MaintenanceReadOnlyService readOnlyService;
@@ -83,6 +85,11 @@ public class MaintenanceAgentService {
             return new MaintenanceAgentResult(pending.description() + "\n\n请点击确认后执行。确认有效期 10 分钟。",
                     List.of(), 1, false, pending);
         }
+        if (isGreeting(message)) {
+            return new MaintenanceAgentResult(
+                    "你好，我是识海知识库助手。可以帮你查看当前空间的文档处理、索引和失败任务，也可以解释维护操作的影响。你可以直接问我“为什么这篇文档还没索引成功？”。",
+                    List.of(), 1, true, null);
+        }
         MaintenanceAgentTools tools = new MaintenanceAgentTools(readOnlyService,
                 new MaintenanceAgentContext(user, context));
         long startedAt = System.nanoTime();
@@ -104,6 +111,12 @@ public class MaintenanceAgentService {
             }
             throw exception;
         }
+    }
+
+    private boolean isGreeting(String message) {
+        if (message == null) return false;
+        String normalized = message.strip().replaceAll("[\\p{P}\\p{Z}\\s]+", "");
+        return GREETING_PATTERN.matcher(normalized).matches();
     }
 
     public MaintenanceWriteResult confirm(AppUser user, com.example.workbench.workspace.WorkspaceAccessContext context,
