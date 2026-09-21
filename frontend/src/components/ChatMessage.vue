@@ -18,7 +18,7 @@ const props = defineProps({
 defineEmits(['retry'])
 
 const expandedUserMessage = ref(false)
-const userMessageLimit = 480
+const userMessageLimit = 180
 
 const displayContent = computed(() => (props.message.content || '')
   .replace(/^\s*以上回答基于通用大模型知识，不是当前知识库内容。\s*$/gm, '')
@@ -30,6 +30,7 @@ const userMessageContent = computed(() => {
   if (!isLongUserMessage.value || expandedUserMessage.value) return content
   return `${content.slice(0, userMessageLimit)}…`
 })
+const userMessageLineCount = computed(() => (props.message.content || '').split(/\r?\n/).length)
 const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
@@ -75,7 +76,7 @@ async function copyCode(event) {
 <template>
   <article v-if="message.role === 'user' || (message.role === 'assistant' && (message.streaming || message.content || message.error))" class="message" :class="`message-${message.role}`">
     <div class="avatar">{{ roleLabel }}</div>
-    <div class="message-body">
+    <div class="message-body" :class="{ 'error-only': isAssistant && message.error && !message.content }">
       <div class="message-meta">
         <strong>{{ roleLabel }}</strong>
         <time v-if="timeLabel" :datetime="message.createdAt">{{ timeLabel }}</time>
@@ -86,7 +87,7 @@ async function copyCode(event) {
          <span>{{ userMessageContent }}</span>
          <button v-if="isLongUserMessage" type="button" class="message-expand"
                  @click="expandedUserMessage = !expandedUserMessage">
-           {{ expandedUserMessage ? '收起原文' : '展开原文' }}
+           {{ expandedUserMessage ? '收起原文' : `展开原文 · ${message.content.length} 字 / ${userMessageLineCount} 行` }}
          </button>
        </div>
        <div v-else-if="message.content" class="markdown-body" @click="copyCode" v-html="html"></div>
@@ -113,6 +114,14 @@ async function copyCode(event) {
 .message-alert.error {
   display: grid;
   gap: 4px;
+}
+
+.message-body.error-only {
+  max-width: min(520px, 88%);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .message-retry {

@@ -31,6 +31,18 @@ export function apiErrorFromException(error, fallbackMessage = '请求失败，�
     return error
   }
 
+  // SSE 错误事件使用 Error 携带后端返回的状态和用户提示，不能退回成笼统的 fallback。
+  if (error?.message && (error.status != null || error.errorType || error.retryable != null)) {
+    return new ApiError({
+      message: error.message,
+      status: error.status ?? null,
+      requestId: error.requestId || '',
+      details: error.traceId ? `traceId: ${error.traceId}` : '',
+      retryable: error.retryable === true,
+      cause: error
+    })
+  }
+
   if (error?.name === 'AbortError') {
     return new ApiError({
       message: '模型服务响应超时，请稍后重试。',
@@ -50,6 +62,9 @@ export function apiErrorFromException(error, fallbackMessage = '请求失败，�
 
 export function formatApiError(error, fallbackMessage) {
   const apiError = apiErrorFromException(error, fallbackMessage)
+  if (apiError.status === 413 || apiError.message?.includes('message 不能超过 4000')) {
+    return '问题内容超过 4000 字，请删减日志后重试。'
+  }
   return apiError.message
 }
 

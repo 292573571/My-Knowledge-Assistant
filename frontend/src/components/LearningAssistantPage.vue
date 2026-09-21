@@ -282,7 +282,7 @@ async function send(content) {
     }
   } catch (exception) {
     if (requestId !== activeRequestId || exception?.name === 'AbortError') return
-    assistant.error = formatApiError(exception, '学习助手暂时无法回答。')
+    assistant.error = formatApiError(exception, '学习助手暂时无法回答。请检查模型配置或稍后重试。')
     error.value = assistant.error
   } finally {
     assistant.streaming = false
@@ -359,10 +359,17 @@ function streamMessage(sessionId, payload, assistant) {
           }
           settled = true
           if (closeStream.value?.close === activeClose) closeStream.value = null
-          reject(data.apiError || Object.assign(new Error(data.message || '学习助手回答失败。'), {
-            status: data.status || null,
-            requestId: data.requestId || ''
-          }))
+          if (data.apiError) {
+            reject(data.apiError)
+          } else {
+            const error = new Error(data.message || '学习助手回答失败。')
+            error.status = data.status || null
+            error.requestId = data.requestId || ''
+            error.retryable = data.retryable === true
+            error.errorType = data.errorType || ''
+            error.traceId = data.traceId || ''
+            reject(error)
+          }
         }
       }, {
         streamId: assistant.streamId,

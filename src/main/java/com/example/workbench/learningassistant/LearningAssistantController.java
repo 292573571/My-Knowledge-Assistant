@@ -362,9 +362,10 @@ public class LearningAssistantController {
         emitter.send(SseEmitter.event().id(String.valueOf(chunk.seq())).name(chunk.event()).data(chunk.data()));
     }
 
-    private Map<String, Object> errorPayload(Exception exception, String requestId) {
+    private Map<String, Object> errorPayload(Throwable exception, String requestId) {
         Map<String, Object> payload = new java.util.HashMap<>();
-        if (exception instanceof ModelProviderException provider) {
+        ModelProviderException provider = findCause(exception, ModelProviderException.class);
+        if (provider != null) {
             payload.put("message", provider.getUserMessage());
             payload.put("errorType", provider.getErrorCode());
             payload.put("status", provider.getHttpStatus());
@@ -383,16 +384,55 @@ public class LearningAssistantController {
             payload.put("requestId", requestId);
             return payload;
         }
-        payload.put("message", exception instanceof ResponseStatusException response && response.getReason() != null
-                ? response.getReason() : "学习助手处理失败,请稍后重试");
-        payload.put("errorType", exception.getClass().getSimpleName());
-        payload.put("requestId", requestId);
-        if (exception instanceof ResponseStatusException response) {
+        ResponseStatusException response = findCause(exception, ResponseStatusException.class);
+        if (response != null) {
+            payload.put("message", response.getReason() == null ? "学习助手处理失败,请稍后重试" : response.getReason());
+            payload.put("errorType", response.getClass().getSimpleName());
+            payload.put("requestId", requestId);
             int status = response.getStatusCode().value();
             payload.put("status", status);
             payload.put("retryable", status == 408 || status == 429 || status >= 500);
+            return payload;
         }
+        if (isModelOrNetworkFailure(exception)) {
+            payload.put("message", "模型服务暂时不可用，请稍后重试或到「模型配置」切换其他对话模型。");
+            payload.put("errorType", "model_service_unavailable");
+            payload.put("status", HttpStatus.BAD_GATEWAY.value());
+            payload.put("retryable", true);
+            payload.put("requestId", requestId);
+            return payload;
+        }
+        payload.put("message", "学习助手处理失败,请稍后重试");
+        payload.put("errorType", exception == null ? "unknown" : exception.getClass().getSimpleName());
+        payload.put("requestId", requestId);
         return payload;
+    }
+
+    private <T extends Throwable> T findCause(Throwable throwable, Class<T> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) return type.cast(current);
+            if (current.getCause() == current) break;
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private boolean isModelOrNetworkFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String name = current.getClass().getName();
+            if (name.contains("AiModelCallException")
+                    || name.contains("WebClient")
+                    || name.contains("ResourceAccessException")
+                    || name.contains("ConnectException")
+                    || name.contains("SocketException")) {
+                return true;
+            }
+            if (current.getCause() == current) break;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static boolean isTimeoutException(Throwable throwable) {

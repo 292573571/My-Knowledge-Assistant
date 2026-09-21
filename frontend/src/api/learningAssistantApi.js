@@ -1,4 +1,4 @@
-import { apiErrorFromException, apiErrorFromResponse } from './apiError'
+import { ApiError, apiErrorFromException, apiErrorFromResponse } from './apiError'
 import { authHeaders } from './authApi'
 import { getActiveWorkspaceId } from './workspaceApi'
 
@@ -43,6 +43,33 @@ export function deleteLearningSession(sessionId) {
   }, '删除学习会话失败。')
 }
 
+async function errorFromFailedStream(response) {
+  const contentType = response.headers.get('Content-Type') || ''
+  if (!contentType.includes('text/event-stream')) {
+    return apiErrorFromResponse(response, '学习助手回答失败。')
+  }
+  const text = await response.text().catch(() => '')
+  const payload = parseSseDataPayload(text)
+  return new ApiError({
+    message: payload?.message || '学习助手回答失败。',
+    status: response.status,
+    requestId: response.headers.get('X-Request-Id') || '',
+    retryable: payload?.retryable === true
+  })
+}
+
+function parseSseDataPayload(text) {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue
+    try {
+      return JSON.parse(line.substring(5).trim())
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 export function streamLearningMessage(sessionId, payload, onEvent, options = {}) {
   const controller = new AbortController()
   let sawTerminalEvent = false
@@ -60,7 +87,7 @@ export function streamLearningMessage(sessionId, payload, onEvent, options = {})
     body: JSON.stringify({ workspaceId: getActiveWorkspaceId(), ...payload }),
     signal: controller.signal
   }).then(async response => {
-    if (!response.ok) throw await apiErrorFromResponse(response, '学习助手回答失败。')
+    if (!response.ok) throw await errorFromFailedStream(response)
     if (!response.body) throw apiErrorFromException(new Error('后端没有返回回答流。'), '后端没有返回回答流。')
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8', { fatal: true })
