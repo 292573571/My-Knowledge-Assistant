@@ -62,8 +62,8 @@ export function apiErrorFromException(error, fallbackMessage = '请求失败，�
 
 export function formatApiError(error, fallbackMessage) {
   const apiError = apiErrorFromException(error, fallbackMessage)
-  if (apiError.status === 413 || apiError.message?.includes('message 不能超过 4000')) {
-    return '问题内容超过 4000 字，请删减日志后重试。'
+  if (apiError.status === 413 || apiError.message?.includes('message 不能超过 32000')) {
+    return '问题内容超过 32000 字，请删减后重试。'
   }
   return apiError.message
 }

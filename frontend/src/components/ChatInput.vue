@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
     <textarea
       v-model="text"
       :disabled="disabled"
-      maxlength="4000"
+      maxlength="32000"
       rows="1"
       placeholder="问点什么，或从知识库中检索答案..."
       @keydown="onKeydown"

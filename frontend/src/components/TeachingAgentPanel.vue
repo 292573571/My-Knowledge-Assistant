@@ -305,9 +305,9 @@ onMounted(loadTeachingProgress)
             </div>
           </header>
           <form @submit.prevent="ask()">
-            <textarea v-model="message" maxlength="4000" rows="5" :disabled="loading" placeholder="例如：请用一个生活中的例子解释 Agent 如何选择工具。" aria-label="教学问题"></textarea>
+            <textarea v-model="message" maxlength="32000" rows="5" :disabled="loading" placeholder="例如：请用一个生活中的例子解释 Agent 如何选择工具。" aria-label="教学问题"></textarea>
             <div class="teaching-form-footer">
-              <small>{{ message.length }} / 4000 · 当前空间：{{ workspaceName }}</small>
+              <small>{{ message.length }} / 32000 · 当前空间：{{ workspaceName }}</small>
               <button type="submit" :disabled="loading || !topic.trim() || !message.trim() || !props.workspace?.id">
                 {{ loading ? '正在组织讲解...' : '开始讲解' }}
               </button>

@@ -32,6 +32,8 @@ import com.example.workbench.pagination.PageResponse;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,10 @@ import org.springframework.web.server.ResponseStatusException;
 public class LearningAssistantService {
     private static final Pattern GUIDED_INTENT = Pattern.compile(
             "(教我|讲解|解释(?:一下|一下子)?|带我学|开始学|学习一下|检查我|考考我|练习一下|做练习)");
+    private static final int MODEL_INPUT_MAX_CHARS = 24_000;
+    private static final int MODEL_INPUT_HEAD_CHARS = 16_000;
+    private static final int MODEL_INPUT_TAIL_CHARS = 8_000;
+    private static final Logger log = LoggerFactory.getLogger(LearningAssistantService.class);
     private final ConversationService conversationService;
     private final WorkspaceService workspaceService;
     private final com.example.workbench.workbench.WorkbenchChatService chatService;
@@ -119,6 +125,7 @@ public class LearningAssistantService {
         String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name(), String.valueOf(request.modelId()));
         return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
             requireRunning(execution);
+            String modelInput = guardModelInput(request.message());
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
                 String topic = null;
                 conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
@@ -126,7 +133,7 @@ public class LearningAssistantService {
                         "teaching", request.message());
                 TeachingAgentResult result = teachingService.chat(user, access,
                         new TeachingAgentRequest(access.workspaceId(), sessionId, topic,
-                                request.normalizedUserLevel(), request.message()),
+                                request.normalizedUserLevel(), modelInput),
                         () -> execution != null && execution.isCancelled());
                 requireRunning(execution);
                 workspaceService.access(user, access.workspaceId());
@@ -138,7 +145,7 @@ public class LearningAssistantService {
                 return LearningAssistantResponse.teaching(result, intent);
             }
             WorkbenchChatResponse result = chatService.chat(user,
-                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()));
+                    new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), modelInput));
             requireRunning(execution);
             workspaceService.access(user, access.workspaceId());
             session.touch(LearningMode.CHAT, null, "CHAT", "ACTIVE");
@@ -164,6 +171,7 @@ public class LearningAssistantService {
         String hash = hash(request.message(), mode.name(), request.normalizedUserLevel().name(), String.valueOf(request.modelId()));
         return idempotent(session, request.clientRequestId(), "MESSAGE", hash, () -> {
             requireRunning(execution);
+            String modelInput = guardModelInput(request.message());
             if (mode == LearningMode.GUIDED || mode == LearningMode.REVIEW || mode == LearningMode.PRACTICE) {
                 String topic = null;
                 conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
@@ -171,7 +179,7 @@ public class LearningAssistantService {
                         "teaching", request.message());
                 TeachingAgentResult result = teachingService.streamChat(user, access,
                         new TeachingAgentRequest(access.workspaceId(), sessionId, topic,
-                                request.normalizedUserLevel(), request.message()),
+                                request.normalizedUserLevel(), modelInput),
                         onToken,
                         () -> execution != null && execution.isCancelled());
                 requireRunning(execution);
@@ -187,7 +195,7 @@ public class LearningAssistantService {
                 return response;
             }
             WorkbenchChatResponse result = chatService.streamChat(user,
-                     new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), request.message()),
+                     new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), modelInput),
                      onToken, onRoute, onSources);
             requireRunning(execution);
             workspaceService.access(user, access.workspaceId());
@@ -283,6 +291,18 @@ public class LearningAssistantService {
             if (exception.getStatusCode() == HttpStatus.NOT_FOUND) return null;
             throw exception;
         }
+    }
+
+    String guardModelInput(String message) {
+        if (message == null || message.length() <= MODEL_INPUT_MAX_CHARS) {
+            return message;
+        }
+        int omitted = message.length() - MODEL_INPUT_HEAD_CHARS - MODEL_INPUT_TAIL_CHARS;
+        log.warn("学习助手输入超过模型单次上限 chars={} head={} tail={}", message.length(),
+                MODEL_INPUT_HEAD_CHARS, MODEL_INPUT_TAIL_CHARS);
+        return message.substring(0, MODEL_INPUT_HEAD_CHARS)
+                + "\n\n...(中间省略 " + omitted + " 个字符)...\n\n"
+                + message.substring(message.length() - MODEL_INPUT_TAIL_CHARS);
     }
 
     private LearningIntent resolveIntent(LearningAssistantMessageRequest request) {

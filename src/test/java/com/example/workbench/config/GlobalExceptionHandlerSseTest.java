@@ -19,7 +19,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 
 class GlobalExceptionHandlerSseTest {
 
-    private static final String MESSAGE = "message 不能超过 4000 个字符";
+    private static final String MESSAGE = "message 不能超过 32000 个字符";
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
