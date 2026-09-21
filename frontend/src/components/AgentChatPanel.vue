@@ -27,6 +27,7 @@ const props = defineProps({
 const uid = Math.random().toString(36).slice(2, 8)
 const titleId = `agent-title-${uid}`
 
+const draft = ref('')
 const question = ref('')
 const answer = ref(null)
 const error = ref('')
@@ -146,6 +147,7 @@ async function ask(message = question.value) {
   trackedTasks.value = []
   taskProgressError.value = ''
   question.value = normalized
+  draft.value = ''
   error.value = ''
   answer.value = null
   showTrace.value = false
@@ -162,7 +164,13 @@ async function ask(message = question.value) {
 }
 
 function handleSubmit() {
-  ask()
+  ask(draft.value)
+}
+
+function handleKeydown(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  handleSubmit()
 }
 
 async function confirmAction() {
@@ -198,6 +206,7 @@ function taskStatusLabel(status) {
 
 function reset() {
   stopTaskPolling()
+  draft.value = ''
   question.value = ''
   answer.value = null
   error.value = ''
@@ -344,9 +353,10 @@ function reset() {
     </div>
 
     <form class="agent-chat-composer" @submit.prevent="handleSubmit">
-      <textarea v-model="question" rows="2" :disabled="busy"
-                :placeholder="placeholder" :aria-label="`向${title}提问`"></textarea>
-      <button type="submit" :disabled="busy || !question.trim()">
+      <textarea v-model="draft" rows="2" :disabled="busy"
+                :placeholder="placeholder" :aria-label="`向${title}提问`"
+                @keydown="handleKeydown"></textarea>
+      <button type="submit" :disabled="busy || !draft.trim()">
         {{ busy ? (confirming ? '执行中…' : loadingLabel) : sendLabel }}
       </button>
     </form>

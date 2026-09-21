@@ -17,8 +17,8 @@ const welcome = computed(() => isAdmin.value
 const sendLabel = computed(() => isAdmin.value ? '询问管家' : '提问')
 const loadingLabel = computed(() => isAdmin.value ? '查询中…' : '查询中…')
 const placeholder = computed(() => isAdmin.value
-  ? '例如：最近有哪些失败任务和异常日志？'
-  : '例如：上传文档后一直没索引成功，可能是什么原因？')
+  ? '输入问题，按回车发送；Shift + 回车换行'
+  : '输入问题，按回车发送；Shift + 回车换行')
 const suggestions = computed(() => isAdmin.value
   ? ['系统现在整体运行状态怎么样？', '最近有哪些失败的文档处理任务？', '最近有没有异常日志或失败的审计事件？']
   : [])
