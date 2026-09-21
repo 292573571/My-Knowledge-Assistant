@@ -36,6 +36,7 @@ function close() {
       class="floating-agent-button"
       :aria-label="label"
       :aria-expanded="isOpen"
+      :title="title"
       @click="toggle"
     >
       <span class="floating-agent-icon" aria-hidden="true">
