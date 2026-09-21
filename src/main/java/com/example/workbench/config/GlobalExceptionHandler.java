@@ -20,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -72,6 +73,19 @@ public class GlobalExceptionHandler {
                 exception.getErrorCode(), exception.getTraceId(), exception.getUserMessage());
         return respond(request, response, HttpStatus.valueOf(exception.getHttpStatus()),
                 exception.getUserMessage(), exception.getErrorCode(), exception.isRetryable());
+    }
+
+    /**
+     * 静态资源/未知路径 404:浏览器探测(favicon.ico、robots.txt)与爬虫扫描会高频触发,
+     * 这属于预期内的客户端行为,不再按 ERROR 记录,避免日志与日志中心被噪音刷屏。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<?> handleNoResourceFoundException(NoResourceFoundException exception,
+                                                             HttpServletRequest request,
+                                                             HttpServletResponse response) throws IOException {
+        log.debug("静态资源不存在 method={} uri={} resource={}",
+                request.getMethod(), request.getRequestURI(), exception.getResourcePath());
+        return respond(request, response, HttpStatus.NOT_FOUND, "资源不存在", "resource_not_found", false);
     }
 
     @ExceptionHandler(Exception.class)
