@@ -602,6 +602,29 @@ textarea:focus-visible,
   color: #e5eee1;
 }
 
+.message-user-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.message-expand {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  color: rgba(255, 255, 255, .82);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.message-expand:hover {
+  color: #fff;
+}
+
 .markdown-body :first-child {
   margin-top: 0;
 }

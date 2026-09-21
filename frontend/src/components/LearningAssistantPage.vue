@@ -53,6 +53,10 @@ const latestSources = computed(() => {
     : latestAssistant?.sources || []
   return groupSourcesByFile(sources)
 })
+const showPageError = computed(() => {
+  if (!error.value) return false
+  return !messages.value.some(message => message.role === 'assistant' && message.error === error.value)
+})
 const closeStream = ref(null)
 const streamingRequest = ref(false)
 const mobileSessionsOpen = ref(false)
@@ -566,17 +570,17 @@ function closeSourceOnPointerMove(event) {
             <div v-if="error" class="learning-empty-error" role="alert"><strong>暂时无法打开学习空间</strong><span>{{ error }}</span><button type="button" @click="loadSessions">重试</button></div>
           </div>
           <template v-for="message in messages" :key="message.id">
-            <ChatMessage :message="message" :streaming="message.streaming" />
+            <ChatMessage :message="message" :streaming="message.streaming" @retry="regenerate(message)" />
             <div v-if="message.role === 'assistant' && message.interrupted && message.streaming" class="stream-recovery hint" role="status">
               回答中断,正在自动恢复…
             </div>
-            <div v-else-if="message.role === 'assistant' && (message.error || message.interrupted) && !message.streaming" class="stream-recovery">
-              <span>{{ message.error || '回答未能完成。' }}</span>
+            <div v-else-if="message.role === 'assistant' && message.interrupted && !message.streaming" class="stream-recovery">
+              <span>回答未能完成。</span>
               <button type="button" class="stream-regenerate" :disabled="loading" @click="regenerate(message)">重新生成</button>
             </div>
           </template>
         </section>
-        <div v-if="error && messages.length" class="learning-assistant-error" role="alert"><span>{{ error }}</span></div>
+        <div v-if="showPageError && messages.length" class="learning-assistant-error" role="alert"><span>{{ error }}</span></div>
          <footer class="learning-input-bar">
            <button type="button" class="session-mobile-trigger" aria-label="打开会话列表" @click="mobileSessionsOpen = true"><span></span><span></span><span></span></button>
            <ChatInput :disabled="loading" :stoppable="streamingRequest" :mode="mode" :mode-labels="modeLabels" :model-id="selectedModelId" :model-options="modelOptions" :current-model="currentModel" :can-manage-models="Boolean(currentUser)" @send="send" @stop="stop" @update:mode="modeChanged" @update:model-id="modelChanged" @manage-models="emit('manage-models')" />

@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
 import { groupSourcesByFile } from '../utils/sources'
@@ -15,9 +15,21 @@ const props = defineProps({
   }
 })
 
+defineEmits(['retry'])
+
+const expandedUserMessage = ref(false)
+const userMessageLimit = 480
+
 const displayContent = computed(() => (props.message.content || '')
   .replace(/^\s*以上回答基于通用大模型知识，不是当前知识库内容。\s*$/gm, '')
   .trim())
+const isLongUserMessage = computed(() => props.message.role === 'user'
+  && (props.message.content || '').length > userMessageLimit)
+const userMessageContent = computed(() => {
+  const content = props.message.content || ''
+  if (!isLongUserMessage.value || expandedUserMessage.value) return content
+  return `${content.slice(0, userMessageLimit)}…`
+})
 const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
@@ -70,10 +82,18 @@ async function copyCode(event) {
       </div>
       <LoadingDots v-if="streaming && !message.content && !message.retrieving" />
       <div v-if="streaming && !message.content && message.retrieving" style="color: var(--site-muted, #718074); font-size: 13px; padding: 4px 0;">正在检索知识库，请稍候…</div>
-      <div v-if="message.content" class="markdown-body" @click="copyCode" v-html="html"></div>
+       <div v-if="message.content && message.role === 'user'" class="message-user-content">
+         <span>{{ userMessageContent }}</span>
+         <button v-if="isLongUserMessage" type="button" class="message-expand"
+                 @click="expandedUserMessage = !expandedUserMessage">
+           {{ expandedUserMessage ? '收起原文' : '展开原文' }}
+         </button>
+       </div>
+       <div v-else-if="message.content" class="markdown-body" @click="copyCode" v-html="html"></div>
       <div v-if="isAssistant && message.error" class="message-alert error">
         <strong>模型或后端调用失败</strong>
         <span>{{ message.error }}</span>
+        <button v-if="message.streaming === false" type="button" class="message-retry" @click="$emit('retry')">重新生成</button>
       </div>
       <div v-else-if="isAssistant && message.noRagMatch" class="message-alert warning">
         <strong>RAG 未命中</strong>
@@ -88,3 +108,26 @@ async function copyCode(event) {
     </div>
   </article>
 </template>
+
+<style scoped>
+.message-alert.error {
+  display: grid;
+  gap: 4px;
+}
+
+.message-retry {
+  justify-self: start;
+  margin-top: 6px;
+  padding: 5px 12px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.message-retry:hover {
+  background: rgb(255 255 255 / 45%);
+}
+</style>
