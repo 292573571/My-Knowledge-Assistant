@@ -74,14 +74,28 @@ class MaintenanceAgentServiceTest {
         WorkspaceAccessContext org = context(superAdmin, "org-1", WorkspaceType.ORG);
         WorkspaceAccessContext team = context(superAdmin, "team-1", WorkspaceType.TEAM);
         when(workspaceService.allWorkspaceAccesses(superAdmin)).thenReturn(List.of(org, team));
+        when(taskService.createMaintenance(org, DocumentTaskType.REBUILD, null))
+                .thenReturn(task("task-1", org.workspaceId()));
+        when(taskService.createMaintenance(team, DocumentTaskType.REBUILD, null))
+                .thenReturn(task("task-2", team.workspaceId()));
 
         MaintenanceAgentResult proposal = service.chat(superAdmin, org, "重建所有向量索引");
         MaintenanceWriteResult write = service.confirm(superAdmin, org,
                 proposal.pendingAction().confirmationToken());
 
         assertThat(write.answer()).contains("2 个知识空间");
+        assertThat(write.tasks()).containsExactly(
+                new MaintenanceTaskReference("task-1", "org-1"),
+                new MaintenanceTaskReference("task-2", "team-1"));
         verify(taskService).createMaintenance(org, DocumentTaskType.REBUILD, null);
         verify(taskService).createMaintenance(team, DocumentTaskType.REBUILD, null);
+    }
+
+    private static com.example.workbench.rag.DocumentTaskResponse task(String taskId, String workspaceId) {
+        return new com.example.workbench.rag.DocumentTaskResponse(taskId, DocumentTaskType.REBUILD,
+                com.example.workbench.rag.DocumentTaskStatus.QUEUED, "QUEUED", 5, workspaceId,
+                "重建空间索引", null, 0, 3, null, true, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                java.time.Instant.now(), null, null, false);
     }
 
     @Test

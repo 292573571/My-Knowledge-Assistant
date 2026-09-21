@@ -11,11 +11,15 @@ import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AuthFilter;
 import com.example.workbench.auth.SystemRole;
+import com.example.workbench.rag.DocumentTaskResponse;
+import com.example.workbench.rag.DocumentTaskStatus;
+import com.example.workbench.rag.DocumentTaskType;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceRole;
 import com.example.workbench.workspace.WorkspaceService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -80,12 +84,64 @@ class SystemAgentControllerTest {
         verify(agentService).chat(user, access, request.message());
     }
 
+    @Test
+    void rejectsTaskProgressForNonAdminBeforeResolvingWorkspace() {
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        HttpServletRequest httpRequest = authenticatedRequest(user);
+        SystemAgentTaskProgressRequest request = progressRequest();
+
+        assertThatThrownBy(() -> controller.taskProgress(request, httpRequest))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        verifyNoInteractions(agentService, workspaceService);
+    }
+
+    @Test
+    void resolvesEachTaskWorkspaceForRegularAdmin() {
+        AppUser user = new AppUser("ops", "Ops", "hash");
+        user.changeSystemRole(SystemRole.ADMIN);
+        HttpServletRequest httpRequest = authenticatedRequest(user);
+        WorkspaceAccessContext access = new WorkspaceAccessContext("user-1", "workspace-a", WorkspaceRole.OWNER);
+        DocumentTaskResponse expected = task();
+        when(workspaceService.access(user, "workspace-a")).thenReturn(access);
+        when(agentService.taskProgress(user, "task-1", access)).thenReturn(expected);
+
+        assertThat(controller.taskProgress(progressRequest(), httpRequest)).containsExactly(expected);
+        verify(workspaceService).access(user, "workspace-a");
+        verify(agentService).taskProgress(user, "task-1", access);
+    }
+
+    @Test
+    void resolvesSystemAccessForSuperAdminTaskProgress() {
+        AppUser user = new AppUser("admin", "Admin", "hash");
+        HttpServletRequest httpRequest = authenticatedRequest(user);
+        WorkspaceAccessContext access = new WorkspaceAccessContext("admin", "workspace-a", WorkspaceRole.OWNER);
+        DocumentTaskResponse expected = task();
+        when(workspaceService.systemAccess(user, "workspace-a")).thenReturn(access);
+        when(agentService.taskProgress(user, "task-1", access)).thenReturn(expected);
+
+        assertThat(controller.taskProgress(progressRequest(), httpRequest)).containsExactly(expected);
+        verify(workspaceService).systemAccess(user, "workspace-a");
+        verify(agentService).taskProgress(user, "task-1", access);
+    }
+
     private static MaintenanceAgentRequest request() {
         return new MaintenanceAgentRequest("workspace-a", "查询系统状态");
     }
 
     private static MaintenanceAgentResult result() {
         return new MaintenanceAgentResult("当前正常", List.of(), 1, true, null);
+    }
+
+    private static SystemAgentTaskProgressRequest progressRequest() {
+        return new SystemAgentTaskProgressRequest(List.of(
+                new MaintenanceTaskReference("task-1", "workspace-a")));
+    }
+
+    private static DocumentTaskResponse task() {
+        return new DocumentTaskResponse("task-1", DocumentTaskType.REBUILD, DocumentTaskStatus.RUNNING,
+                "INDEXING", 50, "workspace-a", "重建空间索引", null, 1, 3, null, true,
+                2, 1, 1, 0, 10, 0, 0, 0, 0, Instant.now(), Instant.now(), null, false);
     }
 
     private static HttpServletRequest authenticatedRequest(AppUser user) {

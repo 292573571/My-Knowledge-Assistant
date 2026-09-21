@@ -214,6 +214,10 @@ public class DocumentTaskService {
         return DocumentTaskResponse.from(saved);
     }
 
+    public DocumentTaskResponse status(String taskId, WorkspaceAccessContext access) {
+        return DocumentTaskResponse.from(visibleTask(taskId, access));
+    }
+
     /**
      * 读取上传任务对应的原始文件。
      *

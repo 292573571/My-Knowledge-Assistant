@@ -25,6 +25,7 @@ import com.example.workbench.modelconfig.AiModelService;
 import com.example.workbench.modelconfig.AiModelType;
 import com.example.workbench.rag.DocumentIngestionService;
 import com.example.workbench.rag.DocumentTaskService;
+import com.example.workbench.rag.DocumentTaskType;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceRole;
 import com.example.workbench.workspace.WorkspaceService;
@@ -173,6 +174,20 @@ class SystemAgentServiceTest {
     }
 
     @Test
+    void confirmSingleWorkspaceActionRejectsRevokedAdmin() {
+        AppUser promoted = admin("ops-2");
+        WorkspaceAccessContext workspaceContext = context(promoted);
+        MaintenanceAgentResult proposal = service.chat(promoted, workspaceContext, "重建索引");
+        promoted.changeSystemRole(SystemRole.USER);
+
+        assertThatThrownBy(() -> service.confirm(promoted, workspaceContext,
+                proposal.pendingAction().confirmationToken()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("系统管理员");
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
     void keepsRebuildAllIntentForSuperAdmin() {
         when(workspaceService.allWorkspaceAccesses(superAdmin)).thenReturn(List.of(context(superAdmin)));
 
@@ -180,6 +195,26 @@ class SystemAgentServiceTest {
 
         assertThat(result.pendingAction()).isNotNull();
         assertThat(result.pendingAction().action()).isEqualTo(MaintenanceAction.REBUILD_ALL_INDEX);
+    }
+
+    @Test
+    void confirmRebuildAllReturnsTaskReferencesForProgressTracking() {
+        WorkspaceAccessContext first = context(superAdmin);
+        WorkspaceAccessContext second = new WorkspaceAccessContext("admin", "team-2",
+                WorkspaceRole.OWNER, WorkspaceType.TEAM);
+        when(workspaceService.allWorkspaceAccesses(superAdmin)).thenReturn(List.of(first, second));
+        when(taskService.createMaintenance(first, DocumentTaskType.REBUILD, null))
+                .thenReturn(task("task-1", first.workspaceId()));
+        when(taskService.createMaintenance(second, DocumentTaskType.REBUILD, null))
+                .thenReturn(task("task-2", second.workspaceId()));
+
+        MaintenanceAgentResult proposal = service.chat(superAdmin, first, "重建所有向量索引");
+        MaintenanceWriteResult result = service.confirm(superAdmin, first,
+                proposal.pendingAction().confirmationToken());
+
+        assertThat(result.tasks()).containsExactly(
+                new MaintenanceTaskReference("task-1", first.workspaceId()),
+                new MaintenanceTaskReference("task-2", second.workspaceId()));
     }
 
     @Test
@@ -202,5 +237,12 @@ class SystemAgentServiceTest {
     private static WorkspaceAccessContext context(AppUser user) {
         return new WorkspaceAccessContext(UserConversationScope.ownerId(user), "personal-1",
                 WorkspaceRole.OWNER, WorkspaceType.PERSONAL);
+    }
+
+    private static com.example.workbench.rag.DocumentTaskResponse task(String taskId, String workspaceId) {
+        return new com.example.workbench.rag.DocumentTaskResponse(taskId, DocumentTaskType.REBUILD,
+                com.example.workbench.rag.DocumentTaskStatus.QUEUED, "QUEUED", 5, workspaceId,
+                "重建空间索引", null, 0, 3, null, true, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                Instant.now(), null, null, false);
     }
 }

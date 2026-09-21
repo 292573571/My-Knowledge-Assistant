@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderMarkdown } from '../utils/markdown'
 import { formatApiError } from '../api/apiError'
 
@@ -19,6 +19,7 @@ const props = defineProps({
   send: { type: Function, required: true },
   confirm: { type: Function, default: null },
   confirmHint: { type: Function, default: null },
+  taskProgress: { type: Function, default: null },
   showHeader: { type: Boolean, default: true }
 })
 
@@ -33,32 +34,130 @@ const loading = ref(false)
 const confirming = ref(false)
 const showTrace = ref(false)
 const threadEl = ref(null)
+const elapsedSeconds = ref(0)
+const progressStage = ref(0)
+const trackedTaskRefs = ref([])
+const trackedTasks = ref([])
+const taskProgressError = ref('')
+const taskPolling = ref(false)
+let progressTimer = null
+let taskPollTimer = null
+let taskPollGeneration = 0
+let taskPollFailures = 0
 
 const answerHtml = computed(() => renderMarkdown(answer.value?.answer || ''))
 const hasThread = computed(() => Boolean(question.value || answer.value || loading.value || props.welcome))
 const traces = computed(() => answer.value?.toolCalls || answer.value?.traces || [])
 const pending = computed(() => answer.value?.pendingAction?.confirmationToken
   ? answer.value.pendingAction : null)
+const busy = computed(() => loading.value || confirming.value)
+const progressTitle = computed(() => confirming.value ? '正在执行已确认操作' : props.loadingLabel)
+const progressSteps = computed(() => confirming.value
+  ? ['确认请求已发送', '正在校验权限并提交任务', '等待服务返回执行结果']
+  : ['问题已发送', 'Agent 正在分析并调用工具', '等待服务返回回答'])
+const backgroundProgress = computed(() => {
+  const tasks = trackedTasks.value
+  if (!tasks.length) return null
+  const terminal = tasks.filter(task => ['SUCCEEDED', 'FAILED'].includes(task.status)).length
+  const failed = tasks.filter(task => task.status === 'FAILED').length
+  const running = tasks.filter(task => task.status === 'RUNNING').length
+  const queued = tasks.length - terminal - running
+  const progress = Math.round(tasks.reduce((total, task) => total
+    + (['SUCCEEDED', 'FAILED'].includes(task.status) ? 100 : (task.progress || 0)), 0) / tasks.length)
+  return { total: tasks.length, terminal, failed, running, queued, progress, done: terminal === tasks.length }
+})
 
-watch([loading, answer, () => error.value], async () => {
+watch([loading, confirming, answer, () => error.value], async () => {
   await nextTick()
   if (threadEl.value) threadEl.value.scrollTop = threadEl.value.scrollHeight
 })
 
+function startProgress() {
+  stopProgress()
+  elapsedSeconds.value = 0
+  progressStage.value = 1
+  progressTimer = window.setInterval(() => {
+    elapsedSeconds.value += 1
+    if (elapsedSeconds.value >= 4) progressStage.value = 2
+  }, 1000)
+}
+
+function stopProgress() {
+  if (progressTimer) window.clearInterval(progressTimer)
+  progressTimer = null
+}
+
+function stopTaskPolling() {
+  taskPollGeneration += 1
+  taskPollFailures = 0
+  if (taskPollTimer) window.clearTimeout(taskPollTimer)
+  taskPollTimer = null
+  taskPolling.value = false
+}
+
+async function refreshTaskProgress() {
+  if (!props.taskProgress || !trackedTaskRefs.value.length) {
+    taskPolling.value = false
+    return
+  }
+  const generation = taskPollGeneration
+  taskPolling.value = true
+  try {
+    const tasks = await props.taskProgress(trackedTaskRefs.value)
+    if (generation !== taskPollGeneration) return
+    trackedTasks.value = tasks
+    taskPollFailures = 0
+    taskProgressError.value = ''
+    if (trackedTasks.value.some(task => !['SUCCEEDED', 'FAILED'].includes(task.status))) {
+      taskPollTimer = window.setTimeout(refreshTaskProgress, 2000)
+    } else {
+      taskPolling.value = false
+    }
+  } catch (exception) {
+    if (generation !== taskPollGeneration) return
+    taskProgressError.value = formatApiError(exception, '任务进度暂时无法获取。')
+    taskPollFailures += 1
+    if (exception?.retryable && taskPollFailures <= 3) {
+      taskPollTimer = window.setTimeout(refreshTaskProgress, 5000 * taskPollFailures)
+    } else {
+      taskPolling.value = false
+    }
+  }
+}
+
+async function trackTasks(tasks) {
+  stopTaskPolling()
+  trackedTaskRefs.value = Array.isArray(tasks) ? tasks : []
+  trackedTasks.value = []
+  taskProgressError.value = ''
+  if (trackedTaskRefs.value.length) await refreshTaskProgress()
+}
+
+onBeforeUnmount(() => {
+  stopProgress()
+  stopTaskPolling()
+})
+
 async function ask(message = question.value) {
   const normalized = (message || '').trim()
-  if (!normalized || loading.value) return
+  if (!normalized || busy.value) return
+  stopTaskPolling()
+  trackedTaskRefs.value = []
+  trackedTasks.value = []
+  taskProgressError.value = ''
   question.value = normalized
   error.value = ''
   answer.value = null
   showTrace.value = false
   loading.value = true
+  startProgress()
   try {
     answer.value = await props.send(normalized)
   } catch (exception) {
     error.value = formatApiError(exception, '助手暂时无法回答。')
   } finally {
     loading.value = false
+    stopProgress()
   }
 }
 
@@ -70,13 +169,16 @@ async function confirmAction() {
   if (!props.confirm || !pending.value || confirming.value) return
   confirming.value = true
   error.value = ''
+  startProgress()
   try {
     const result = await props.confirm(pending.value.confirmationToken)
     answer.value = { ...answer.value, answer: result.answer, pendingAction: null, readOnly: false }
+    trackTasks(result.tasks)
   } catch (exception) {
     error.value = formatApiError(exception, '操作执行失败。')
   } finally {
     confirming.value = false
+    stopProgress()
   }
 }
 
@@ -84,11 +186,25 @@ function hint(action) {
   return props.confirmHint ? props.confirmHint(action) : '请确认后才会执行。'
 }
 
+function taskStatusLabel(status) {
+  return {
+    QUEUED: '排队中',
+    RUNNING: '运行中',
+    RETRY_WAIT: '等待重试',
+    SUCCEEDED: '已完成',
+    FAILED: '失败'
+  }[status] || status
+}
+
 function reset() {
+  stopTaskPolling()
   question.value = ''
   answer.value = null
   error.value = ''
   showTrace.value = false
+  trackedTaskRefs.value = []
+  trackedTasks.value = []
+  taskProgressError.value = ''
 }
 </script>
 
@@ -130,8 +246,19 @@ function reset() {
 
       <div v-if="loading" class="agent-msg agent-msg-bot">
         <div class="agent-avatar">AI</div>
-        <div class="agent-bubble">
-          <span class="agent-typing" aria-label="正在生成回答"><i></i><i></i><i></i></span>
+        <div class="agent-bubble agent-progress-card" role="status" aria-live="polite">
+          <div class="agent-progress-heading">
+            <span class="agent-progress-spinner" aria-hidden="true"></span>
+            <strong>{{ progressTitle }}</strong>
+            <time>{{ elapsedSeconds }} 秒</time>
+          </div>
+          <div class="agent-progress-track" aria-hidden="true"><span></span></div>
+          <ol class="agent-progress-steps">
+            <li v-for="(step, index) in progressSteps" :key="step"
+                :class="{ done: index < progressStage, active: index === progressStage }">
+              <i aria-hidden="true"></i><span>{{ step }}</span>
+            </li>
+          </ol>
         </div>
       </div>
 
@@ -145,10 +272,24 @@ function reset() {
           <div class="markdown-body" v-html="answerHtml"></div>
 
           <div v-if="pending" class="maintenance-agent-confirmation">
-            <strong>{{ hint(pending.action) }}</strong>
-            <button type="button" :disabled="confirming" @click="confirmAction">
-              {{ confirming ? '执行中…' : '确认执行' }}
-            </button>
+            <template v-if="!confirming">
+              <strong>{{ hint(pending.action) }}</strong>
+              <button type="button" @click="confirmAction">确认执行</button>
+            </template>
+            <div v-else class="agent-confirm-progress" role="status" aria-live="polite">
+              <div class="agent-progress-heading">
+                <span class="agent-progress-spinner" aria-hidden="true"></span>
+                <strong>{{ progressTitle }}</strong>
+                <time>{{ elapsedSeconds }} 秒</time>
+              </div>
+              <div class="agent-progress-track" aria-hidden="true"><span></span></div>
+              <ol class="agent-progress-steps">
+                <li v-for="(step, index) in progressSteps" :key="step"
+                    :class="{ done: index < progressStage, active: index === progressStage }">
+                  <i aria-hidden="true"></i><span>{{ step }}</span>
+                </li>
+              </ol>
+            </div>
           </div>
 
           <div v-if="traces.length" class="maintenance-agent-trace">
@@ -162,26 +303,56 @@ function reset() {
               </li>
             </ul>
           </div>
+
+          <section v-if="backgroundProgress" class="agent-task-progress" role="status" aria-live="polite">
+            <header>
+              <div>
+                <span>{{ backgroundProgress.done ? '后台任务已完成' : '后台任务执行中' }}</span>
+                <strong>{{ backgroundProgress.progress }}%</strong>
+              </div>
+              <small>{{ backgroundProgress.terminal }}/{{ backgroundProgress.total }} 个空间完成</small>
+            </header>
+            <div class="agent-task-progress-track" :aria-label="`后台任务进度 ${backgroundProgress.progress}%`">
+              <span :style="{ width: `${backgroundProgress.progress}%` }"></span>
+            </div>
+            <dl>
+              <div><dt>运行中</dt><dd>{{ backgroundProgress.running }}</dd></div>
+              <div><dt>排队中</dt><dd>{{ backgroundProgress.queued }}</dd></div>
+              <div><dt>已完成</dt><dd>{{ backgroundProgress.terminal - backgroundProgress.failed }}</dd></div>
+              <div :class="{ failed: backgroundProgress.failed }"><dt>失败</dt><dd>{{ backgroundProgress.failed }}</dd></div>
+            </dl>
+            <p v-if="taskPolling && !backgroundProgress.done"><span class="agent-live-dot"></span>每 2 秒自动更新</p>
+            <details class="agent-task-progress-details">
+              <summary>查看各空间进度</summary>
+              <ul>
+                <li v-for="task in trackedTasks" :key="task.taskId" :class="task.status.toLowerCase()">
+                  <code>{{ task.workspaceId }}</code>
+                  <span>{{ taskStatusLabel(task.status) }} · {{ task.progress }}%</span>
+                </li>
+              </ul>
+            </details>
+          </section>
+          <p v-if="taskProgressError" class="agent-task-progress-error">{{ taskProgressError }}</p>
         </div>
       </div>
     </div>
 
     <div v-if="suggestions.length" class="agent-chat-suggestions" aria-label="常见问题">
       <button v-for="suggestion in suggestions" :key="suggestion" type="button"
-              :disabled="loading" @click="ask(suggestion)">{{ suggestion }}</button>
+              :disabled="busy" @click="ask(suggestion)">{{ suggestion }}</button>
     </div>
 
     <form class="agent-chat-composer" @submit.prevent="handleSubmit">
-      <textarea v-model="question" rows="2" :disabled="loading"
+      <textarea v-model="question" rows="2" :disabled="busy"
                 :placeholder="placeholder" :aria-label="`向${title}提问`"></textarea>
-      <button type="submit" :disabled="loading || !question.trim()">
-        {{ loading ? loadingLabel : sendLabel }}
+      <button type="submit" :disabled="busy || !question.trim()">
+        {{ busy ? (confirming ? '执行中…' : loadingLabel) : sendLabel }}
       </button>
     </form>
 
     <p v-if="error" class="agent-chat-error" role="alert">{{ error }}</p>
     <div v-if="hasThread" class="agent-chat-footer">
-      <button type="button" :disabled="loading" @click="reset">清空对话</button>
+      <button type="button" :disabled="busy" @click="reset">清空对话</button>
     </div>
   </section>
 </template>

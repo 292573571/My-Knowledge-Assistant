@@ -4983,6 +4983,73 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
   30% { transform: translateY(-5px); opacity: 1; }
 }
 
+.agent-progress-card {
+  width: min(320px, 82vw);
+  padding: 14px 16px;
+  background: linear-gradient(145deg, #fffef9 0%, #f2f7ef 100%);
+}
+.agent-progress-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  color: var(--site-ink-soft);
+  font-size: 11.5px;
+}
+.agent-progress-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-progress-heading time { color: var(--site-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.agent-progress-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #bed0c0;
+  border-top-color: var(--site-green);
+  border-radius: 50%;
+  animation: agent-progress-spin .8s linear infinite;
+}
+.agent-progress-track {
+  height: 3px;
+  margin: 11px 0 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe8dc;
+}
+.agent-progress-track span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #4a9168, transparent);
+  animation: agent-progress-track 1.35s ease-in-out infinite;
+}
+.agent-progress-steps { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.agent-progress-steps li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: #8b978c;
+  font-size: 10.5px;
+  transition: color .2s ease;
+}
+.agent-progress-steps li i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  justify-self: center;
+  border: 1px solid #b8c5b7;
+  border-radius: 50%;
+  background: #f8faf5;
+}
+.agent-progress-steps li.done { color: #65806e; }
+.agent-progress-steps li.done i { border-color: #78a789; background: #78a789; }
+.agent-progress-steps li.active { color: var(--site-green); font-weight: 750; }
+.agent-progress-steps li.active i { border-color: var(--site-green); background: var(--site-green); box-shadow: 0 0 0 4px rgba(29, 89, 57, .1); }
+@keyframes agent-progress-spin { to { transform: rotate(360deg); } }
+@keyframes agent-progress-track {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(240%); }
+}
+
 .agent-chat-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
 .agent-chat-suggestions button {
   border: 1px solid #cfd8c8;
@@ -5033,6 +5100,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .agent-chat .maintenance-agent-confirmation { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; border: 1px solid #eed6a8; border-radius: 12px; padding: 10px 12px; color: #8a632b; background: #fff9ed; font-size: 11.5px; }
 .agent-chat .maintenance-agent-confirmation button { border: 0; border-radius: 8px; padding: 8px 13px; color: #fff; background: #b9762a; font-size: 11.5px; font-weight: 800; white-space: nowrap; }
 .agent-chat .maintenance-agent-confirmation button:disabled { cursor: wait; opacity: .55; }
+.agent-confirm-progress { width: 100%; color: var(--site-ink-soft); }
 
 .agent-chat .maintenance-agent-trace { margin-top: 12px; border-top: 1px solid var(--site-line-soft); padding-top: 10px; }
 .agent-chat .maintenance-agent-trace > button { border: 0; padding: 0; color: #5a70bd; background: transparent; font-size: 10.5px; font-weight: 750; }
@@ -5042,6 +5110,40 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .agent-chat .maintenance-agent-trace li span.succeeded { color: #2d8a62; }
 .agent-chat .maintenance-agent-trace li span.failed, .agent-chat .maintenance-agent-trace li span.rejected { color: #b24d57; }
 
+.agent-task-progress {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+  border: 1px solid #bed4c1;
+  border-radius: 13px;
+  padding: 12px;
+  color: var(--site-ink-soft);
+  background: linear-gradient(145deg, #f5faf3, #edf5eb);
+}
+.agent-task-progress header { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.agent-task-progress header div { display: flex; align-items: baseline; gap: 8px; }
+.agent-task-progress header span { font-size: 11px; font-weight: 750; }
+.agent-task-progress header strong { color: var(--site-green); font-size: 18px; font-variant-numeric: tabular-nums; }
+.agent-task-progress header small { color: var(--site-muted); font-size: 10px; }
+.agent-task-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: #d9e6d7; }
+.agent-task-progress-track span { display: block; min-width: 2px; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2f7952, #72a77f); transition: width .35s ease; }
+.agent-task-progress dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.agent-task-progress dl div { display: grid; gap: 2px; border-radius: 8px; padding: 7px 6px; text-align: center; background: rgba(255, 255, 255, .58); }
+.agent-task-progress dt { color: var(--site-muted); font-size: 9px; }
+.agent-task-progress dd { margin: 0; color: var(--site-ink); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.agent-task-progress dl div.failed dd { color: #b24d57; }
+.agent-task-progress p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--site-muted); font-size: 9.5px; }
+.agent-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #3c8c60; box-shadow: 0 0 0 3px rgba(60, 140, 96, .12); animation: agent-live-pulse 1.5s ease infinite; }
+.agent-task-progress-error { margin: 9px 0 0; color: #a33e47; font-size: 10.5px; }
+.agent-task-progress-details { border-top: 1px solid rgba(79, 116, 85, .18); padding-top: 8px; }
+.agent-task-progress-details summary { cursor: pointer; color: var(--site-green); font-size: 10px; font-weight: 750; }
+.agent-task-progress-details ul { display: grid; gap: 5px; max-height: 150px; overflow-y: auto; margin: 8px 0 0; padding: 0; list-style: none; }
+.agent-task-progress-details li { display: flex; justify-content: space-between; gap: 10px; border-radius: 7px; padding: 6px 7px; background: rgba(255, 255, 255, .55); font-size: 9.5px; }
+.agent-task-progress-details code { overflow: hidden; color: var(--site-ink-soft); text-overflow: ellipsis; white-space: nowrap; }
+.agent-task-progress-details li span { flex: 0 0 auto; color: var(--site-muted); font-variant-numeric: tabular-nums; }
+.agent-task-progress-details li.failed span { color: #b24d57; }
+@keyframes agent-live-pulse { 50% { opacity: .4; transform: scale(.82); } }
+
 @media (max-width: 760px) {
   .agent-chat { padding: 16px; border-radius: 16px; }
   .agent-chat-header { flex-direction: column; }
@@ -5050,6 +5152,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
   .agent-chat-composer { grid-template-columns: 1fr; }
   .agent-chat-composer button { width: 100%; }
   .agent-chat .maintenance-agent-confirmation { flex-direction: column; align-items: stretch; }
+  .agent-task-progress dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .agent-chat-footer { display: flex; justify-content: flex-end; }
@@ -5172,7 +5275,13 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .floating-agent-dialog .agent-chat-thread {
   max-height: min(360px, 40vh);
   min-height: 140px;
+  padding-right: 5px;
+  scrollbar-width: thin;
+  scrollbar-color: #b9c8b7 transparent;
 }
+
+.floating-agent-dialog .agent-chat-thread::-webkit-scrollbar { width: 5px; }
+.floating-agent-dialog .agent-chat-thread::-webkit-scrollbar-thumb { border-radius: 999px; background: #b9c8b7; }
 
 .floating-agent-dialog .agent-chat-suggestions {
   margin-top: -4px;

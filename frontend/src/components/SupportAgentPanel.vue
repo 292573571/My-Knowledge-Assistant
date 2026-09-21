@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import FloatingAgentChat from './FloatingAgentChat.vue'
 import { chatWithSupportAgent } from '../api/supportAgentApi'
-import { chatWithSystemAgent, confirmSystemAgentAction } from '../api/systemAgentApi'
+import { chatWithSystemAgent, confirmSystemAgentAction, fetchSystemAgentTaskProgress } from '../api/systemAgentApi'
 
 const props = defineProps({
   workspace: { type: Object, default: null },
@@ -26,9 +26,15 @@ const suggestions = computed(() => isAdmin.value
 const send = (message) => isAdmin.value
   ? chatWithSystemAgent(message, props.workspace?.id)
   : chatWithSupportAgent(message, props.workspace?.id)
-const confirm = (token) => isAdmin.value
-  ? confirmSystemAgentAction(token, props.workspace?.id)
-  : null
+const confirm = async (token) => {
+  if (!isAdmin.value) return null
+  const result = await confirmSystemAgentAction(token, props.workspace?.id)
+  if ((!result.tasks || !result.tasks.length) && result.taskId) {
+    return { ...result, tasks: [{ taskId: result.taskId, workspaceId: props.workspace?.id }] }
+  }
+  return result
+}
+const taskProgress = (tasks) => isAdmin.value ? fetchSystemAgentTaskProgress(tasks) : null
 
 function confirmHint(action) {
   if (action === 'REBUILD_ALL_INDEX') return '将为全部知识空间提交索引重建任务，可能耗时较长。'
@@ -50,6 +56,7 @@ function confirmHint(action) {
     :placeholder="placeholder"
     :confirm="isAdmin ? confirm : null"
     :confirm-hint="isAdmin ? confirmHint : null"
+    :task-progress="isAdmin ? taskProgress : null"
     :send="send"
   />
 </template>

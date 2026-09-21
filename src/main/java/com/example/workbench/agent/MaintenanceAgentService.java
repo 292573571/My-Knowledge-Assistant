@@ -119,26 +119,28 @@ public class MaintenanceAgentService {
             return switch (pending.action) {
                 case RETRY_TASK -> {
                     DocumentTaskResponse task = taskService.retry(pending.targetId, context, admin);
-                    yield new MaintenanceWriteResult("任务已重新进入处理队列。", pending.action, task.taskId(), false);
+                    yield taskResult("任务已重新进入处理队列。", pending.action, task);
                 }
                 case SYNC_WORKSPACE -> {
                     DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.SYNC, null);
-                    yield new MaintenanceWriteResult("增量同步任务已提交。", pending.action, task.taskId(), false);
+                    yield taskResult("增量同步任务已提交。", pending.action, task);
                 }
                 case REBUILD_INDEX -> {
                     DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.REBUILD, null);
-                    yield new MaintenanceWriteResult("索引重建任务已提交。", pending.action, task.taskId(), false);
+                    yield taskResult("索引重建任务已提交。", pending.action, task);
                 }
                 case REBUILD_ALL_INDEX -> {
                     // 全量重建是系统级写操作：确认时再校验一次超管，避免角色被降级后旧令牌仍然可用。
                     adminAuthorizationService.requireSuperAdmin(user);
                     List<com.example.workbench.workspace.WorkspaceAccessContext> accesses =
                             workspaceService.allWorkspaceAccesses(user);
+                    List<MaintenanceTaskReference> tasks = new java.util.ArrayList<>();
                     for (com.example.workbench.workspace.WorkspaceAccessContext access : accesses) {
-                        taskService.createMaintenance(access, DocumentTaskType.REBUILD, null);
+                        DocumentTaskResponse task = taskService.createMaintenance(access, DocumentTaskType.REBUILD, null);
+                        tasks.add(new MaintenanceTaskReference(task.taskId(), task.workspaceId()));
                     }
                     yield new MaintenanceWriteResult("已为 " + accesses.size() + " 个知识空间提交索引重建任务。",
-                            pending.action, null, false);
+                            pending.action, null, false, tasks);
                 }
                 case DELETE_DOCUMENT -> {
                     ingestionService.deleteDocument(pending.targetId, context, admin);
@@ -149,6 +151,11 @@ public class MaintenanceAgentService {
                         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该动作请通过系统管家确认");
             };
         });
+    }
+
+    private MaintenanceWriteResult taskResult(String answer, MaintenanceAction action, DocumentTaskResponse task) {
+        return new MaintenanceWriteResult(answer, action, task.taskId(), false,
+                List.of(new MaintenanceTaskReference(task.taskId(), task.workspaceId())));
     }
 
     private MaintenancePendingAction proposeWrite(AppUser user,

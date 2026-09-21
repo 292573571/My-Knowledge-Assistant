@@ -3,10 +3,12 @@ package com.example.workbench.agent;
 import com.example.workbench.auth.AdminAuthorizationService;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AuthFilter;
+import com.example.workbench.rag.DocumentTaskResponse;
 import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.workspace.WorkspaceService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,9 +44,19 @@ public class SystemAgentController {
 
     @PostMapping("/confirm")
     public MaintenanceWriteResult confirm(@Valid @RequestBody MaintenanceConfirmationRequest request,
-                                          HttpServletRequest httpRequest) {
+                                           HttpServletRequest httpRequest) {
         AppUser user = requireUser(httpRequest);
+        adminAuthorizationService.requireAdmin(user);
         return agentService.confirm(user, access(user, request.workspaceId()), request.confirmationToken());
+    }
+
+    @PostMapping("/tasks/progress")
+    public List<DocumentTaskResponse> taskProgress(
+            @Valid @RequestBody SystemAgentTaskProgressRequest request, HttpServletRequest httpRequest) {
+        AppUser user = requireUser(httpRequest);
+        adminAuthorizationService.requireAdmin(user);
+        return request.tasks().stream().map(task -> agentService.taskProgress(user, task.taskId(),
+                access(user, task.workspaceId()))).toList();
     }
 
     private static AppUser requireUser(HttpServletRequest request) {

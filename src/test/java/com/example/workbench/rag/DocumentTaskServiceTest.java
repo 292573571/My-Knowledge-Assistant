@@ -190,6 +190,21 @@ class DocumentTaskServiceTest {
     }
 
     @Test
+    void returnsTaskStatusOnlyForMatchingWorkspace() {
+        DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
+        when(repository.findById("task-1")).thenReturn(Optional.of(task()));
+        DocumentTaskService service = service(repository, Mockito.mock(DocumentIngestionService.class));
+
+        assertThat(service.status("task-1", new WorkspaceAccessContext(
+                "admin", "team-1", WorkspaceRole.OWNER, WorkspaceType.TEAM)).taskId()).isEqualTo("task-1");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.status("task-1",
+                        new WorkspaceAccessContext("admin", "team-2", WorkspaceRole.OWNER, WorkspaceType.TEAM)))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((org.springframework.web.server.ResponseStatusException) exception)
+                        .getStatusCode().value()).isEqualTo(404));
+    }
+
+    @Test
     void fallsBackToCurrentIndexedSourceWhenHistoricalUploadWasCleaned() {
         DocumentTaskRepository repository = Mockito.mock(DocumentTaskRepository.class);
         DocumentIngestionService ingestionService = Mockito.mock(DocumentIngestionService.class);

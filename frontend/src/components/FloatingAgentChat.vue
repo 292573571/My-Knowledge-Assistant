@@ -12,6 +12,7 @@ const props = defineProps({
   send: { type: Function, required: true },
   confirm: { type: Function, default: null },
   confirmHint: { type: Function, default: null },
+  taskProgress: { type: Function, default: null },
   // 悬浮入口专属
   label: { type: String, default: '打开智能客服' }
 })
@@ -81,6 +82,7 @@ function close() {
         :loading-label="loadingLabel"
         :confirm="confirm"
         :confirm-hint="confirmHint"
+        :task-progress="taskProgress"
         :send="send"
       />
     </div>

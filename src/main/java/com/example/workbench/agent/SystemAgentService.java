@@ -144,32 +144,41 @@ public class SystemAgentService {
             if (!pending.userId.equals(context.userId()) || !pending.workspaceId.equals(context.workspaceId())) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "确认不属于当前用户或工作空间");
             }
+            if (pending.action == MaintenanceAction.REBUILD_ALL_INDEX
+                    || pending.action == MaintenanceAction.SET_DEFAULT_MODEL
+                    || pending.action == MaintenanceAction.SET_USER_ROLE) {
+                adminAuthorizationService.requireSuperAdmin(user);
+            } else {
+                adminAuthorizationService.requireAdmin(user);
+            }
             boolean admin = adminAuthorizationService.isAdmin(user);
             return switch (pending.action) {
                 case RETRY_TASK -> {
                     DocumentTaskResponse task = taskService.retry(pending.targetId, context, admin);
                     audit(user, context, AuditAction.SYSTEM_AGENT_ACTION, "TASK", task.taskId());
-                    yield new MaintenanceWriteResult("任务已重新进入处理队列。", pending.action, task.taskId(), false);
+                    yield taskResult("任务已重新进入处理队列。", pending.action, task);
                 }
                 case SYNC_WORKSPACE -> {
                     DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.SYNC, null);
                     audit(user, context, AuditAction.SYSTEM_AGENT_ACTION, "WORKSPACE", context.workspaceId());
-                    yield new MaintenanceWriteResult("增量同步任务已提交。", pending.action, task.taskId(), false);
+                    yield taskResult("增量同步任务已提交。", pending.action, task);
                 }
                 case REBUILD_INDEX -> {
                     DocumentTaskResponse task = taskService.createMaintenance(context, DocumentTaskType.REBUILD, null);
                     audit(user, context, AuditAction.DOCUMENT_REBUILD, "WORKSPACE", context.workspaceId());
-                    yield new MaintenanceWriteResult("索引重建任务已提交。", pending.action, task.taskId(), false);
+                    yield taskResult("索引重建任务已提交。", pending.action, task);
                 }
                 case REBUILD_ALL_INDEX -> {
                     adminAuthorizationService.requireSuperAdmin(user);
                     List<WorkspaceAccessContext> accesses = workspaceService.allWorkspaceAccesses(user);
+                    List<MaintenanceTaskReference> tasks = new ArrayList<>();
                     for (WorkspaceAccessContext access : accesses) {
-                        taskService.createMaintenance(access, DocumentTaskType.REBUILD, null);
+                        DocumentTaskResponse task = taskService.createMaintenance(access, DocumentTaskType.REBUILD, null);
+                        tasks.add(new MaintenanceTaskReference(task.taskId(), task.workspaceId()));
                     }
                     audit(user, context, AuditAction.DOCUMENT_REBUILD, "SYSTEM", "ALL");
                     yield new MaintenanceWriteResult("已为 " + accesses.size() + " 个知识空间提交索引重建任务。",
-                            pending.action, null, false);
+                            pending.action, null, false, tasks);
                 }
                 case SET_DEFAULT_MODEL -> {
                     adminAuthorizationService.requireSuperAdmin(user);
@@ -205,6 +214,16 @@ public class SystemAgentService {
                 }
             };
         });
+    }
+
+    public DocumentTaskResponse taskProgress(AppUser user, String taskId, WorkspaceAccessContext context) {
+        adminAuthorizationService.requireAdmin(user);
+        return taskService.status(taskId, context);
+    }
+
+    private MaintenanceWriteResult taskResult(String answer, MaintenanceAction action, DocumentTaskResponse task) {
+        return new MaintenanceWriteResult(answer, action, task.taskId(), false,
+                List.of(new MaintenanceTaskReference(task.taskId(), task.workspaceId())));
     }
 
     private MaintenancePendingAction proposeWrite(AppUser user, WorkspaceAccessContext context, String message) {

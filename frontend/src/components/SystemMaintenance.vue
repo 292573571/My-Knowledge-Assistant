@@ -6,7 +6,6 @@ import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
-import SystemAgentPanel from './SystemAgentPanel.vue'
 import ToastContainer from './ToastContainer.vue'
 
 const toast = ref(null)
@@ -495,10 +494,6 @@ async function handleTestModel(model) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M7.5 10.5h6M10.5 7.5v6"/></svg>
         检索诊断
       </button>
-      <button v-if="currentUser?.systemRole === 'ADMIN' || currentUser?.systemRole === 'SUPER_ADMIN'" type="button" :aria-pressed="activeTool === 'system-agent'" :class="{ active: activeTool === 'system-agent' }" @click="activeTool = 'system-agent'">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-8.5 8.5c0 1.8.56 3.47 1.52 4.84L4 20.5l4.05-1.02A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>
-        系统管家
-      </button>
        <button v-if="currentUser?.systemRole === 'SUPER_ADMIN'" type="button" :aria-pressed="activeTool === 'model-pool'" :class="{ active: activeTool === 'model-pool' }" @click="activeTool = 'model-pool'">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v2"/><path d="M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M12 12.5v4M9 12.5h6"/></svg>
         模型管理
@@ -655,10 +650,6 @@ async function handleTestModel(model) {
           </div>
         </div>
       </section>
-    </div>
-
-    <div v-if="activeTool === 'system-agent'" class="maintenance-sections">
-      <SystemAgentPanel :workspace="workspace" :current-user="currentUser" />
     </div>
 
     <RetrievalDebug v-else-if="activeTool === 'retrieval'" embedded />
