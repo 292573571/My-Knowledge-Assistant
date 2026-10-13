@@ -10,6 +10,7 @@ import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } fr
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
 const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeBase.vue'))
 const WikiPages = defineAsyncComponent(() => import('./components/WikiPages.vue'))
+const GraphView = defineAsyncComponent(() => import('./components/GraphView.vue'))
 const UserProfile = defineAsyncComponent(() => import('./components/UserProfile.vue'))
 const ConfirmDialog = defineAsyncComponent(() => import('./components/ConfirmDialog.vue'))
 const WorkspaceManager = defineAsyncComponent(() => import('./components/WorkspaceManager.vue'))
@@ -23,6 +24,7 @@ const restoringWorkspace = ref(false)
 const appReady = ref(false)
 const authOpen = ref(false)
 const activeSection = ref('home')
+const pendingWikiPageId = ref(null)
 const assistantMounted = ref(false)
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
@@ -47,7 +49,7 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'wiki', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'wiki', 'graph', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
@@ -259,6 +261,12 @@ function openProfile() {
   mobileNavOpen.value = false
 }
 
+// 知识图谱点击页面节点：切到 wiki 区块并打开对应页
+function openWikiPageFromGraph(pageId) {
+  pendingWikiPageId.value = pageId
+  navigateTo('wiki')
+}
+
 function navigateTo(section) {
   if (!navigableSections.has(section) || !canAccessSection(section, currentUser.value)) return
   const update = () => {
@@ -338,6 +346,10 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L17 19l-2.7 1.9a.5.5 0 0 1-.6 0L11 19l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z"/><path d="M9 7.5h6M9 11h6"/></svg>
             <span>Wiki 知识库</span>
           </button>
+          <button :class="{ active: activeSection === 'graph' }" type="button" @click="navigateTo('graph')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.6 8.4 11 16M16.4 7.8 13 16.2M8 7.2l8-1"/></svg>
+            <span>知识图谱</span>
+          </button>
           <button v-if="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :class="{ active: activeSection === 'users' }" type="button" @click="navigateTo('users')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 7.5a2.5 2.5 0 0 1 0 5M17 15a4 4 0 0 1 3.5 4"/></svg>
             <span>用户管理</span>
@@ -394,7 +406,8 @@ async function submitPasswordChange() {
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
-      <WikiPages v-else-if="activeSection === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
+      <WikiPages v-else-if="activeSection === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :open-page-id="pendingWikiPageId" @wiki-page-opened="pendingWikiPageId = null" />
+      <GraphView v-else-if="activeSection === 'graph'" :key="`graph-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @open-wiki-page="openWikiPageFromGraph" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />

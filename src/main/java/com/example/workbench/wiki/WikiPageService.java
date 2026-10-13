@@ -1,6 +1,7 @@
 package com.example.workbench.wiki;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.kg.KnowledgeGraphService;
 import com.example.workbench.rag.DocumentIngestionService;
 import java.time.Instant;
 import java.util.List;
@@ -18,10 +19,13 @@ public class WikiPageService {
 
     private final WikiPageRepository repository;
     private final DocumentIngestionService ingestionService;
+    private final KnowledgeGraphService graphService;
 
-    public WikiPageService(WikiPageRepository repository, DocumentIngestionService ingestionService) {
+    public WikiPageService(WikiPageRepository repository, DocumentIngestionService ingestionService,
+                           KnowledgeGraphService graphService) {
         this.repository = repository;
         this.ingestionService = ingestionService;
+        this.graphService = graphService;
     }
 
     @Transactional
@@ -65,6 +69,7 @@ public class WikiPageService {
     public void delete(AppUser user, String workspaceId, String pageId) {
         WikiPageEntity entity = requireOwnedPage(workspaceId, pageId);
         ingestionService.removeWikiPage(workspaceId, pageId);
+        graphService.removeForPage(workspaceId, pageId);
         repository.delete(entity);
     }
 
@@ -87,6 +92,13 @@ public class WikiPageService {
                 entity.getTitle(),
                 entity.getOwnerId(),
                 entity.getWorkspaceId(),
+                entity.getContentMd()
+        );
+        graphService.rebuildForPage(
+                entity.getWorkspaceId(),
+                entity.getId(),
+                entity.getTitle(),
+                entity.getParentId(),
                 entity.getContentMd()
         );
     }

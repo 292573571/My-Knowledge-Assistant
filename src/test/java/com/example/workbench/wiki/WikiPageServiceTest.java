@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.workbench.auth.AppUser;
+import com.example.workbench.kg.KnowledgeGraphService;
 import com.example.workbench.rag.DocumentIngestionService;
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +31,9 @@ class WikiPageServiceTest {
 
     @Mock
     private DocumentIngestionService ingestionService;
+
+    @Mock
+    private KnowledgeGraphService graphService;
 
     @InjectMocks
     private WikiPageService service;
@@ -55,6 +59,7 @@ class WikiPageServiceTest {
         assertEquals("ws-1", captor.getValue().getWorkspaceId());
         verify(ingestionService).ingestWikiPage(
                 eq(created.id()), eq("Hello World"), eq("1"), eq("ws-1"), eq("# 内容"));
+        verify(graphService).rebuildForPage(eq("ws-1"), any(), eq("Hello World"), any(), eq("# 内容"));
     }
 
     @Test
@@ -81,6 +86,7 @@ class WikiPageServiceTest {
         assertEquals("新标题", updated.title());
         assertEquals("新内容", updated.contentMd());
         verify(ingestionService).ingestWikiPage(eq("page-1"), eq("新标题"), eq("1"), eq("ws-1"), eq("新内容"));
+        verify(graphService).rebuildForPage(eq("ws-1"), eq("page-1"), eq("新标题"), any(), eq("新内容"));
     }
 
     @Test
@@ -92,6 +98,7 @@ class WikiPageServiceTest {
         service.delete(user, "ws-1", "page-1");
 
         verify(ingestionService).removeWikiPage("ws-1", "page-1");
+        verify(graphService).removeForPage("ws-1", "page-1");
         verify(repository).delete(existing);
     }
 

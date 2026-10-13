@@ -10,7 +10,11 @@ import {
 } from '../api/wikiPageApi'
 import { renderMarkdown } from '../utils/markdown'
 
-const props = defineProps({ workspace: { type: Object, default: null } })
+const props = defineProps({
+  workspace: { type: Object, default: null },
+  openPageId: { type: String, default: null }
+})
+const emit = defineEmits(['wikiPageOpened'])
 
 const pages = ref([])
 const selectedId = ref(null)
@@ -159,6 +163,34 @@ async function remove() {
 }
 
 watch(() => props.workspace?.id, load)
+
+// 由知识图谱点击页面节点触发：按 id 直接打开该页
+async function openById(id) {
+  reading.value = true
+  error.value = ''
+  try {
+    const detail = await fetchWikiPage(id, workspaceId.value)
+    selectedId.value = detail.id
+    selected.value = detail
+    draft.value = {
+      title: detail.title,
+      slug: detail.slug,
+      parentId: detail.parentId || '',
+      contentMd: detail.contentMd || ''
+    }
+    previewMode.value = false
+    notice.value = ''
+  } catch (exception) {
+    error.value = formatApiError(exception, 'wiki 页面打开失败。')
+  } finally {
+    reading.value = false
+    emit('wikiPageOpened')
+  }
+}
+
+watch(() => props.openPageId, (id) => {
+  if (id) openById(id)
+})
 onMounted(load)
 </script>
 

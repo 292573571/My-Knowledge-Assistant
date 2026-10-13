@@ -12,6 +12,10 @@ public interface WikiPageRepository extends JpaRepository<WikiPageEntity, String
 
     Optional<WikiPageEntity> findByWorkspaceIdAndSlug(String workspaceId, String slug);
 
+    Optional<WikiPageEntity> findByWorkspaceIdAndTitleIgnoreCase(String workspaceId, String title);
+
+    List<WikiPageEntity> findByParentId(String parentId);
+
     long countByWorkspaceIdAndSlug(String workspaceId, String slug);
 
     long countByWorkspaceIdAndSlugAndIdNot(String workspaceId, String slug, String id);
