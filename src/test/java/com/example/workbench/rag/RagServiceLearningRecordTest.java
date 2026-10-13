@@ -499,6 +499,52 @@ class RagServiceLearningRecordTest {
     }
 
     @Test
+    void usesPromotedFormalNoteWhenRelevantAfterP0() {
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        ConversationMemory memory = new ConversationMemory();
+        SourceDocument formalNote = new SourceDocument(
+                "note-1",
+                "RAG 将检索到的资料作为上下文，让大模型基于证据作答。",
+                "2026-07-27 正式笔记",
+                "2026-07-27-learning-note.md",
+                "docs/manual-notes/user-1/2026-07-27-learning-note.md",
+                7,
+                "note-document-1",
+                "2026-07-27-learning-note.md",
+                "hash",
+                0.1,
+                "2026-07-27 学习记录 > 回答",
+                2,
+                0,
+                30,
+                "markdown-section",
+                "FORMAL_NOTE",
+                "1"
+        );
+        when(chatClient.generate(Mockito.anyString(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("RELATED: RAG 的上下文是怎么用的？");
+        when(chatClient.generate(Mockito.anyString())).thenReturn("RAG 将检索到的资料作为上下文，让大模型基于证据作答。");
+        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt())).thenReturn(List.of(formalNote));
+        when(chatClient.call(Mockito.anyString(), Mockito.anyList(), Mockito.anyList(), Mockito.anyMap()))
+                .thenReturn("RAG 将检索到的资料作为上下文，让大模型基于证据作答。");
+        RagQualityGate qualityGate = Mockito.mock(RagQualityGate.class);
+        when(qualityGate.relevantSources(Mockito.anyString(), Mockito.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(qualityGate.approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList())).thenReturn(true);
+        RagService service = new RagService(
+                Mockito.mock(DocumentIngestionService.class), vectorStore, chatClient, memory,
+                Mockito.mock(WebSearchService.class), qualityGate, false, 5, 0.45, "distance",
+                false, false, 4, true, false);
+
+        RagChatResponse response = service.chat(new RagChatRequest("user-1:conversation-1", "RAG 的上下文是怎么用的？"));
+
+        assertThat(response.answer()).contains("检索到的资料作为上下文");
+        assertThat(response.sources()).isNotEmpty();
+        assertThat(response.sources()).anyMatch(s -> s.path() != null && s.path().contains("2026-07-27-learning-note.md"));
+    }
+
+    @Test
     void fallsBackToGeneralKnowledgeInsteadOfEchoingContextWhenGroundingFails() {
         VectorStore vectorStore = Mockito.mock(VectorStore.class);
         LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);

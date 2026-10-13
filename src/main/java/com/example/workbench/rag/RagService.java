@@ -1411,7 +1411,6 @@ public class RagService {
         // AI 学习记录仅用于学习记录页面，不属于知识库事实来源。
         List<SourceDocument> eligibleSources = sources.stream()
                 .filter(source -> !isLearningRecord(source))
-                .filter(source -> !isPromotedLearningNote(source))
                 .filter(source -> !containsModelKnowledgeDisclaimer(source))
                 .filter(source -> matchesExplicitTechnicalTerm(question, source))
                 .toList();
@@ -1461,10 +1460,6 @@ public class RagService {
 
     private boolean isLearningRecord(SourceDocument source) {
         return DocumentCategory.isLearningRecord(source.category(), source.path());
-    }
-
-    private boolean isPromotedLearningNote(SourceDocument source) {
-        return DocumentCategory.isPromotedLearningNote(source.category(), source.path());
     }
 
     private boolean matchesExplicitTechnicalTerm(String question, SourceDocument source) {
