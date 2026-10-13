@@ -1,0 +1,117 @@
+package com.example.workbench.wiki;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.example.workbench.auth.AppUser;
+import com.example.workbench.rag.DocumentIngestionService;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mockito;
+
+@ExtendWith(MockitoExtension.class)
+class WikiPageServiceTest {
+
+    @Mock
+    private WikiPageRepository repository;
+
+    @Mock
+    private DocumentIngestionService ingestionService;
+
+    @InjectMocks
+    private WikiPageService service;
+
+    private AppUser user;
+
+    @BeforeEach
+    void setUp() {
+        user = org.mockito.Mockito.mock(AppUser.class);
+        Mockito.lenient().when(user.getId()).thenReturn(1L);
+    }
+
+    @Test
+    void createAutoGeneratesUniqueSlugAndIngests() {
+        when(repository.save(any(WikiPageEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(repository.countByWorkspaceIdAndSlug(eq("ws-1"), eq("hello-world"))).thenReturn(0L);
+
+        WikiPageDto created = service.create(user, "ws-1", new WikiPageRequest("Hello World", "", null, "# 内容"));
+
+        assertEquals("hello-world", created.slug());
+        ArgumentCaptor<WikiPageEntity> captor = ArgumentCaptor.forClass(WikiPageEntity.class);
+        verify(repository).save(captor.capture());
+        assertEquals("ws-1", captor.getValue().getWorkspaceId());
+        verify(ingestionService).ingestWikiPage(
+                eq(created.id()), eq("Hello World"), eq("1"), eq("ws-1"), eq("# 内容"));
+    }
+
+    @Test
+    void createAppendsSuffixWhenSlugCollision() {
+        when(repository.save(any(WikiPageEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(repository.countByWorkspaceIdAndSlug("ws-1", "hello")).thenReturn(1L);
+        when(repository.countByWorkspaceIdAndSlug("ws-1", "hello-2")).thenReturn(0L);
+
+        WikiPageDto created = service.create(user, "ws-1", new WikiPageRequest("Hello", "", null, "x"));
+
+        assertEquals("hello-2", created.slug());
+    }
+
+    @Test
+    void updateReplacesContentAndReIngests() {
+        WikiPageEntity existing = new WikiPageEntity("page-1", "ws-1", null, "旧标题", "old",
+                "旧内容", "1", Instant.now(), Instant.now());
+        when(repository.findById("page-1")).thenReturn(Optional.of(existing));
+        when(repository.save(any(WikiPageEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        WikiPageDto updated = service.update(user, "ws-1", "page-1",
+                new WikiPageRequest("新标题", "", null, "新内容"));
+
+        assertEquals("新标题", updated.title());
+        assertEquals("新内容", updated.contentMd());
+        verify(ingestionService).ingestWikiPage(eq("page-1"), eq("新标题"), eq("1"), eq("ws-1"), eq("新内容"));
+    }
+
+    @Test
+    void deleteRemovesFromIndexAndRepository() {
+        WikiPageEntity existing = new WikiPageEntity("page-1", "ws-1", null, "标题", "slug",
+                "内容", "1", Instant.now(), Instant.now());
+        when(repository.findById("page-1")).thenReturn(Optional.of(existing));
+
+        service.delete(user, "ws-1", "page-1");
+
+        verify(ingestionService).removeWikiPage("ws-1", "page-1");
+        verify(repository).delete(existing);
+    }
+
+    @Test
+    void rejectsCrossWorkspaceAccess() {
+        WikiPageEntity other = new WikiPageEntity("page-1", "ws-other", null, "标题", "slug",
+                "内容", "1", Instant.now(), Instant.now());
+        when(repository.findById("page-1")).thenReturn(Optional.of(other));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.get("ws-1", "page-1"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.update(user, "ws-1", "page-1", new WikiPageRequest("x", "", null, "y")));
+    }
+
+    @Test
+    void listReturnsFlatDtos() {
+        when(repository.findByWorkspaceIdOrderByTitleAsc("ws-1")).thenReturn(List.of(
+                new WikiPageEntity("a", "ws-1", null, "Alpha", "alpha", "", "1", Instant.now(), Instant.now()),
+                new WikiPageEntity("b", "ws-1", "a", "Beta", "beta", "", "1", Instant.now(), Instant.now())));
+        assertEquals(2, service.list("ws-1").size());
+    }
+}

@@ -9,6 +9,7 @@ import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } fr
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
 const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeBase.vue'))
+const WikiPages = defineAsyncComponent(() => import('./components/WikiPages.vue'))
 const UserProfile = defineAsyncComponent(() => import('./components/UserProfile.vue'))
 const ConfirmDialog = defineAsyncComponent(() => import('./components/ConfirmDialog.vue'))
 const WorkspaceManager = defineAsyncComponent(() => import('./components/WorkspaceManager.vue'))
@@ -46,7 +47,7 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'wiki', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
@@ -333,6 +334,10 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
             <span>知识库管理</span>
           </button>
+          <button :class="{ active: activeSection === 'wiki' }" type="button" @click="navigateTo('wiki')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L17 19l-2.7 1.9a.5.5 0 0 1-.6 0L11 19l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z"/><path d="M9 7.5h6M9 11h6"/></svg>
+            <span>Wiki 知识库</span>
+          </button>
           <button v-if="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :class="{ active: activeSection === 'users' }" type="button" @click="navigateTo('users')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 7.5a2.5 2.5 0 0 1 0 5M17 15a4 4 0 0 1 3.5 4"/></svg>
             <span>用户管理</span>
@@ -389,6 +394,7 @@ async function submitPasswordChange() {
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
       <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
+      <WikiPages v-else-if="activeSection === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />

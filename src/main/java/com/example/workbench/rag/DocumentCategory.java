@@ -13,9 +13,11 @@ public final class DocumentCategory {
     public static final String SOURCE = "SOURCE";
     public static final String LEARNING_RECORD = "LEARNING_RECORD";
     public static final String FORMAL_NOTE = "FORMAL_NOTE";
+    public static final String WIKI_PAGE = "WIKI_PAGE";
 
     public static final String LEARNING_RECORD_PREFIX = "docs/learning-records/";
     public static final String MANUAL_NOTE_PREFIX = "docs/manual-notes/";
+    public static final String WIKI_PAGE_PREFIX = "docs/wiki/";
 
     private static final String PROMOTED_LEARNING_NOTE_SUFFIX = ".*/\\d{4}-\\d{2}-\\d{2}-learning-note\\.md$";
 
@@ -33,6 +35,9 @@ public final class DocumentCategory {
         }
         if (normalized.startsWith(MANUAL_NOTE_PREFIX)) {
             return FORMAL_NOTE;
+        }
+        if (normalized.startsWith(WIKI_PAGE_PREFIX)) {
+            return WIKI_PAGE;
         }
         return SOURCE;
     }

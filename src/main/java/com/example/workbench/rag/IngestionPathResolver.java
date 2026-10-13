@@ -121,6 +121,9 @@ public final class IngestionPathResolver {
         if (path.startsWith("docs/manual-notes/")) {
             return "FORMAL_NOTE";
         }
+        if (path.startsWith("docs/wiki/")) {
+            return "WIKI_PAGE";
+        }
         return "SOURCE";
     }
 

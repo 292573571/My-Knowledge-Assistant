@@ -234,6 +234,81 @@ public class DocumentIngestionService {
         return responseFrom(List.of(ingestWorkspacePath(documentPath, force, access)));
     }
 
+    /**
+     * 将 wiki 页面投影为检索副本：把页面 Markdown 落盘到 docs/wiki/&lt;workspaceId&gt;/&lt;pageId&gt;.md，
+     * 解析切片后以 WIKI_PAGE 类目纳入向量库与索引。沿用正式笔记投影的同一种「写文件 + 切片 + 投影」模式，
+     * 区别仅在类目（WIKI_PAGE）与可见性推导（个人空间私有、其余空间可见）。
+     *
+     * <p>全量 rebuild / sync 会重新扫描 docs/ 目录，wiki 文件经 documentCategory 映射回 WIKI_PAGE 类目，
+     * 因此重建后仍能正确回到检索链路，无需额外处理。
+     */
+    public void ingestWikiPage(String pageId, String title, String ownerUserId, String workspaceId, String content) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("Wiki page content cannot be empty");
+        }
+        Path pagePath = docsDirectory.resolve("wiki").resolve(workspaceId).resolve(pageId + ".md").normalize();
+        if (!pagePath.startsWith(docsDirectory)) {
+            throw new IllegalArgumentException("Invalid wiki page path");
+        }
+        try {
+            Files.createDirectories(pagePath.getParent());
+            Files.writeString(pagePath, content, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to persist wiki page file: " + pageId, exception);
+        }
+
+        // 解析与投影计算不触碰共享状态，移出锁外，避免大文档解析期间阻塞其他摄入操作。
+        IngestedFile parsed = ingestFile(pagePath);
+        if (parsed.indexEntry() == null || parsed.documents().isEmpty()) {
+            throw new IllegalArgumentException("Wiki page content cannot be parsed into chunks");
+        }
+
+        String scopedHash = ingestionPathResolver.sha256(workspaceId + "\n" + parsed.indexEntry().contentHash());
+        String documentId = scopedHash.substring(0, 16);
+        DocumentVisibility visibility = workspaceId != null && workspaceId.startsWith("personal-")
+                ? DocumentVisibility.PRIVATE : DocumentVisibility.WORKSPACE;
+        String relativePath = ingestionPathResolver.workspaceRelativePath(pagePath).replace('\\', '/');
+        List<SourceDocument> projectedDocuments = parsed.documents().stream().map(source -> new SourceDocument(
+                documentId + "#chunk-" + source.chunkIndex(), source.content(), title, source.source(),
+                relativePath, source.chunkIndex(), documentId, parsed.indexEntry().fileName(), scopedHash,
+                source.score(), source.headingPath(), source.headingLevel(), source.startOffset(), source.endOffset(),
+                source.chunkType(), DocumentCategory.WIKI_PAGE, ownerUserId, workspaceId, visibility, source.pageNumber())
+        ).toList();
+        DocumentIndexEntry projectedEntry = new DocumentIndexEntry(
+                documentId, parsed.indexEntry().fileName(), relativePath, scopedHash, projectedDocuments.size(),
+                java.time.Instant.now(), DocumentCategory.WIKI_PAGE, "INDEXED", ownerUserId, workspaceId, visibility
+        );
+
+        ingestionLock.lock();
+        try {
+            documentIndexStore.list().stream()
+                    .filter(existing -> existing.path().equals(relativePath) && existing.workspaceId().equals(workspaceId))
+                    .toList().forEach(this::removeIndexedDocument);
+            documents.removeIf(document -> document.documentId().equals(documentId));
+            documents.addAll(projectedDocuments);
+            vectorStore.addAll(projectedDocuments);
+            documentIndexStore.upsertAll(List.of(projectedEntry));
+        } finally {
+            ingestionLock.unlock();
+        }
+    }
+
+    /**
+     * 移除某个 wiki 页面的全部检索分块，并清理落盘文件。
+     */
+    public void removeWikiPage(String workspaceId, String pageId) {
+        String relativePath = ("docs/wiki/" + workspaceId + "/" + pageId + ".md").replace('\\', '/');
+        deleteIndexedPath(relativePath);
+        Path pagePath = docsDirectory.resolve("wiki").resolve(workspaceId).resolve(pageId + ".md").normalize();
+        if (pagePath.startsWith(docsDirectory)) {
+            try {
+                Files.deleteIfExists(pagePath);
+            } catch (IOException ignored) {
+                // 文件缺失不影响索引清理结果
+            }
+        }
+    }
+
     public IngestResponse ingestDirectory(String path, boolean force) throws IOException {
         long startedAt = System.currentTimeMillis();
         Path directoryPath = path == null || path.isBlank()
