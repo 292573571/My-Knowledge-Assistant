@@ -221,7 +221,7 @@ onMounted(load)
     <aside class="wiki-sidebar" data-reveal>
       <header class="wiki-sidebar-header">
         <div>
-          <p class="wiki-badge">WIKI · 知识库</p>
+          <p class="wiki-badge">Wiki 页面</p>
           <h2>页面</h2>
         </div>
         <button type="button" class="wiki-new-button" :disabled="!workspaceId" @click="newPage">＋ 新建</button>

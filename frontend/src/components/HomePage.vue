@@ -9,7 +9,7 @@ const emit = defineEmits(['navigate'])
 
 const entries = [
   { section: 'assistant', title: 'AI 学习助手', desc: '提问、拆解、练习，把知识变成真正会用的能力', icon: 'M12 3a7 7 0 0 0-7 7v2.5a3.5 3.5 0 0 0 3.5 3.5H10v2H8.5a1.5 1.5 0 0 0 0 3H12a3 3 0 0 0 3-3v-2h.5a3.5 3.5 0 0 0 3.5-3.5V10a7 7 0 0 0-7-7Z' },
-  { section: 'knowledge', title: '知识库管理', desc: '导入文档，构建属于你的专属知识空间', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
+  { section: 'knowledge', title: '知识库', desc: '导入文档，构建属于你的专属知识空间', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
   { section: 'records', title: '学习记录', desc: '自动沉淀每日学习，随时回顾与复习', icon: 'M5.5 4.5A2.5 2.5 0 0 1 8 2h9.5a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L15 17l-2.7 1.9a.5.5 0 0 1-.6 0L9 17l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z' }
 ]
 
@@ -23,7 +23,7 @@ const steps = [
 const STORAGE_KEY = 'shihai_onboarding_tasks_v1'
 const tasks = [
   { id: 'space', title: '认识你的知识空间', desc: '顶部可切换 个人 / 团队 / 公共 空间，文档只存在于当前所选空间内。', action: '去知识库', section: 'knowledge' },
-  { id: 'import', title: '导入第一篇文档', desc: '在「知识库管理」上传 PDF、Markdown、Word 或图片，系统会自动切片并建立索引。', action: '去导入', section: 'knowledge' },
+  { id: 'import', title: '导入第一篇文档', desc: '在「知识库」的「文档库」上传 PDF、Markdown、Word 或图片，系统会自动切片并建立索引。', action: '去导入', section: 'knowledge' },
   { id: 'model', title: '配置个人对话模型', desc: '在「AI 学习助手」里点「管理模型」，选择或设置属于你自己的对话模型。', action: '去配置', section: 'assistant' },
   { id: 'ask', title: '提出第一个问题', desc: '围绕你的资料提问，系统会基于知识库检索内容并给出带出处的回答。', action: '去提问', section: 'assistant' }
 ]

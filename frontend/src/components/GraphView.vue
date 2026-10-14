@@ -263,7 +263,7 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
     <div v-if="error" class="graph-error">{{ error }}</div>
     <div v-else-if="loading" class="graph-loading">图谱加载中…</div>
     <div v-else-if="nodes.length === 0" class="graph-empty">
-      暂无图谱数据。去「Wiki 知识库」用 <code>[[页面或概念名]]</code> 串联页面，即可生成知识图谱。
+      暂无图谱数据。在「知识库」切换到「Wiki 页面」，用 <code>[[页面或概念名]]</code> 串联页面，即可生成知识图谱。
     </div>
 
     <svg

@@ -12,7 +12,7 @@ defineEmits(['manage-workspace'])
   <main class="knowledge-dashboard">
     <section class="knowledge-hero" data-reveal>
       <div>
-        <p class="records-badge">知识库管理</p>
+        <p class="records-badge">文档库</p>
         <h1>管理你的知识沉淀</h1>
         <p v-if="workspace?.type === 'PUBLIC'">维护平台公共知识源。这里发布的资料可供所有用户在个人和团队空间中检索使用。</p>
         <p v-else>统一查看当前空间的原始资料、正式笔记和 AI 学习记录，支持上传、筛选与精确删除。</p>
