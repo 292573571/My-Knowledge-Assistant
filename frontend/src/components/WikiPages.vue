@@ -24,6 +24,8 @@ const reading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
+// 区分「未选择任何页面」与「点击新建进入空白编辑态」，否则新建会落到与初始态相同的 placeholder
+const isNew = ref(false)
 
 // 编辑表单
 const draft = ref({ title: '', slug: '', parentId: '', contentMd: '' })
@@ -87,6 +89,7 @@ async function load() {
   error.value = ''
   selectedId.value = null
   selected.value = null
+  isNew.value = false
   draft.value = { title: '', slug: '', parentId: '', contentMd: '' }
   if (!workspaceId.value) {
     pages.value = []
@@ -105,6 +108,7 @@ async function load() {
 async function selectPage(page) {
   reading.value = true
   error.value = ''
+  isNew.value = false
   try {
     const detail = await fetchWikiPage(page.id, workspaceId.value)
     selectedId.value = detail.id
@@ -127,6 +131,7 @@ async function selectPage(page) {
 function newPage() {
   selectedId.value = null
   selected.value = null
+  isNew.value = true
   draft.value = { title: '', slug: '', parentId: '', contentMd: '' }
   previewMode.value = false
   error.value = ''
@@ -184,6 +189,7 @@ watch(() => props.workspace?.id, load)
 async function openById(id) {
   reading.value = true
   error.value = ''
+  isNew.value = false
   try {
     const detail = await fetchWikiPage(id, workspaceId.value)
     selectedId.value = detail.id
@@ -244,7 +250,7 @@ onMounted(load)
 
       <div v-if="reading" class="wiki-placeholder">正在打开页面...</div>
       <div v-else-if="!workspaceId" class="wiki-placeholder">请先选择知识空间。</div>
-      <div v-else-if="selectedId === null && !selected" class="wiki-placeholder">
+      <div v-else-if="selectedId === null && !selected && !isNew" class="wiki-placeholder">
         从左侧选择页面查看或编辑，或点击「新建」开始记录知识。
       </div>
 
