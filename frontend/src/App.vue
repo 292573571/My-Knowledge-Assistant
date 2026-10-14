@@ -25,6 +25,8 @@ const appReady = ref(false)
 const authOpen = ref(false)
 const activeSection = ref('home')
 const pendingWikiPageId = ref(null)
+// 知识库内部子视图: 'docs'=文档库(上传文件), 'wiki'=Wiki 页面(写 markdown)
+const knowledgeTab = ref('docs')
 const assistantMounted = ref(false)
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
@@ -49,13 +51,16 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'wiki', 'graph', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'graph', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
-  const section = params.get('section') || window.location.hash.slice(1)
+  let section = params.get('section') || window.location.hash.slice(1)
+  let tab = 'docs'
+  if (section === 'wiki') { section = 'knowledge'; tab = 'wiki' }
   return {
     section: navigableSections.has(section) ? section : 'home',
+    tab,
     workspaceId: params.get('workspace') || ''
   }
 }
@@ -78,6 +83,7 @@ function syncUrlState({ replace = false } = {}) {
 function applyUrlState() {
   const state = readUrlState()
   activeSection.value = canAccessSection(state.section, currentUser.value) ? state.section : 'assistant'
+  if (state.section === 'knowledge') knowledgeTab.value = state.tab || 'docs'
   const workspace = workspaces.value.find(item => item.id === state.workspaceId)
   if (workspace) {
     activeWorkspaceId.value = workspace.id
@@ -261,10 +267,11 @@ function openProfile() {
   mobileNavOpen.value = false
 }
 
-// 知识图谱点击页面节点：切到 wiki 区块并打开对应页
+// 知识图谱点击页面节点：进入知识库的 Wiki 子视图并打开对应页
 function openWikiPageFromGraph(pageId) {
   pendingWikiPageId.value = pageId
-  navigateTo('wiki')
+  knowledgeTab.value = 'wiki'
+  navigateTo('knowledge')
 }
 
 function navigateTo(section) {
@@ -340,11 +347,7 @@ async function submitPasswordChange() {
           </button>
           <button :class="{ active: activeSection === 'knowledge' }" type="button" @click="navigateTo('knowledge')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
-            <span>知识库管理</span>
-          </button>
-          <button :class="{ active: activeSection === 'wiki' }" type="button" @click="navigateTo('wiki')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L17 19l-2.7 1.9a.5.5 0 0 1-.6 0L11 19l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z"/><path d="M9 7.5h6M9 11h6"/></svg>
-            <span>Wiki 知识库</span>
+            <span>知识库</span>
           </button>
           <button :class="{ active: activeSection === 'graph' }" type="button" @click="navigateTo('graph')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.6 8.4 11 16M16.4 7.8 13 16.2M8 7.2l8-1"/></svg>
@@ -405,8 +408,16 @@ async function submitPasswordChange() {
        <LearningRecords v-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
        <SystemMaintenance v-else-if="activeSection === 'maintenance'" :key="`maintenance-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" />
-      <KnowledgeBase v-else-if="activeSection === 'knowledge'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
-      <WikiPages v-else-if="activeSection === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :open-page-id="pendingWikiPageId" @wiki-page-opened="pendingWikiPageId = null" />
+      <template v-else-if="activeSection === 'knowledge'">
+        <div class="knowledge-shell">
+          <div class="knowledge-tabs" role="tablist" aria-label="知识库子视图">
+            <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="knowledgeTab = 'docs'">文档库</button>
+            <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="knowledgeTab = 'wiki'">Wiki 页面</button>
+          </div>
+          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
+          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :open-page-id="pendingWikiPageId" @wiki-page-opened="pendingWikiPageId = null" />
+        </div>
+      </template>
       <GraphView v-else-if="activeSection === 'graph'" :key="`graph-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @open-wiki-page="openWikiPageFromGraph" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
@@ -418,6 +429,42 @@ async function submitPasswordChange() {
       </footer>
     </div>
   </template>
+  <style scoped>
+  .knowledge-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .knowledge-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 14px 24px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    flex: 0 0 auto;
+  }
+  .knowledge-tabs button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #64748b;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    border-radius: 6px 6px 0 0;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .knowledge-tabs button:hover {
+    color: #334155;
+    background: rgba(148, 163, 184, 0.1);
+  }
+  .knowledge-tabs button.active {
+    color: #2563eb;
+    border-bottom-color: #2563eb;
+  }
+  </style>
   <template v-else>
     <div class="public-site">
       <header class="public-header">
