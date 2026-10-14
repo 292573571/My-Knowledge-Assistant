@@ -97,6 +97,42 @@ public class KnowledgeGraphService {
         entityRepository.deleteOrphanTerms(workspaceId);
     }
 
+    /**
+     * 取某 wiki 页的 1 跳邻接 wiki 页集合（用于 RAG 图谱感知扩召回）：
+     * 出边中的 WIKI_LINK 目标页与 PARENT_CHILD 子页，以及入边中的 PARENT_CHILD 父页。
+     * 返回的是 pageId 列表（剥离 wiki: 前缀），不含自身。
+     */
+    public Set<String> neighborWikiPageIds(String workspaceId, String pageId) {
+        String pageEntityId = KgTypes.wikiEntityId(pageId);
+        Set<String> neighbors = new HashSet<>();
+        for (KgRelation relation : relationRepository.findByWorkspaceIdAndSourceEntityId(workspaceId, pageEntityId)) {
+            if (KgTypes.REL_WIKI_LINK.equals(relation.getRelationType())
+                    || KgTypes.REL_PARENT_CHILD.equals(relation.getRelationType())) {
+                String neighbor = toPageId(relation.getTargetEntityId());
+                if (neighbor != null) {
+                    neighbors.add(neighbor);
+                }
+            }
+        }
+        for (KgRelation relation : relationRepository.findByWorkspaceIdAndTargetEntityId(workspaceId, pageEntityId)) {
+            if (KgTypes.REL_PARENT_CHILD.equals(relation.getRelationType())) {
+                String parent = toPageId(relation.getSourceEntityId());
+                if (parent != null) {
+                    neighbors.add(parent);
+                }
+            }
+        }
+        neighbors.remove(pageId);
+        return neighbors;
+    }
+
+    private static String toPageId(String entityId) {
+        if (entityId != null && entityId.startsWith(KgTypes.WIKI_ENTITY_PREFIX)) {
+            return entityId.substring(KgTypes.WIKI_ENTITY_PREFIX.length());
+        }
+        return null;
+    }
+
     private KgEntity upsertWikiPageEntity(String workspaceId, String pageId, String title) {
         String id = KgTypes.wikiEntityId(pageId);
         KgEntity entity = entityRepository.findById(id).orElse(new KgEntity());

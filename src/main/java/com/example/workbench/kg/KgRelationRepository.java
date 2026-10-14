@@ -10,6 +10,8 @@ public interface KgRelationRepository extends JpaRepository<KgRelation, String> 
 
     List<KgRelation> findByWorkspaceIdOrderByRelationTypeAsc(String workspaceId);
 
+    List<KgRelation> findByWorkspaceIdAndSourceEntityId(String workspaceId, String sourceEntityId);
+
     void deleteByWorkspaceIdAndEvidenceSourceId(String workspaceId, String evidenceSourceId);
 
     Optional<KgRelation> findByWorkspaceIdAndSourceEntityIdAndTargetEntityIdAndRelationType(

@@ -8,6 +8,7 @@ import com.example.workbench.tools.WebSearchResult;
 import com.example.workbench.tools.WebSearchService;
 import com.example.workbench.workspace.DocumentVisibility;
 import com.example.workbench.workspace.WorkspaceService;
+import com.example.workbench.kg.KnowledgeGraphService;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -15,9 +16,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.stream.Collectors;
@@ -33,6 +36,7 @@ public class RagService {
     private static final String NO_CONTEXT_ANSWER = "我在当前知识库中没有找到足够信息和依据来回答这个问题。你可以导入相关文档后再问，或者切换到普通聊天模式让我基于通用知识回答。";
     private static final String MODEL_FALLBACK_SAFETY_ANSWER = "当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。";
     private static final Pattern EXPLICIT_TECHNICAL_ACRONYM = Pattern.compile("(?<![A-Za-z0-9])[A-Z][A-Z0-9.+#-]{1,}(?![A-Za-z0-9])");
+    private static final Pattern WIKI_PATH_PATTERN = Pattern.compile("docs/wiki/([^/]+)/([^/]+)\\.md");
     private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
@@ -97,6 +101,15 @@ public class RagService {
     private final boolean adjacentEnabled;
     private final DocumentTaskRepository documentTaskRepository;
     private final DocumentDisplayNameResolver displayNameResolver;
+
+    @Value("${workbench.rag.wiki-graph-expansion.enabled:false}")
+    boolean wikiGraphExpansionEnabled = false;
+    @Value("${workbench.rag.wiki-graph-expansion.max-pages:6}")
+    int wikiGraphExpansionMaxPages = 6;
+    @Value("${workbench.rag.wiki-graph-expansion.max-chunks:15}")
+    int wikiGraphExpansionMaxChunks = 15;
+
+    private KnowledgeGraphService knowledgeGraphService;
     private WorkspaceService workspaceService;
     private RagAnswerGuardrail answerGuardrail = new RagAnswerGuardrail();
     /**
@@ -137,6 +150,15 @@ public class RagService {
     @Autowired(required = false)
     public void setWorkspaceService(WorkspaceService workspaceService) {
         this.workspaceService = workspaceService;
+    }
+
+    /**
+     * 注入知识图谱服务，用于 RAG 图谱感知扩召回。单元测试直接构造服务时可不提供；
+     * 未注入时扩召回方法空操作返回原始上下文。
+     */
+    @Autowired(required = false)
+    public void setKnowledgeGraphService(KnowledgeGraphService knowledgeGraphService) {
+        this.knowledgeGraphService = knowledgeGraphService;
     }
 
     @Autowired
@@ -273,6 +295,88 @@ public class RagService {
         return new ContextEvaluationResult(context.relation(), context.standaloneQuestion(), queries, context.history());
     }
 
+    /**
+     * 图谱感知扩召回：当本次检索命中的片段来自 wiki 页时，把命中页的 1 跳邻接 wiki 页切片作为补充上下文并入。
+     * 这是纯增量——不改变主检索、阈值门禁与兜底路由；邻接片段即便不过向量阈值也并入，因为它们是图谱相关而非向量相关。
+     * 功能默认关闭（workbench.rag.wiki-graph-expansion.enabled=false），且未注入图谱服务时直接返回原始上下文。
+     */
+    private List<SourceDocument> expandWithGraphNeighbors(String question, List<SourceDocument> retrieved,
+                                                         List<SourceDocument> primary, String workspaceId,
+                                                         Set<String> readableWorkspaceIds) {
+        if (!wikiGraphExpansionEnabled || knowledgeGraphService == null || workspaceId == null) {
+            return primary;
+        }
+        if (retrieved == null || retrieved.isEmpty()) {
+            return primary;
+        }
+        Set<String> seedPageIds = new HashSet<>();
+        for (SourceDocument source : retrieved) {
+            if (DocumentCategory.WIKI_PAGE.equals(source.category())) {
+                String pageId = wikiPageIdFromPath(source.path());
+                if (pageId != null) {
+                    seedPageIds.add(pageId);
+                }
+            }
+        }
+        if (seedPageIds.isEmpty()) {
+            return primary;
+        }
+        Set<String> neighborPageIds = new HashSet<>();
+        for (String seed : seedPageIds) {
+            neighborPageIds.addAll(knowledgeGraphService.neighborWikiPageIds(workspaceId, seed));
+            if (neighborPageIds.size() >= wikiGraphExpansionMaxPages) {
+                break;
+            }
+        }
+        neighborPageIds.removeAll(seedPageIds);
+        if (neighborPageIds.isEmpty()) {
+            return primary;
+        }
+        List<SourceDocument> expansion = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String pageId : neighborPageIds) {
+            for (SourceDocument chunk : documentIngestionService.getChunksByWikiPageId(workspaceId, pageId)) {
+                if (readableWorkspaceIds != null && !readableWorkspaceIds.contains(chunk.workspaceId())) {
+                    continue;
+                }
+                if (!seen.add(stableSourceKey(chunk))) {
+                    continue;
+                }
+                expansion.add(chunk.withScore(0.0));
+            }
+            if (expansion.size() >= wikiGraphExpansionMaxChunks) {
+                break;
+            }
+        }
+        if (expansion.isEmpty()) {
+            return primary;
+        }
+        Set<String> primaryKeys = new HashSet<>();
+        for (SourceDocument source : primary) {
+            primaryKeys.add(stableSourceKey(source));
+        }
+        List<SourceDocument> merged = new ArrayList<>(primary);
+        for (SourceDocument chunk : expansion) {
+            if (merged.size() >= primary.size() + wikiGraphExpansionMaxChunks) {
+                break;
+            }
+            if (!primaryKeys.contains(stableSourceKey(chunk))) {
+                merged.add(chunk);
+            }
+        }
+        log.info("RAG wiki-graph expansion workspaceId={} seeds={} neighbors={} addedChunks={}",
+                workspaceId, seedPageIds.size(), neighborPageIds.size(), merged.size() - primary.size());
+        return merged;
+    }
+
+    private static String wikiPageIdFromPath(String path) {
+        if (path == null) {
+            return null;
+        }
+        Matcher matcher = WIKI_PATH_PATTERN.matcher(path);
+        return matcher.matches() ? matcher.group(2) : null;
+    }
+
     private RagChatResponse chatInternal(AppUser user, RagChatRequest request, RagChatOptions options, boolean includeDebug) {
         try {
         long startedAt = System.currentTimeMillis();
@@ -319,10 +423,14 @@ public class RagService {
         List<ChatMessage> relevantHistory = conversationContext.history();
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
+        Set<String> readableWorkspaceIds = resolveReadable(user, request.workspaceId());
         List<SourceDocument> retrievedSources = retrieveCandidates(
                 question, conversationContext.standaloneQuestion(), ownerUserId(conversationId),
-                resolveReadable(user, request.workspaceId()), options);
+                readableWorkspaceIds, options);
         List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
+        // 图谱感知扩召回（默认关闭）：命中 wiki 页时并入 1 跳邻接页切片作为补充上下文。
+        sources = expandWithGraphNeighbors(question, retrievedSources, sources,
+                request.workspaceId(), readableWorkspaceIds);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
                 conversationId,

@@ -7,12 +7,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.example.workbench.wiki.WikiPageEntity;
 import com.example.workbench.wiki.WikiPageRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -135,5 +137,48 @@ class KnowledgeGraphServiceTest {
 
         // 每次重建先按 evidence 清掉该页旧关系，再重新抽取，因此重复运行安全（DB 唯一约束兜底）
         verify(relationRepository, times(2)).deleteByWorkspaceIdAndEvidenceSourceId("ws", "p1");
+    }
+
+    @Test
+    void neighborWikiPageIdsIncludesLinksChildrenAndParent() {
+        KgRelation link = new KgRelation();
+        link.setSourceEntityId("wiki:p1");
+        link.setTargetEntityId("wiki:p2");
+        link.setRelationType(KgTypes.REL_WIKI_LINK);
+        KgRelation child = new KgRelation();
+        child.setSourceEntityId("wiki:p1");
+        child.setTargetEntityId("wiki:p3");
+        child.setRelationType(KgTypes.REL_PARENT_CHILD);
+        KgRelation parent = new KgRelation();
+        parent.setSourceEntityId("wiki:p0");
+        parent.setTargetEntityId("wiki:p1");
+        parent.setRelationType(KgTypes.REL_PARENT_CHILD);
+        when(relationRepository.findByWorkspaceIdAndSourceEntityId("ws", "wiki:p1"))
+                .thenReturn(List.of(link, child));
+        when(relationRepository.findByWorkspaceIdAndTargetEntityId("ws", "wiki:p1"))
+                .thenReturn(List.of(parent));
+
+        Set<String> neighbors = service.neighborWikiPageIds("ws", "p1");
+
+        assertEquals(Set.of("p2", "p3", "p0"), neighbors);
+    }
+
+    @Test
+    void neighborWikiPageIdsIgnoresTermAndSelfTargets() {
+        KgRelation term = new KgRelation();
+        term.setSourceEntityId("wiki:p1");
+        term.setTargetEntityId("term:xyz");
+        term.setRelationType(KgTypes.REL_MENTIONS);
+        when(relationRepository.findByWorkspaceIdAndSourceEntityId("ws", "wiki:p1"))
+                .thenReturn(List.of(term));
+
+        Set<String> neighbors = service.neighborWikiPageIds("ws", "p1");
+
+        assertTrue(neighbors.isEmpty());
+    }
+
+    @Test
+    void neighborWikiPageIdsNoRelationsReturnsEmpty() {
+        assertTrue(service.neighborWikiPageIds("ws", "p1").isEmpty());
     }
 }

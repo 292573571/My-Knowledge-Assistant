@@ -375,6 +375,18 @@ public class DocumentIngestionService {
         return Collections.unmodifiableList(documents);
     }
 
+    /**
+     * 取某 wiki 页在向量库中的全部切片（用于图谱感知扩召回）。
+     * wiki 页的切片 path 固定为 docs/wiki/&lt;workspaceId&gt;/&lt;pageId&gt;.md，
+     * 按 path 反查即可，无需额外索引。
+     */
+    public List<SourceDocument> getChunksByWikiPageId(String workspaceId, String pageId) {
+        String targetPath = ("docs/wiki/" + workspaceId + "/" + pageId + ".md").replace('\\', '/');
+        return documents.stream()
+                .filter(document -> targetPath.equals(document.path()))
+                .toList();
+    }
+
     public WorkspaceDocumentUploadResponse uploadWorkspaceDocument(
             WorkspaceAccessContext access,
             MultipartFile file

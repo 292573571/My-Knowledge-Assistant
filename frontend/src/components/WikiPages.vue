@@ -59,7 +59,23 @@ const flatTree = computed(() => {
   return out
 })
 
-const previewHtml = computed(() => renderMarkdown(draft.value.contentMd || ''))
+const previewHtml = computed(() => renderMarkdown(draft.value.contentMd || '', { wikiLinks: true }))
+
+// 预览区点击 wiki 链接：按标题/短链在当前空间匹配页面并打开，未命中给出提示。
+function onPreviewClick(event) {
+  const link = event.target.closest('a.wiki-link')
+  if (!link) return
+  event.preventDefault()
+  const title = link.getAttribute('data-wiki-title') || ''
+  if (!title) return
+  const page = pages.value.find((p) => p.title === title || p.slug === title)
+  if (page) {
+    notice.value = ''
+    selectPage(page)
+  } else {
+    notice.value = `未找到名为「${title}」的页面，可新建后用 [[${title}]] 关联。`
+  }
+}
 
 const parentOptions = computed(() => {
   // 可选上级：除自己以外的所有页面（简单处理，P1 不做后代闭环校验）
@@ -269,7 +285,7 @@ onMounted(load)
           placeholder="用 Markdown 书写页面内容..."
           aria-label="页面正文"
         ></textarea>
-        <div v-else class="wiki-preview markdown-body" v-html="previewHtml"></div>
+        <div v-else class="wiki-preview markdown-body" v-html="previewHtml" @click="onPreviewClick"></div>
       </article>
     </section>
   </main>
@@ -555,5 +571,11 @@ onMounted(load)
   border-radius: 12px;
   padding: 16px 20px;
   min-height: 50vh;
+}
+
+.wiki-preview :deep(.wiki-link) {
+  color: var(--accent, #4f46e5);
+  text-decoration: underline;
+  cursor: pointer;
 }
 </style>
