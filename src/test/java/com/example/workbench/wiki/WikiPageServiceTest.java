@@ -11,6 +11,8 @@ import static org.mockito.Mockito.when;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.kg.KnowledgeGraphService;
 import com.example.workbench.rag.DocumentIngestionService;
+import com.example.workbench.rag.ParsedDocument;
+import com.example.workbench.wiki.WikiImportContent;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.Mockito;
+import org.springframework.web.multipart.MultipartFile;
 
 @ExtendWith(MockitoExtension.class)
 class WikiPageServiceTest {
@@ -120,5 +123,32 @@ class WikiPageServiceTest {
                 new WikiPageEntity("a", "ws-1", null, "Alpha", "alpha", "", "1", Instant.now(), Instant.now()),
                 new WikiPageEntity("b", "ws-1", "a", "Beta", "beta", "", "1", Instant.now(), Instant.now())));
         assertEquals(2, service.list("ws-1").size());
+    }
+
+    @Test
+    void importFromFileUsesParsedTitleAndContent() {
+        MultipartFile file = Mockito.mock(MultipartFile.class);
+        Mockito.lenient().when(file.getOriginalFilename()).thenReturn("report.pdf");
+        when(ingestionService.parseUploadForWiki(file))
+                .thenReturn(new ParsedDocument("pdf", "# 季度报告\n\n正文", "季度报告", List.of()));
+
+        WikiImportContent result = service.importFromFile(user, "ws-1", file);
+
+        assertEquals("季度报告", result.title());
+        assertEquals("# 季度报告\n\n正文", result.contentMd());
+        assertEquals("report.pdf", result.fileName());
+    }
+
+    @Test
+    void importFromFileFallsBackToFileNameWhenTitleBlank() {
+        MultipartFile file = Mockito.mock(MultipartFile.class);
+        Mockito.lenient().when(file.getOriginalFilename()).thenReturn("meeting-notes.txt");
+        when(ingestionService.parseUploadForWiki(file))
+                .thenReturn(new ParsedDocument("txt", "纯文本", "", List.of()));
+
+        WikiImportContent result = service.importFromFile(user, "ws-1", file);
+
+        assertEquals("meeting-notes", result.title());
+        assertEquals("纯文本", result.contentMd());
     }
 }

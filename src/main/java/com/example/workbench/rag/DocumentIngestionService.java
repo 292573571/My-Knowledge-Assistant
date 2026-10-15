@@ -549,6 +549,27 @@ public class DocumentIngestionService {
         }
     }
 
+    /**
+     * 将上传文件解析为可用于 wiki 页面的纯文本 / Markdown 内容。
+     *
+     * <p>与空间文档上传不同，这里不落盘、不进入向量库，仅作预处理：
+     * 解析结果交由前端填入 wiki 编辑器，保存时再走 {@link #ingestWikiPage} 投影进检索链路。
+     * 校验与读取复用 IngestionPathResolver 的既有规则（非空、≤50MB、扩展名白名单）。
+     *
+     * @param file 上传文件
+     * @return 解析后的文档（含标题与正文）
+     */
+    public ParsedDocument parseUploadForWiki(MultipartFile file) {
+        String originalFileName = ingestionPathResolver.safeOriginalFileName(file.getOriginalFilename());
+        byte[] content = ingestionPathResolver.uploadedContent(file);
+        try {
+            return documentParserRouter.parse(originalFileName, content);
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "无法解析该文件为可导入内容：" + originalFileName);
+        }
+    }
+
     private List<List<SourceDocument>> partitionByPageBatch(List<SourceDocument> sourceDocuments) {
         if (sourceDocuments.isEmpty()) return List.of();
         return new ArrayList<>(sourceDocuments.stream().collect(Collectors.groupingBy(

@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/wiki-pages")
@@ -61,6 +63,19 @@ public class WikiPageController {
         AppUser user = user(request);
         workspaceService.access(user, workspaceId);
         wikiPageService.delete(user, workspaceId, id);
+    }
+
+    /**
+     * 将上传文件解析为 wiki 页面草稿（PDF / Word / 文本等），不落库。
+     * 前端把返回内容填入编辑器，用户确认保存时再走创建链路投影进 RAG 检索。
+     */
+    @PostMapping("/import")
+    public WikiImportContent importFromFile(@RequestParam String workspaceId,
+                                           @RequestPart("file") MultipartFile file,
+                                           HttpServletRequest request) {
+        AppUser user = user(request);
+        workspaceService.access(user, workspaceId);
+        return wikiPageService.importFromFile(user, workspaceId, file);
     }
 
     private AppUser user(HttpServletRequest request) {

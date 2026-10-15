@@ -3,11 +3,13 @@ package com.example.workbench.wiki;
 import com.example.workbench.auth.AppUser;
 import com.example.workbench.kg.KnowledgeGraphService;
 import com.example.workbench.rag.DocumentIngestionService;
+import com.example.workbench.rag.ParsedDocument;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -77,6 +79,29 @@ public class WikiPageService {
         return repository.findByWorkspaceIdOrderByTitleAsc(workspaceId).stream()
                 .map(WikiPageDto::from)
                 .toList();
+    }
+
+    /**
+     * 将上传的 PDF / Word / 文本等文件解析为 wiki 页面草稿。
+     *
+     * <p>不直接落库，仅返回解析出的标题与 Markdown 正文，交由前端填入编辑器；
+     * 用户确认保存时再走 {@link #create} 投影进 RAG 检索链路，形成一张 WIKI_PAGE。
+     * 解析与校验委托 DocumentIngestionService，复用既有的扩展名白名单与 50MB 限制。
+     *
+     * @param user 操作人
+     * @param workspaceId 知识空间标识
+     * @param file 上传文件
+     * @return 解析后的导入草稿
+     */
+    public WikiImportContent importFromFile(AppUser user, String workspaceId, MultipartFile file) {
+        ParsedDocument parsed = ingestionService.parseUploadForWiki(file);
+        String originalFileName = file.getOriginalFilename();
+        String baseName = originalFileName == null ? "" : originalFileName.replaceAll("\\.[^.]+$", "");
+        String title = (parsed.title() != null && !parsed.title().isBlank())
+                ? parsed.title().trim()
+                : (baseName.isBlank() ? "未命名导入" : baseName.trim());
+        String contentMd = parsed.content() == null ? "" : parsed.content();
+        return new WikiImportContent(originalFileName, title, contentMd);
     }
 
     public WikiPageDto get(String workspaceId, String pageId) {

@@ -40,3 +40,13 @@ export function updateWikiPage(id, workspaceId, body) {
 export function deleteWikiPage(id, workspaceId) {
   return request(`/api/wiki-pages/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, { method: 'DELETE' })
 }
+
+// 将上传文件解析为 wiki 页面草稿（不落库），返回 { fileName, title, contentMd } 供编辑器填充。
+export function importWikiPageFile(workspaceId, file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request(`/api/wiki-pages/import?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
+    method: 'POST',
+    body: formData
+  })
+}

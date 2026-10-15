@@ -6,6 +6,7 @@ import {
   deleteWikiPage,
   fetchWikiPage,
   fetchWikiPages,
+  importWikiPageFile,
   updateWikiPage
 } from '../api/wikiPageApi'
 import { renderMarkdown } from '../utils/markdown'
@@ -26,6 +27,8 @@ const error = ref('')
 const notice = ref('')
 // 区分「未选择任何页面」与「点击新建进入空白编辑态」，否则新建会落到与初始态相同的 placeholder
 const isNew = ref(false)
+const importing = ref(false)
+const importInput = ref(null)
 
 // 编辑表单
 const draft = ref({ title: '', slug: '', parentId: '', contentMd: '' })
@@ -138,6 +141,38 @@ function newPage() {
   notice.value = ''
 }
 
+function triggerImport() {
+  if (importInput.value) importInput.value.click()
+}
+
+async function onImportFile(event) {
+  const file = event.target.files && event.target.files[0]
+  if (!file) return
+  importing.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await importWikiPageFile(workspaceId.value, file)
+    // 解析结果填入编辑器，进入新建态，保存时走 create 投影进检索。
+    isNew.value = true
+    selectedId.value = null
+    selected.value = null
+    draft.value = {
+      title: result.title || file.name.replace(/\.[^.]+$/, ''),
+      slug: '',
+      parentId: '',
+      contentMd: result.contentMd || ''
+    }
+    previewMode.value = false
+    notice.value = '文件已解析为草稿，确认无误后点击「保存」生成 Wiki 页面。'
+  } catch (exception) {
+    error.value = formatApiError(exception, '文件导入失败。')
+  } finally {
+    importing.value = false
+    event.target.value = ''
+  }
+}
+
 async function save() {
   saving.value = true
   error.value = ''
@@ -225,6 +260,10 @@ onMounted(load)
           <h2>页面</h2>
         </div>
         <button type="button" class="wiki-new-button" :disabled="!workspaceId" @click="newPage">＋ 新建</button>
+        <button type="button" class="wiki-import-button" :disabled="!workspaceId || importing" @click="triggerImport">
+          {{ importing ? '导入中...' : '导入文件' }}
+        </button>
+        <input ref="importInput" type="file" class="wiki-import-input" accept=".md,.txt,.html,.htm,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.csv,.json,.xml,.rtf,.odt,.png,.jpg,.jpeg" @change="onImportFile" />
       </header>
       <div v-if="loading" class="wiki-list-skeleton"><span></span><span></span><span></span></div>
       <div v-else-if="!flatTree.length" class="wiki-empty">
@@ -347,6 +386,33 @@ onMounted(load)
 .wiki-new-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.wiki-import-button {
+  border: 1px solid var(--border, #e5e7eb);
+  color: var(--text, #1f2937);
+  background: var(--surface, #fff);
+  border-radius: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.wiki-import-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wiki-import-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wiki-tree {
