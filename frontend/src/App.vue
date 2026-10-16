@@ -429,40 +429,6 @@ async function submitPasswordChange() {
       </footer>
     </div>
   </template>
-  <style scoped>
-  .knowledge-shell {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .knowledge-tabs {
-    display: flex;
-    gap: 6px;
-    padding: 14px 24px 12px;
-    flex: 0 0 auto;
-  }
-  .knowledge-tabs button {
-    appearance: none;
-    border: 1px solid transparent;
-    background: transparent;
-    padding: 8px 18px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    color: var(--site-muted, #738097);
-    border-radius: 999px;
-    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-  }
-  .knowledge-tabs button:hover {
-    color: var(--site-ink-soft, #525f75);
-    background: rgba(111, 155, 120, 0.08);
-  }
-  .knowledge-tabs button.active {
-    color: #fff;
-    background: var(--site-green, #6f9b78);
-    border-color: var(--site-green, #6f9b78);
-  }
-  </style>
   <template v-else>
     <div class="public-site">
       <header class="public-header">
