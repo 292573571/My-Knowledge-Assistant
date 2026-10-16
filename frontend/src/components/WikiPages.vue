@@ -255,18 +255,37 @@ onMounted(load)
   <main class="wiki-layout">
     <aside class="wiki-sidebar" data-reveal>
       <header class="wiki-sidebar-header">
-        <div>
+        <div class="wiki-sidebar-title">
           <p class="wiki-badge">Wiki 页面</p>
           <h2>页面</h2>
         </div>
-        <button type="button" class="wiki-new-button" :disabled="!workspaceId" @click="newPage">＋ 新建</button>
-        <button type="button" class="wiki-import-button" :disabled="!workspaceId || importing" @click="triggerImport">
-          {{ importing ? '导入中...' : '导入文件' }}
-        </button>
+        <div class="wiki-actions">
+          <button type="button" class="wiki-new-button" :disabled="!workspaceId" @click="newPage">
+            <span class="wiki-new-icon" aria-hidden="true">＋</span>
+            <span>新建</span>
+          </button>
+          <button type="button" class="wiki-import-button" :disabled="!workspaceId || importing" @click="triggerImport">
+            <svg class="wiki-import-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>{{ importing ? '导入中...' : '导入文件' }}</span>
+          </button>
+        </div>
         <input ref="importInput" type="file" class="wiki-import-input" accept=".md,.txt,.html,.htm,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.csv,.json,.xml,.rtf,.odt,.png,.jpg,.jpeg" @change="onImportFile" />
       </header>
       <div v-if="loading" class="wiki-list-skeleton"><span></span><span></span><span></span></div>
       <div v-else-if="!flatTree.length" class="wiki-empty">
+        <div class="wiki-empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
         <strong>还没有页面</strong>
         <span>新建一个页面，用 Markdown 组织你的知识，保存后自动进入检索。</span>
       </div>
@@ -289,8 +308,12 @@ onMounted(load)
 
       <div v-if="reading" class="wiki-placeholder">正在打开页面...</div>
       <div v-else-if="!workspaceId" class="wiki-placeholder">请先选择知识空间。</div>
-      <div v-else-if="selectedId === null && !selected && !isNew" class="wiki-placeholder">
-        从左侧选择页面查看或编辑，或点击「新建」开始记录知识。
+      <div v-else-if="selectedId === null && !selected && !isNew" class="wiki-placeholder wiki-placeholder-centered">
+        <svg class="wiki-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+        <p>从左侧选择页面查看或编辑，或点击「新建」开始记录知识。</p>
       </div>
 
       <article v-else class="wiki-editor">
@@ -355,9 +378,18 @@ onMounted(load)
 
 .wiki-sidebar-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.wiki-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .wiki-badge {
@@ -374,6 +406,9 @@ onMounted(load)
 }
 
 .wiki-new-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--accent, #4f46e5);
   color: var(--accent, #4f46e5);
   background: transparent;
@@ -381,6 +416,12 @@ onMounted(load)
   padding: 6px 12px;
   cursor: pointer;
   font-weight: 600;
+  font-size: 13px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.wiki-new-button:hover:not(:disabled) {
+  background: var(--accent-soft, #eef2ff);
 }
 
 .wiki-new-button:disabled {
@@ -388,19 +429,40 @@ onMounted(load)
   cursor: not-allowed;
 }
 
+.wiki-new-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .wiki-import-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--border, #e5e7eb);
-  color: var(--text, #1f2937);
-  background: var(--surface, #fff);
+  color: var(--text-muted, #6b7280);
+  background: transparent;
   border-radius: 10px;
   padding: 6px 12px;
   cursor: pointer;
   font-weight: 600;
+  font-size: 13px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.wiki-import-button:hover:not(:disabled) {
+  background: var(--surface-hover, #f3f4f6);
+  color: var(--text, #1f2937);
+  border-color: var(--text-muted, #6b7280);
 }
 
 .wiki-import-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.wiki-import-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .wiki-import-input {
@@ -462,14 +524,42 @@ onMounted(load)
 .wiki-empty,
 .wiki-placeholder {
   color: var(--text-muted, #6b7280);
-  font-size: 14px;
 }
 
 .wiki-empty {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 4px;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+.wiki-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-soft, #eef2ff);
+  color: var(--accent, #4f46e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wiki-empty-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.wiki-empty strong {
+  font-size: 14px;
+  color: var(--text, #1f2937);
+}
+
+.wiki-empty span {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 220px;
 }
 
 .wiki-list-skeleton span {
@@ -491,6 +581,30 @@ onMounted(load)
 .wiki-placeholder {
   padding: 40px 8px;
   text-align: center;
+  font-size: 14px;
+}
+
+.wiki-placeholder-centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 60px 20px;
+  min-height: 40vh;
+}
+
+.wiki-placeholder-centered p {
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+.wiki-placeholder-icon {
+  width: 56px;
+  height: 56px;
+  color: var(--text-muted, #6b7280);
+  opacity: 0.45;
 }
 
 .wiki-error {
