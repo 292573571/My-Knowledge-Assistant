@@ -270,7 +270,7 @@ onMounted(load)
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            <span>{{ importing ? '导入中...' : '导入文件' }}</span>
+            <span>{{ importing ? '导入中...' : '导入' }}</span>
           </button>
         </div>
         <input ref="importInput" type="file" class="wiki-import-input" accept=".md,.txt,.html,.htm,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.csv,.json,.xml,.rtf,.odt,.png,.jpg,.jpeg" @change="onImportFile" />
@@ -362,7 +362,7 @@ onMounted(load)
 <style scoped>
 .wiki-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 320px 1fr;
   gap: 24px;
   align-items: start;
 }
@@ -378,18 +378,19 @@ onMounted(load)
 
 .wiki-sidebar-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
 }
 
 .wiki-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .wiki-badge {
@@ -410,18 +411,21 @@ onMounted(load)
   align-items: center;
   gap: 4px;
   border: 1px solid var(--accent, #4f46e5);
-  color: var(--accent, #4f46e5);
-  background: transparent;
+  color: #fff;
+  background: var(--accent, #4f46e5);
   border-radius: 10px;
   padding: 6px 12px;
   cursor: pointer;
   font-weight: 600;
   font-size: 13px;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.12);
 }
 
 .wiki-new-button:hover:not(:disabled) {
-  background: var(--accent-soft, #eef2ff);
+  background: #4338ca;
+  border-color: #4338ca;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.2);
 }
 
 .wiki-new-button:disabled {
@@ -446,6 +450,7 @@ onMounted(load)
   cursor: pointer;
   font-weight: 600;
   font-size: 13px;
+  white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
@@ -530,14 +535,14 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 28px 12px;
+  gap: 12px;
+  padding: 32px 16px;
   text-align: center;
 }
 
 .wiki-empty-icon {
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: var(--accent-soft, #eef2ff);
   color: var(--accent, #4f46e5);
@@ -547,19 +552,20 @@ onMounted(load)
 }
 
 .wiki-empty-icon svg {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
 .wiki-empty strong {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text, #1f2937);
 }
 
 .wiki-empty span {
   font-size: 13px;
   line-height: 1.5;
-  max-width: 220px;
+  max-width: 230px;
+  color: var(--text-muted, #6b7280);
 }
 
 .wiki-list-skeleton span {
