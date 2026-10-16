@@ -40,8 +40,8 @@ const SIM = {
   maxV: 30
 }
 
-const nodeColor = (type) => (type === 'WIKI_PAGE' ? '#2f6fed' : '#e8893a')
-const edgeStroke = (type) => (type === 'WIKI_LINK' ? '#6b9fff' : type === 'PARENT_CHILD' ? '#9aa7b5' : '#f0a93a')
+const nodeColor = (type) => (type === 'WIKI_PAGE' ? '#4f7c63' : '#c08a3e')
+const edgeStroke = (type) => (type === 'WIKI_LINK' ? '#7fa88f' : type === 'PARENT_CHILD' ? '#a8b0a5' : '#d8a95c')
 
 async function load() {
   if (!workspaceId.value) {
@@ -263,7 +263,14 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
     <div v-if="error" class="graph-error">{{ error }}</div>
     <div v-else-if="loading" class="graph-loading">图谱加载中…</div>
     <div v-else-if="nodes.length === 0" class="graph-empty">
-      暂无图谱数据。在「知识库」切换到「Wiki 页面」，用 <code>[[页面或概念名]]</code> 串联页面，即可生成知识图谱。
+      <div class="graph-empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="17" r="2.5" /><circle cx="19" cy="17" r="2.5" />
+          <path d="M12 7.5v3" /><path d="M10.6 12.2 6.8 15" /><path d="M13.4 12.2l3.8 2.8" />
+        </svg>
+      </div>
+      <strong>暂无图谱数据</strong>
+      <span>在「知识库」切换到「Wiki 页面」，用 <code>[[页面或概念名]]</code> 串联页面，即可生成知识图谱。</span>
     </div>
 
     <svg
@@ -322,37 +329,170 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
     </aside>
 
     <div class="graph-legend">
-      <span><i class="dot" style="background:#2f6fed" /> wiki 页</span>
-      <span><i class="dot" style="background:#e8893a" /> 概念</span>
-      <span><i class="line" style="background:#6b9fff" /> 页间链接</span>
-      <span><i class="line" style="background:#9aa7b5" /> 层级</span>
-      <span><i class="line dash" style="background:#f0a93a" /> 提及</span>
+      <span><i class="dot" style="background:#4f7c63" /> wiki 页</span>
+      <span><i class="dot" style="background:#c08a3e" /> 概念</span>
+      <span><i class="line" style="background:#7fa88f" /> 页间链接</span>
+      <span><i class="line" style="background:#a8b0a5" /> 层级</span>
+      <span><i class="line dash" style="background:#d8a95c" /> 提及</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.graph-view { position: relative; height: 100%; display: flex; flex-direction: column; }
-.graph-toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #ececec; flex-wrap: wrap; }
-.graph-stat { color: #6b7280; font-size: 13px; }
-.graph-hint { color: #9aa0a6; font-size: 12px; }
+.graph-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--site-line, #dce5f2);
+  border-radius: 18px;
+  background: var(--site-paper, rgba(255, 254, 249, 0.88));
+  box-shadow: var(--site-shadow, 0 10px 28px rgba(48, 67, 105, 0.055));
+}
+
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--site-line, #dce5f2);
+  background: rgba(255, 255, 255, 0.62);
+  flex-wrap: wrap;
+}
+
+.graph-toolbar strong {
+  color: var(--site-ink, #263552);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.graph-stat {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--site-green-soft, #eaf3e7);
+  color: var(--site-green, #6f9b78);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-hint { color: var(--site-muted, #738097); font-size: 12px; }
 .graph-spacer { flex: 1; }
-.graph-btn { border: 1px solid #d6dae0; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
-.graph-btn:hover { background: #f3f5f8; }
-.graph-svg { flex: 1; width: 100%; background: #fbfcfe; cursor: grab; user-select: none; }
+
+.graph-btn {
+  border: 1px solid var(--site-line, #dce5f2);
+  background: #fff;
+  border-radius: 9px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--site-ink-soft, #525f75);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.graph-btn:hover {
+  border-color: #80a388;
+  color: var(--site-green, #6f9b78);
+  background: var(--site-green-soft, #eaf3e7);
+}
+
+.graph-svg {
+  flex: 1;
+  width: 100%;
+  background-color: #fffdf8;
+  background-image: radial-gradient(circle, rgba(80, 110, 90, 0.09) 1px, transparent 1px);
+  background-size: 24px 24px;
+  cursor: grab;
+  user-select: none;
+}
+
 .graph-svg:active { cursor: grabbing; }
 .graph-node { cursor: pointer; }
-.graph-label { font-size: 11px; fill: #2b2f36; pointer-events: none; }
-.graph-error, .graph-loading, .graph-empty { padding: 24px; color: #6b7280; }
-.graph-empty code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; }
-.graph-panel { position: absolute; top: 52px; right: 12px; width: 240px; background: #fff; border: 1px solid #e3e7ec; border-radius: 10px; padding: 12px; box-shadow: 0 6px 18px rgba(0,0,0,.08); }
-.graph-panel h4 { margin: 0 0 8px; font-size: 14px; }
-.graph-panel ul { list-style: none; margin: 0 0 8px; padding: 0; max-height: 320px; overflow: auto; }
+
+.graph-label {
+  font-size: 11px;
+  fill: var(--site-ink-soft, #525f75);
+  paint-order: stroke;
+  stroke: rgba(255, 253, 248, 0.95);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.graph-error,
+.graph-loading,
+.graph-empty {
+  padding: 44px 24px;
+  color: var(--site-muted, #738097);
+  text-align: center;
+}
+
+.graph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.graph-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--site-green-soft, #eaf3e7);
+  color: var(--site-green, #6f9b78);
+}
+
+.graph-empty-icon svg { width: 28px; height: 28px; }
+.graph-empty strong { color: var(--site-ink, #263552); font-size: 15px; }
+.graph-empty span { font-size: 13px; line-height: 1.6; max-width: 420px; }
+.graph-empty code { background: #eef1ea; padding: 2px 6px; border-radius: 5px; }
+
+.graph-panel {
+  position: absolute;
+  top: 66px;
+  right: 14px;
+  width: 250px;
+  background: #fffdf8;
+  border: 1px solid var(--site-line, #dce5f2);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 12px 30px rgba(48, 67, 105, 0.12);
+}
+
+.graph-panel h4 { margin: 0 0 10px; color: var(--site-ink, #263552); font-size: 14px; }
+.graph-panel ul { list-style: none; margin: 0 0 10px; padding: 0; max-height: 320px; overflow: auto; }
 .graph-panel li { padding: 3px 0; }
-.graph-link { background: none; border: none; color: #2f6fed; cursor: pointer; padding: 0; font-size: 13px; }
+
+.graph-link {
+  background: none;
+  border: none;
+  color: var(--site-green, #6f9b78);
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+}
+
 .graph-link:hover { text-decoration: underline; }
-.graph-legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 14px; background: rgba(255,255,255,.9); border: 1px solid #ececec; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #555; }
-.graph-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-.graph-legend .line { display: inline-block; width: 16px; height: 0; border-top: 2px solid; margin-right: 4px; vertical-align: middle; }
+
+.graph-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--site-line, #dce5f2);
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.92);
+  box-shadow: 0 4px 14px rgba(48, 67, 105, 0.06);
+  font-size: 12px;
+  color: var(--site-muted, #738097);
+}
+
+.graph-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.graph-legend .line { display: inline-block; width: 16px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
 .graph-legend .line.dash { border-top-style: dashed; }
 </style>
