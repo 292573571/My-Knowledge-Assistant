@@ -437,32 +437,30 @@ async function submitPasswordChange() {
   }
   .knowledge-tabs {
     display: flex;
-    gap: 4px;
-    padding: 14px 24px 0;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    gap: 6px;
+    padding: 14px 24px 12px;
     flex: 0 0 auto;
   }
   .knowledge-tabs button {
     appearance: none;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
-    padding: 10px 18px;
+    padding: 8px 18px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    color: #64748b;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    border-radius: 6px 6px 0 0;
-    transition: color 0.15s ease, background 0.15s ease;
+    color: var(--site-muted, #738097);
+    border-radius: 999px;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   }
   .knowledge-tabs button:hover {
-    color: #334155;
-    background: rgba(148, 163, 184, 0.1);
+    color: var(--site-ink-soft, #525f75);
+    background: rgba(111, 155, 120, 0.08);
   }
   .knowledge-tabs button.active {
-    color: #2563eb;
-    border-bottom-color: #2563eb;
+    color: #fff;
+    background: var(--site-green, #6f9b78);
+    border-color: var(--site-green, #6f9b78);
   }
   </style>
   <template v-else>

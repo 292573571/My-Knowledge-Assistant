@@ -15,7 +15,6 @@ defineEmits(['manage-workspace'])
         <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7"/><path d="M9 11h7"/></svg>
       </div>
       <div class="knowledge-hero-body">
-        <p class="records-badge">文档库</p>
         <h1>管理你的知识沉淀</h1>
         <p class="knowledge-hero-desc">{{ workspace?.type === 'PUBLIC' ? '维护平台公共知识源。这里发布的资料可供所有用户在个人和团队空间中检索使用。' : '统一查看当前空间的原始资料、正式笔记和 AI 学习记录，支持上传、筛选与精确删除。' }}</p>
       </div>
@@ -38,23 +37,28 @@ defineEmits(['manage-workspace'])
 <style scoped>
 .knowledge-hero {
   justify-content: flex-start;
-  gap: 18px;
+  gap: 16px;
+  padding: 14px 4px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .knowledge-hero-icon {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 15px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   color: var(--site-green, #6f9b78);
   background: var(--site-green-soft, #eaf3e7);
 }
 
 .knowledge-hero-icon svg {
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -67,18 +71,22 @@ defineEmits(['manage-workspace'])
   min-width: 0;
 }
 
+.knowledge-hero-body h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
 .knowledge-hero-desc {
-  margin: 9px 0 0;
+  margin: 6px 0 0;
   color: var(--site-muted, #738097);
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 .knowledge-hero-aside {
   display: flex;
   flex: 0 0 auto;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 10px;
 }
 
@@ -86,7 +94,7 @@ defineEmits(['manage-workspace'])
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 200px;
   padding: 5px 11px;
   border: 1px solid var(--site-line, #dce5f2);
   border-radius: 999px;
@@ -108,14 +116,17 @@ defineEmits(['manage-workspace'])
 }
 
 @media (max-width: 900px) {
+  .knowledge-hero {
+    flex-wrap: wrap;
+  }
+
   .knowledge-hero-aside {
-    align-items: stretch;
     width: 100%;
+    justify-content: flex-start;
   }
 
   .knowledge-workspace-chip {
     max-width: none;
-    align-self: flex-start;
   }
 }
 </style>
