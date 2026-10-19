@@ -22,7 +22,8 @@ import org.junit.jupiter.api.Test;
 class ExpandedDocumentParserTest {
 
     private final ExcelDocumentParser excel = new ExcelDocumentParser();
-    private final PowerPointDocumentParser powerPoint = new PowerPointDocumentParser();
+    private final PowerPointDocumentParser powerPoint =
+            new PowerPointDocumentParser(image -> "", "auto", 1600, 500, 200);
     private final CsvDocumentParser csv = new CsvDocumentParser();
     private final JsonDocumentParser json = new JsonDocumentParser();
     private final XmlDocumentParser xml = new XmlDocumentParser();
