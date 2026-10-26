@@ -427,10 +427,8 @@ public class RagService {
         List<SourceDocument> retrievedSources = retrieveCandidates(
                 question, conversationContext.standaloneQuestion(), ownerUserId(conversationId),
                 readableWorkspaceIds, options);
-        List<SourceDocument> sources = filterByThreshold(question, retrievedSources);
-        // 图谱感知扩召回（默认关闭）：命中 wiki 页时并入 1 跳邻接页切片作为补充上下文。
-        sources = expandWithGraphNeighbors(question, retrievedSources, sources,
-                request.workspaceId(), readableWorkspaceIds);
+        List<SourceDocument> sources = applyRetrievalPolicy(
+                question, retrievedSources, request.workspaceId(), readableWorkspaceIds, true);
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
                 conversationId,
@@ -683,7 +681,7 @@ public class RagService {
         // standaloneQuestion 仅作为查询扩展，改写回来后再补充检索，检索质量不变。
         java.util.concurrent.CompletableFuture<ConversationContext> contextFuture =
                 java.util.concurrent.CompletableFuture.supplyAsync(
-                        () -> resolveConversationContext(conversationId, question, contextHistory));
+                        () -> resolveConversationContext(conversationId, question, contextHistory), aiExecutor);
 
         RagChatOptions retrievalOptions = new RagChatOptions(queryRewriteEnabled, multiQueryEnabled);
         Set<String> readableWorkspaceIds = resolveReadable(user, request.workspaceId());
@@ -714,7 +712,8 @@ public class RagService {
             timing.mark("expandRetrieve");
         }
 
-        List<SourceDocument> sources = filterByThreshold(question, retrievedSources, qualityGate.isEnabled());
+        List<SourceDocument> sources = applyRetrievalPolicy(
+                question, retrievedSources, request.workspaceId(), readableWorkspaceIds, false);
         timing.mark("filter");
         String effectiveQuestion = standaloneQuestion != null ? standaloneQuestion : question;
         if (sources.isEmpty() || !hasEnoughKnowledge(effectiveQuestion, sources)) {
@@ -1511,10 +1510,31 @@ public class RagService {
                 .toList();
     }
 
+    /**
+     * 检索后处理：阈值过滤 + 图谱感知扩召回，同步与流式两条链路共用。
+     *
+     * <p>两条链路对「同步质量门」是有意区别的：质量门内部是一次阻塞 LLM 调用，放在首字之前会显著
+     * 推高流式 TTFT，因此流式链路传 {@code synchronousQualityGate=false}，只做本地规则阈值过滤。
+     * 图谱扩召回是纯查询、不调模型，必须两条链路一致生效——此前流式链路各自内联了阈值过滤、
+     * 漏掉扩召回，导致该能力在线上（全部走流式）从未生效。</p>
+     */
+    private List<SourceDocument> applyRetrievalPolicy(String question, List<SourceDocument> retrievedSources,
+                                                      String workspaceId, Set<String> readableWorkspaceIds,
+                                                      boolean synchronousQualityGate) {
+        List<SourceDocument> sources = filterByThreshold(question, retrievedSources, synchronousQualityGate);
+        // 图谱感知扩召回（默认关闭）：命中 wiki 页时并入 1 跳邻接页切片作为补充上下文。
+        return expandWithGraphNeighbors(question, retrievedSources, sources, workspaceId, readableWorkspaceIds);
+    }
+
     private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources) {
         return filterByThreshold(question, sources, true);
     }
 
+    /**
+     * @param alwaysGate true 时调用质量门（是否真正生效由 {@link RagQualityGate#relevantSources}
+     *                   内部按 workbench.rag.quality-gate.enabled 决定）；false 用于 Agent 工具检索，
+     *                   显式跳过同步 LLM 筛选以降低工具调用首字延迟。
+     */
     private List<SourceDocument> filterByThreshold(String question, List<SourceDocument> sources, boolean alwaysGate) {
         // AI 学习记录仅用于学习记录页面，不属于知识库事实来源。
         List<SourceDocument> eligibleSources = sources.stream()
@@ -1532,8 +1552,7 @@ public class RagService {
                 .filter(this::passesThreshold)
                 .filter(source -> hasStrongRetrievalSignal(question, source))
                 .toList()));
-        boolean shouldLlmGate = alwaysGate;
-        List<SourceDocument> relevantSources = shouldLlmGate
+        List<SourceDocument> relevantSources = alwaysGate
                 ? qualityGate.relevantSources(question, thresholdSources)
                 : thresholdSources;
         List<SourceDocument> contextSources = applyContextPolicy(expandAdjacent(relevantSources));
