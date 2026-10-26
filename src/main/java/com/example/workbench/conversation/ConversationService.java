@@ -11,7 +11,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,20 +96,20 @@ public class ConversationService {
     @Transactional(readOnly = true)
     public List<MessageResponse> messages(AppUser user, String workspaceId, String conversationId) {
         ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
-        List<DocumentIndexEntry> indexEntries = indexedEntriesFor(workspaceId);
+        DisplayNameBatch names = displayNameBatch(workspaceId);
         return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
-                .map(message -> messageResponse(message, workspaceId, indexEntries))
+                .map(message -> messageResponse(message, names))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public PageResponse<MessageResponse> pageMessages(AppUser user, String workspaceId, String conversationId, int page, int size) {
         ChatConversation conversation = ownedConversation(user, workspaceId, conversationId);
-        List<DocumentIndexEntry> indexEntries = indexedEntriesFor(workspaceId);
+        DisplayNameBatch names = displayNameBatch(workspaceId);
         var result = messageRepository.findByConversationId(conversation.getId(),
                 PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 500),
                         Sort.by(Sort.Direction.ASC, "createdAt").and(Sort.by(Sort.Direction.ASC, "id"))));
-        return new PageResponse<>(result.getContent().stream().map(message -> messageResponse(message, workspaceId, indexEntries)).toList(),
+        return new PageResponse<>(result.getContent().stream().map(message -> messageResponse(message, names)).toList(),
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(), result.hasNext());
     }
 
@@ -224,20 +226,30 @@ public class ConversationService {
         return new ConversationResponse(conversation.getClientConversationId(), conversation.getTitle(), conversation.getMode(), conversation.getUpdatedAt());
     }
 
-    private MessageResponse messageResponse(ChatMessageEntity message, String workspaceId, List<DocumentIndexEntry> indexEntries) {
+    private MessageResponse messageResponse(ChatMessageEntity message, DisplayNameBatch names) {
         return new MessageResponse(message.getId(), message.getRole(), message.getContent(),
-                normalizeSources(readJson(message.getSourcesJson()), workspaceId, indexEntries), readJson(message.getToolCallsJson()),
+                normalizeSources(readJson(message.getSourcesJson()), names), readJson(message.getToolCallsJson()),
                 message.getCreatedAt());
     }
 
     /**
-     * 一次读取本会话全部消息共用同一份文档索引。
+     * 一次读取本会话全部消息共用同一份文档索引与任务快照。
      *
      * <p>原先每条消息各自调一次 {@code listIndexedDocuments()}：消息数 × 索引全表扫描，
      * 且每次都去抢索引 store 的同一把 synchronized 锁（与文档入库写入互斥），
      * 会话越长 / 入库越频繁，互相拖慢越明显。索引未变化时重复查询没有任何收益，
      * 因此在进入循环前查一次并复用。</p>
+     *
+     * <p>同一份任务快照也在这里预取：展示名解析需要该工作空间的上传任务列表，
+     * 逐条来源重新查询会让打开一次会话产生「消息数 × 来源数」次任务表查询。</p>
      */
+    private DisplayNameBatch displayNameBatch(String workspaceId) {
+        if (documentIngestionService == null || displayNameResolver == null) {
+            return null;
+        }
+        return new DisplayNameBatch(workspaceId, indexedEntriesFor(workspaceId));
+    }
+
     private List<DocumentIndexEntry> indexedEntriesFor(String workspaceId) {
         if (documentIngestionService == null || displayNameResolver == null) return List.of();
         return documentIngestionService.listIndexedDocuments().stream()
@@ -249,9 +261,8 @@ public class ConversationService {
      * 历史消息可能保存了旧版向量 metadata 中的 UUID 存储文件名。
      * 读取历史时按当前索引表的路径恢复原始文件名，避免旧引用永久显示 UUID。
      */
-    private JsonNode normalizeSources(JsonNode sources, String workspaceId, List<DocumentIndexEntry> indexEntries) {
-        if (sources == null || !sources.isArray() || documentIngestionService == null || displayNameResolver == null) return sources;
-        List<DocumentIndexEntry> entries = indexEntries;
+    private JsonNode normalizeSources(JsonNode sources, DisplayNameBatch names) {
+        if (sources == null || !sources.isArray() || names == null) return sources;
         ArrayNode normalized = objectMapper.createArrayNode();
         for (JsonNode source : sources) {
             if (!source.isObject()) {
@@ -259,11 +270,44 @@ public class ConversationService {
                 continue;
             }
             ObjectNode copy = source.deepCopy();
-            String displayName = displayNameResolver.resolve(text(copy, "file"), text(copy, "path"), workspaceId, entries);
+            String displayName = names.resolve(text(copy, "file"), text(copy, "path"));
             if (displayName != null && !displayName.isBlank()) copy.put("file", displayName);
             normalized.add(copy);
         }
         return normalized;
+    }
+
+    /**
+     * 单次请求内的文档名解析上下文。
+     *
+     * <p>任务快照只在首次需要时加载（多数会话没有引用文档，不必白查一次），
+     * 相同「文件 + 路径」只解析一次：同一份文档常被多条回答反复引用。</p>
+     */
+    private final class DisplayNameBatch {
+
+        private final String workspaceId;
+        private final List<DocumentIndexEntry> indexEntries;
+        private final Map<String, String> resolvedNames = new HashMap<>();
+        private DocumentDisplayNameResolver.TaskScope taskScope;
+        private boolean taskScopeLoaded;
+
+        private DisplayNameBatch(String workspaceId, List<DocumentIndexEntry> indexEntries) {
+            this.workspaceId = workspaceId;
+            this.indexEntries = indexEntries;
+        }
+
+        private String resolve(String file, String path) {
+            String key = (file == null ? "" : file) + '\u0000' + (path == null ? "" : path);
+            String cached = resolvedNames.get(key);
+            if (cached != null) return cached;
+            if (!taskScopeLoaded) {
+                taskScope = displayNameResolver.scope(workspaceId);
+                taskScopeLoaded = true;
+            }
+            String name = displayNameResolver.resolve(file, path, workspaceId, indexEntries, taskScope);
+            resolvedNames.put(key, name);
+            return name;
+        }
     }
 
     private String text(ObjectNode node, String field) {

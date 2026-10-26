@@ -2,6 +2,7 @@ package com.example.workbench.scheduling;
 
 import com.example.workbench.agent.MaintenancePendingActionCleanupService;
 import com.example.workbench.agent.TeachingAttemptCleanupService;
+import com.example.workbench.auth.UserSessionCleanupService;
 import com.example.workbench.learning.LearningRecordProjectionService;
 import com.example.workbench.learning.FormalNoteProjectionService;
 import com.example.workbench.audit.AuditOutboxService;
@@ -20,6 +21,7 @@ class DatabaseScheduledJobRunner {
     static final String LEARNING_RECORD_PROJECTION = "learning-record-projection";
     static final String FORMAL_NOTE_PROJECTION = "formal-note-projection";
     static final String AUDIT_EVENT_OUTBOX_RETRY = "audit-event-outbox-retry";
+    static final String USER_SESSION_CLEANUP = "user-session-cleanup";
     private static final Logger log = LoggerFactory.getLogger(DatabaseScheduledJobRunner.class);
     private static final long LEASE_SECONDS = 60;
 
@@ -29,12 +31,13 @@ class DatabaseScheduledJobRunner {
     private final LearningRecordProjectionService learningRecordProjectionService;
     private final FormalNoteProjectionService formalNoteProjectionService;
     private final AuditOutboxService auditOutboxService;
+    private final UserSessionCleanupService userSessionCleanupService;
     private final String workerId = UUID.randomUUID().toString();
 
     DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
                                TeachingAttemptCleanupService teachingAttemptCleanupService,
                                MaintenancePendingActionCleanupService maintenanceActionCleanupService) {
-        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService, null, null, null);
+        this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService, null, null, null, null);
     }
 
     DatabaseScheduledJobRunner(ScheduledJobRepository jobRepository,
@@ -43,7 +46,7 @@ class DatabaseScheduledJobRunner {
                                LearningRecordProjectionService learningRecordProjectionService,
                                FormalNoteProjectionService formalNoteProjectionService) {
         this(jobRepository, teachingAttemptCleanupService, maintenanceActionCleanupService,
-                learningRecordProjectionService, formalNoteProjectionService, null);
+                learningRecordProjectionService, formalNoteProjectionService, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -52,13 +55,15 @@ class DatabaseScheduledJobRunner {
                                MaintenancePendingActionCleanupService maintenanceActionCleanupService,
                                LearningRecordProjectionService learningRecordProjectionService,
                                FormalNoteProjectionService formalNoteProjectionService,
-                               AuditOutboxService auditOutboxService) {
+                               AuditOutboxService auditOutboxService,
+                               UserSessionCleanupService userSessionCleanupService) {
         this.jobRepository = jobRepository;
         this.teachingAttemptCleanupService = teachingAttemptCleanupService;
         this.maintenanceActionCleanupService = maintenanceActionCleanupService;
         this.learningRecordProjectionService = learningRecordProjectionService;
         this.formalNoteProjectionService = formalNoteProjectionService;
         this.auditOutboxService = auditOutboxService;
+        this.userSessionCleanupService = userSessionCleanupService;
     }
 
     // 这里只负责高频唤醒；任务是否启用、何时执行和多实例抢占由 scheduled_jobs 控制。
@@ -75,6 +80,9 @@ class DatabaseScheduledJobRunner {
             }
             if (auditOutboxService != null) {
                 runIfDue(AUDIT_EVENT_OUTBOX_RETRY, auditOutboxService::projectOne);
+            }
+            if (userSessionCleanupService != null) {
+                runIfDue(USER_SESSION_CLEANUP, () -> userSessionCleanupService.cleanupExpired(Instant.now()));
             }
         } catch (Exception e) {
             // 必须把异常对象交给日志框架：只打 getMessage() 会丢掉堆栈，数据库类故障将无法定位。
