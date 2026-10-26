@@ -252,7 +252,6 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
 <template>
   <div class="graph-view">
     <div class="graph-toolbar">
-      <strong>知识图谱</strong>
       <span class="graph-stat">节点 {{ nodes.length }} · 边 {{ edges.length }}</span>
       <span class="graph-hint">拖拽节点 / 滚轮缩放 / 空白处平移 · 点页面节点打开 · 点概念节点看关联页</span>
       <span class="graph-spacer" />
@@ -269,8 +268,8 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
           <path d="M12 7.5v3" /><path d="M10.6 12.2 6.8 15" /><path d="M13.4 12.2l3.8 2.8" />
         </svg>
       </div>
-      <strong>暂无图谱数据</strong>
-      <span>在「知识库」切换到「Wiki 页面」，用 <code>[[页面或概念名]]</code> 串联页面，即可生成知识图谱。</span>
+      <strong>这个空间还没有图谱</strong>
+      <span>切回「页面」视图，用 <code>[[页面或概念名]]</code> 把页面串起来，保存后即可在这里看到关系网络。</span>
     </div>
 
     <svg

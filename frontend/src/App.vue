@@ -10,7 +10,6 @@ import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } fr
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
 const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeBase.vue'))
 const WikiPages = defineAsyncComponent(() => import('./components/WikiPages.vue'))
-const GraphView = defineAsyncComponent(() => import('./components/GraphView.vue'))
 const UserProfile = defineAsyncComponent(() => import('./components/UserProfile.vue'))
 const ConfirmDialog = defineAsyncComponent(() => import('./components/ConfirmDialog.vue'))
 const WorkspaceManager = defineAsyncComponent(() => import('./components/WorkspaceManager.vue'))
@@ -24,9 +23,10 @@ const restoringWorkspace = ref(false)
 const appReady = ref(false)
 const authOpen = ref(false)
 const activeSection = ref('home')
-const pendingWikiPageId = ref(null)
 // 知识库内部子视图: 'docs'=文档库(上传文件), 'wiki'=Wiki 页面(写 markdown)
 const knowledgeTab = ref('docs')
+// Wiki 子视图: 'pages'=页面列表/编辑器, 'graph'=知识图谱（与 Wiki 同页面，仅切换视图）
+const wikiView = ref('pages')
 const assistantMounted = ref(false)
 const accountMenuOpen = ref(false)
 const passwordFormOpen = ref(false)
@@ -51,16 +51,21 @@ const accountMenuRef = ref(null)
 let revealObserver = null
 let revealMutationObserver = null
 
-const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'graph', 'users', 'maintenance', 'profile'])
+// 'graph' 已并入 knowledge 的 Wiki 视图，不再是独立导航项（旧链接在 readUrlState 里兼容）
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
   let section = params.get('section') || window.location.hash.slice(1)
-  let tab = 'docs'
+  let tab = params.get('tab') === 'wiki' ? 'wiki' : 'docs'
+  let view = params.get('view') === 'graph' ? 'graph' : 'pages'
   if (section === 'wiki') { section = 'knowledge'; tab = 'wiki' }
+  // 兼容旧链接：知识图谱以前是独立导航项 ?section=graph
+  if (section === 'graph') { section = 'knowledge'; tab = 'wiki'; view = 'graph' }
   return {
     section: navigableSections.has(section) ? section : 'home',
     tab,
+    view,
     workspaceId: params.get('workspace') || ''
   }
 }
@@ -74,6 +79,14 @@ function canAccessSection(section, user) {
 function syncUrlState({ replace = false } = {}) {
   const url = new URL(window.location.href)
   url.searchParams.set('section', activeSection.value)
+  if (activeSection.value === 'knowledge') {
+    url.searchParams.set('tab', knowledgeTab.value)
+    if (knowledgeTab.value === 'wiki' && wikiView.value === 'graph') url.searchParams.set('view', 'graph')
+    else url.searchParams.delete('view')
+  } else {
+    url.searchParams.delete('tab')
+    url.searchParams.delete('view')
+  }
   if (activeWorkspaceId.value) url.searchParams.set('workspace', activeWorkspaceId.value)
   else url.searchParams.delete('workspace')
   url.hash = ''
@@ -83,7 +96,10 @@ function syncUrlState({ replace = false } = {}) {
 function applyUrlState() {
   const state = readUrlState()
   activeSection.value = canAccessSection(state.section, currentUser.value) ? state.section : 'assistant'
-  if (state.section === 'knowledge') knowledgeTab.value = state.tab || 'docs'
+  if (state.section === 'knowledge') {
+    knowledgeTab.value = state.tab || 'docs'
+    wikiView.value = state.view || 'pages'
+  }
   const workspace = workspaces.value.find(item => item.id === state.workspaceId)
   if (workspace) {
     activeWorkspaceId.value = workspace.id
@@ -267,11 +283,17 @@ function openProfile() {
   mobileNavOpen.value = false
 }
 
-// 知识图谱点击页面节点：进入知识库的 Wiki 子视图并打开对应页
-function openWikiPageFromGraph(pageId) {
-  pendingWikiPageId.value = pageId
-  knowledgeTab.value = 'wiki'
-  navigateTo('knowledge')
+// 知识库子视图切换：写回 URL，刷新/分享链接后仍停在同一个 tab
+function selectKnowledgeTab(tab) {
+  const next = tab === 'wiki' ? 'wiki' : 'docs'
+  if (knowledgeTab.value === next) return
+  knowledgeTab.value = next
+  syncUrlState()
+}
+
+function onWikiViewChange(next) {
+  wikiView.value = next === 'graph' ? 'graph' : 'pages'
+  syncUrlState()
 }
 
 function navigateTo(section) {
@@ -349,10 +371,6 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
             <span>知识库</span>
           </button>
-          <button :class="{ active: activeSection === 'graph' }" type="button" @click="navigateTo('graph')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.6 8.4 11 16M16.4 7.8 13 16.2M8 7.2l8-1"/></svg>
-            <span>知识图谱</span>
-          </button>
           <button v-if="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :class="{ active: activeSection === 'users' }" type="button" @click="navigateTo('users')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 7.5a2.5 2.5 0 0 1 0 5M17 15a4 4 0 0 1 3.5 4"/></svg>
             <span>用户管理</span>
@@ -411,14 +429,13 @@ async function submitPasswordChange() {
       <template v-else-if="activeSection === 'knowledge'">
         <div class="knowledge-shell">
           <div class="knowledge-tabs" role="tablist" aria-label="知识库子视图">
-            <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="knowledgeTab = 'docs'">文档库</button>
-            <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="knowledgeTab = 'wiki'">Wiki 页面</button>
+            <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="selectKnowledgeTab('docs')">文档库</button>
+            <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">Wiki 页面</button>
           </div>
           <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
-          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :open-page-id="pendingWikiPageId" @wiki-page-opened="pendingWikiPageId = null" />
+          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" @view-change="onWikiViewChange" />
         </div>
       </template>
-      <GraphView v-else-if="activeSection === 'graph'" :key="`graph-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @open-wiki-page="openWikiPageFromGraph" />
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />

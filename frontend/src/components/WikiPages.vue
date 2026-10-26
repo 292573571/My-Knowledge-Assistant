@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import {
   createWikiPage,
@@ -11,11 +11,31 @@ import {
 } from '../api/wikiPageApi'
 import { renderMarkdown } from '../utils/markdown'
 
+// 图谱按需加载：只在切到「图谱」视图时才拉这 500 行与布局仿真代码。
+const GraphView = defineAsyncComponent(() => import('./GraphView.vue'))
+
 const props = defineProps({
   workspace: { type: Object, default: null },
-  openPageId: { type: String, default: null }
+  openPageId: { type: String, default: null },
+  // 由 URL 状态传入，支持 ?tab=wiki&view=graph 直接落到图谱视图
+  initialView: { type: String, default: 'pages' }
 })
-const emit = defineEmits(['wikiPageOpened'])
+const emit = defineEmits(['wikiPageOpened', 'viewChange'])
+
+// 视图：'pages'=页面对话式编辑（左列表 + 右编辑器），'graph'=图谱
+const view = ref(props.initialView === 'graph' ? 'graph' : 'pages')
+
+function setView(next) {
+  const target = next === 'graph' ? 'graph' : 'pages'
+  if (view.value === target) return
+  view.value = target
+  emit('viewChange', target)
+}
+
+function openFromGraph(pageId) {
+  setView('pages')
+  if (pageId) openById(pageId)
+}
 
 const pages = ref([])
 const selectedId = ref(null)
@@ -248,11 +268,54 @@ async function openById(id) {
 watch(() => props.openPageId, (id) => {
   if (id) openById(id)
 })
+// 外部（URL / 浏览器前进后退）切换视图时同步内部状态
+watch(() => props.initialView, (next) => {
+  view.value = next === 'graph' ? 'graph' : 'pages'
+})
 onMounted(load)
 </script>
 
 <template>
-  <main class="wiki-layout">
+  <div class="wiki-shell">
+    <div class="wiki-viewbar">
+      <div class="wiki-view-switch" role="tablist" aria-label="Wiki 视图">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="view === 'pages'"
+          :class="{ active: view === 'pages' }"
+          @click="setView('pages')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10l2 2.5h6.5A1.5 1.5 0 0 1 20 8v10.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z" />
+          </svg>
+          页面
+          <span class="wiki-view-count">{{ pages.length }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="view === 'graph'"
+          :class="{ active: view === 'graph' }"
+          @click="setView('graph')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <circle cx="6" cy="7" r="2.2" />
+            <circle cx="18" cy="6" r="2.2" />
+            <circle cx="12" cy="18" r="2.2" />
+            <path d="M7.6 8.4 11 16M16.4 7.8 13 16.2M8 7.2l8-1" />
+          </svg>
+          图谱
+        </button>
+      </div>
+      <p class="wiki-view-hint">
+        {{ view === 'pages'
+          ? '用 [[页面名]] 互相引用，保存后自动生成图谱'
+          : '拖拽节点 / 滚轮缩放 · 点页面节点直接打开 · 点概念节点看关联页' }}
+      </p>
+    </div>
+
+    <main v-if="view === 'pages'" class="wiki-layout">
     <aside class="wiki-sidebar" data-reveal>
       <header class="wiki-sidebar-header">
         <div class="wiki-sidebar-title">
@@ -356,10 +419,80 @@ onMounted(load)
         <div v-else class="wiki-preview markdown-body" v-html="previewHtml" @click="onPreviewClick"></div>
       </article>
     </section>
-  </main>
+    </main>
+
+    <GraphView
+      v-else
+      class="wiki-graph"
+      :workspace="workspace"
+      @open-wiki-page="openFromGraph"
+    />
+  </div>
 </template>
 
 <style scoped>
+/* 视图切换：页面（列表 + 编辑器） / 图谱，两者同属 Wiki 一个页面 */
+.wiki-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.wiki-viewbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.wiki-view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--site-line, #dce5f2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.wiki-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--site-muted, #738097);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.wiki-view-switch button svg { width: 15px; height: 15px; }
+.wiki-view-switch button:hover { color: var(--site-ink, #263552); background: rgba(111, 155, 120, 0.09); }
+.wiki-view-switch button.active,
+.wiki-view-switch button.active:hover { color: #fff; background: var(--site-green, #6f9b78); }
+
+.wiki-view-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(38, 53, 82, 0.07);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wiki-view-switch button.active .wiki-view-count { background: rgba(255, 255, 255, 0.25); }
+
+.wiki-view-hint { margin: 0; color: var(--site-muted, #738097); font-size: 12px; }
+
+.wiki-graph { min-height: 660px; }
+
 .wiki-layout {
   display: grid;
   grid-template-columns: 320px 1fr;
