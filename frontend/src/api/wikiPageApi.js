@@ -55,3 +55,18 @@ export function importWikiPageFile(workspaceId, file) {
 export function fetchWikiImportTask(workspaceId, taskId) {
   return request(`/api/wiki-pages/import/${encodeURIComponent(taskId)}?workspaceId=${encodeURIComponent(workspaceId || '')}`)
 }
+
+// 一键导出空间内全部 Wiki 页面为 Markdown zip。
+export async function exportWikiPagesZip(workspaceId) {
+  let response
+  try {
+    response = await fetch(`/api/wiki-pages/export?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
+      credentials: 'include',
+      headers: authHeaders()
+    })
+  } catch (error) {
+    throw apiErrorFromException(error, '无法连接后端服务。')
+  }
+  if (!response.ok) throw await apiErrorFromResponse(response, '导出失败。')
+  return response.blob()
+}

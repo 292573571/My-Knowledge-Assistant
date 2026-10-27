@@ -25,12 +25,14 @@ public class WikiPageController {
     private final WikiPageService wikiPageService;
     private final WorkspaceService workspaceService;
     private final WikiImportTaskService importTaskService;
+    private final WikiPageExportService exportService;
 
     public WikiPageController(WikiPageService wikiPageService, WorkspaceService workspaceService,
-                              WikiImportTaskService importTaskService) {
+                              WikiImportTaskService importTaskService, WikiPageExportService exportService) {
         this.wikiPageService = wikiPageService;
         this.workspaceService = workspaceService;
         this.importTaskService = importTaskService;
+        this.exportService = exportService;
     }
 
     @PostMapping
@@ -96,6 +98,18 @@ public class WikiPageController {
                     org.springframework.http.HttpStatus.NOT_FOUND, "导入任务不存在或已过期，请重新导入。");
         }
         return response;
+    }
+
+    /** 一键导出空间内全部 Wiki 页面为 Markdown zip（含 _manifest.json 层级清单）。 */
+    @GetMapping("/export")
+    public void export(@RequestParam String workspaceId, HttpServletRequest request,
+                       jakarta.servlet.http.HttpServletResponse response) throws IOException {
+        AppUser user = user(request);
+        workspaceService.access(user, workspaceId);
+        response.setContentType("application/zip");
+        response.setHeader("Content-Disposition",
+                "attachment; filename=wiki-" + workspaceId.replaceAll("[^A-Za-z0-9_-]", "") + ".zip");
+        exportService.export(workspaceId, response.getOutputStream());
     }
 
     private AppUser user(HttpServletRequest request) {

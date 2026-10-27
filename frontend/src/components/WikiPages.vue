@@ -8,6 +8,7 @@ import {
   fetchWikiPages,
   importWikiPageFile,
   fetchWikiImportTask,
+  exportWikiPagesZip,
   updateWikiPage
 } from '../api/wikiPageApi'
 import { renderMarkdown } from '../utils/markdown'
@@ -52,6 +53,7 @@ const notice = ref('')
 // 区分「未选择任何页面」与「点击新建进入空白编辑态」
 const isNew = ref(false)
 const importing = ref(false)
+const exporting = ref(false)
 const importInput = ref(null)
 
 const draft = ref({ title: '', slug: '', parentId: '', contentMd: '' })
@@ -226,6 +228,29 @@ function newPage() {
 
 function triggerImport() {
   if (importInput.value) importInput.value.click()
+}
+
+async function exportAll() {
+  if (exporting.value) return
+  exporting.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const blob = await exportWikiPagesZip(workspaceId.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `wiki-${workspaceId.value}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    notice.value = `已导出 ${pages.value.length} 篇笔记（Markdown zip），请查看浏览器下载。`
+  } catch (exception) {
+    error.value = formatApiError(exception, '导出失败。')
+  } finally {
+    exporting.value = false
+  }
 }
 
 async function onImportFile(event) {
@@ -465,6 +490,9 @@ onMounted(load)
           </button>
           <button type="button" class="wiki-btn ghost" :disabled="!workspaceId || importing" @click="triggerImport">
             {{ importing ? '导入中…' : '导入' }}
+          </button>
+          <button type="button" class="wiki-btn ghost" :disabled="!workspaceId || exporting" @click="exportAll">
+            {{ exporting ? '导出中…' : '导出' }}
           </button>
           <input
             ref="importInput"
