@@ -4,6 +4,7 @@ import com.example.workbench.auth.AppUser;
 import com.example.workbench.auth.AuthFilter;
 import com.example.workbench.workspace.WorkspaceService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,10 +24,13 @@ public class WikiPageController {
 
     private final WikiPageService wikiPageService;
     private final WorkspaceService workspaceService;
+    private final WikiImportTaskService importTaskService;
 
-    public WikiPageController(WikiPageService wikiPageService, WorkspaceService workspaceService) {
+    public WikiPageController(WikiPageService wikiPageService, WorkspaceService workspaceService,
+                              WikiImportTaskService importTaskService) {
         this.wikiPageService = wikiPageService;
         this.workspaceService = workspaceService;
+        this.importTaskService = importTaskService;
     }
 
     @PostMapping
@@ -66,16 +70,32 @@ public class WikiPageController {
     }
 
     /**
-     * 将上传文件解析为 wiki 页面草稿（PDF / Word / 文本等），不落库。
-     * 前端把返回内容填入编辑器，用户确认保存时再走创建链路投影进 RAG 检索。
+     * 受理 wiki 导入任务：立即返回 taskId，后台解析（大文件 OCR 可能耗时数分钟）。
+     * 前端用 {@code GET /import/{taskId}} 轮询，SUCCEEDED 后拿草稿填入编辑器。
      */
     @PostMapping("/import")
-    public WikiImportContent importFromFile(@RequestParam String workspaceId,
-                                           @RequestPart("file") MultipartFile file,
-                                           HttpServletRequest request) {
+    public WikiImportTaskResponse importFromFile(@RequestParam String workspaceId,
+                                                 @RequestPart("file") MultipartFile file,
+                                                 HttpServletRequest request) throws IOException {
         AppUser user = user(request);
         workspaceService.access(user, workspaceId);
-        return wikiPageService.importFromFile(user, workspaceId, file);
+        String taskId = importTaskService.submit(user, workspaceId, file);
+        return WikiImportTaskResponse.running(taskId);
+    }
+
+    /** 轮询导入任务：任务不存在（重启丢失 / 过期清理 / 非本人）返回 404。 */
+    @GetMapping("/import/{taskId}")
+    public WikiImportTaskResponse importTask(@PathVariable String taskId,
+                                             @RequestParam String workspaceId,
+                                             HttpServletRequest request) {
+        AppUser user = user(request);
+        workspaceService.access(user, workspaceId);
+        WikiImportTaskResponse response = importTaskService.poll(user, taskId);
+        if (response == null) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "导入任务不存在或已过期，请重新导入。");
+        }
+        return response;
     }
 
     private AppUser user(HttpServletRequest request) {

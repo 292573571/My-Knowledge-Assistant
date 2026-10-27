@@ -41,7 +41,7 @@ export function deleteWikiPage(id, workspaceId) {
   return request(`/api/wiki-pages/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, { method: 'DELETE' })
 }
 
-// 将上传文件解析为 wiki 页面草稿（不落库），返回 { fileName, title, contentMd } 供编辑器填充。
+// 受理 wiki 导入任务：立即返回 { taskId }，后台异步解析（大文件 OCR 可能耗时数分钟）。
 export function importWikiPageFile(workspaceId, file) {
   const formData = new FormData()
   formData.append('file', file)
@@ -49,4 +49,9 @@ export function importWikiPageFile(workspaceId, file) {
     method: 'POST',
     body: formData
   })
+}
+
+// 轮询导入任务：RUNNING / SUCCEEDED（含草稿）/ FAILED；任务不存在返回 404。
+export function fetchWikiImportTask(workspaceId, taskId) {
+  return request(`/api/wiki-pages/import/${encodeURIComponent(taskId)}?workspaceId=${encodeURIComponent(workspaceId || '')}`)
 }

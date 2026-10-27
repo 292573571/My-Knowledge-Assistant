@@ -7,6 +7,7 @@ import {
   fetchWikiPage,
   fetchWikiPages,
   importWikiPageFile,
+  fetchWikiImportTask,
   updateWikiPage
 } from '../api/wikiPageApi'
 import { renderMarkdown } from '../utils/markdown'
@@ -234,7 +235,10 @@ async function onImportFile(event) {
   error.value = ''
   notice.value = ''
   try {
-    const result = await importWikiPageFile(workspaceId.value, file)
+    // 受理异步任务：大文件（扫描 PDF / 图片 PPT）解析与 OCR 可能耗时数分钟，轮询直到出结果
+    const accepted = await importWikiPageFile(workspaceId.value, file)
+    notice.value = `已开始解析「${file.name}」，扫描件与大文档可能需要几分钟…`
+    const result = await pollImportTask(workspaceId.value, accepted.taskId)
     readToken += 1
     isNew.value = true
     selectedId.value = null
@@ -254,6 +258,20 @@ async function onImportFile(event) {
   } finally {
     importing.value = false
     event.target.value = ''
+  }
+}
+
+const IMPORT_POLL_INTERVAL_MS = 2000
+const IMPORT_POLL_MAX_MS = 10 * 60 * 1000
+
+async function pollImportTask(workspace, taskId) {
+  const deadline = Date.now() + IMPORT_POLL_MAX_MS
+  for (;;) {
+    await new Promise(resolve => setTimeout(resolve, IMPORT_POLL_INTERVAL_MS))
+    const task = await fetchWikiImportTask(workspace, taskId)
+    if (task.status === 'SUCCEEDED') return task
+    if (task.status === 'FAILED') throw Object.assign(new Error(task.error || '文件解析失败，请确认格式受支持后重试。'), { retryable: false })
+    if (Date.now() > deadline) throw new Error('解析超时，请缩小文件后重试或改用文本粘贴。')
   }
 }
 
