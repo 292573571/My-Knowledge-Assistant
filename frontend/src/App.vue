@@ -23,7 +23,7 @@ const restoringWorkspace = ref(false)
 const appReady = ref(false)
 const authOpen = ref(false)
 const activeSection = ref('home')
-// 知识库内部子视图: 'docs'=文档库(上传文件), 'wiki'=Wiki 页面(写 markdown)
+// 知识库内部子视图: 'docs'=文档库(上传文件), 'wiki'=知识笔记(写 markdown)
 const knowledgeTab = ref('docs')
 // Wiki 子视图: 'pages'=页面列表/编辑器, 'graph'=知识图谱（与 Wiki 同页面，仅切换视图）
 const wikiView = ref('pages')
@@ -430,7 +430,7 @@ async function submitPasswordChange() {
         <div class="knowledge-shell">
           <div class="knowledge-tabs" role="tablist" aria-label="知识库子视图">
             <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="selectKnowledgeTab('docs')">文档库</button>
-            <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">Wiki 页面</button>
+            <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">知识笔记</button>
           </div>
           <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
           <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" @view-change="onWikiViewChange" />

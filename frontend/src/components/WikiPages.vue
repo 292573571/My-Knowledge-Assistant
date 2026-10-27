@@ -175,7 +175,7 @@ async function load() {
   try {
     pages.value = await fetchWikiPages(workspaceId.value)
   } catch (exception) {
-    error.value = formatApiError(exception, 'wiki 页面加载失败。')
+    error.value = formatApiError(exception, '知识笔记加载失败。')
   } finally {
     loading.value = false
   }
@@ -205,7 +205,7 @@ async function selectPage(page) {
     notice.value = ''
   } catch (exception) {
     if (token !== readToken) return
-    error.value = formatApiError(exception, 'wiki 页面加载失败。')
+    error.value = formatApiError(exception, '知识笔记加载失败。')
   } finally {
     if (token === readToken) reading.value = false
   }
@@ -248,7 +248,7 @@ async function onImportFile(event) {
     // 导入是草稿态：不设基线，让「未保存」标记如实出现
     baseline.value = ''
     previewMode.value = false
-    notice.value = '文件已解析为草稿，确认无误后点击「保存」生成 Wiki 页面。'
+    notice.value = '文件已解析为草稿，确认无误后点击「保存」生成知识笔记。'
   } catch (exception) {
     error.value = formatApiError(exception, '文件导入失败。')
   } finally {
@@ -278,7 +278,7 @@ async function save() {
     }
     const savedId = selectedId.value
     resetBaseline()
-    notice.value = '已保存，页面内容已进入知识库检索。'
+    notice.value = '已保存，笔记内容已进入知识库检索。'
     // 刷新目录（标题/层级可能变化），但保持当前编辑对象不丢
     await load()
     if (savedId) {
@@ -291,7 +291,7 @@ async function save() {
       }
     }
   } catch (exception) {
-    error.value = formatApiError(exception, 'wiki 页面保存失败。')
+    error.value = formatApiError(exception, '知识笔记保存失败。')
   } finally {
     saving.value = false
   }
@@ -311,10 +311,10 @@ async function confirmRemove() {
   try {
     await deleteWikiPage(selectedId.value, workspaceId.value)
     deleteOpen.value = false
-    notice.value = '页面已删除。'
+    notice.value = '笔记已删除。'
     await load()
   } catch (exception) {
-    error.value = formatApiError(exception, 'wiki 页面删除失败。')
+    error.value = formatApiError(exception, '知识笔记删除失败。')
   } finally {
     saving.value = false
   }
@@ -344,7 +344,7 @@ async function openById(id) {
     notice.value = ''
   } catch (exception) {
     if (token !== readToken) return
-    error.value = formatApiError(exception, 'wiki 页面打开失败。')
+    error.value = formatApiError(exception, '知识笔记打开失败。')
   } finally {
     if (token === readToken) {
       reading.value = false
@@ -372,29 +372,29 @@ onMounted(load)
         </svg>
       </div>
       <div class="wiki-hero-body">
-        <h1>知识页面</h1>
-        <p>用 Markdown 组织内容，用 [[页面名]] 互相引用。保存后自动进入知识库检索，并同步更新知识图谱。</p>
+        <h1>知识笔记</h1>
+        <p>用 Markdown 组织内容，用 [[笔记名]] 互相引用。保存后自动进入知识库检索，并同步更新知识图谱。</p>
       </div>
       <div class="wiki-hero-aside">
         <span class="wiki-chip">
           <i class="wiki-chip-dot" aria-hidden="true" />
-          {{ pages.length }} 个页面
+          {{ pages.length }} 篇笔记
         </span>
-        <div class="wiki-seg" role="tablist" aria-label="Wiki 视图">
+        <div class="wiki-seg" role="tablist" aria-label="知识笔记视图">
           <button
             type="button"
             role="tab"
             :aria-selected="view === 'pages'"
             :class="{ active: view === 'pages' }"
             @click="setView('pages')"
-          >页面</button>
+          >笔记</button>
           <button
             type="button"
             role="tab"
             :aria-selected="view === 'graph'"
             :class="{ active: view === 'graph' }"
             @click="setView('graph')"
-          >图谱</button>
+          >知识图谱</button>
         </div>
       </div>
     </header>
@@ -407,7 +407,7 @@ onMounted(load)
               <circle cx="11" cy="11" r="6.5" />
               <path d="m16 16 4 4" stroke-linecap="round" />
             </svg>
-            <input v-model="keyword" type="search" placeholder="搜索页面" aria-label="搜索页面" />
+            <input v-model="keyword" type="search" placeholder="搜索笔记" aria-label="搜索笔记" />
             <button v-if="keyword" type="button" class="wiki-search-clear" aria-label="清除搜索" @click="keyword = ''">×</button>
           </label>
         </div>
@@ -418,12 +418,12 @@ onMounted(load)
           </div>
           <div v-else-if="!flatTree.length" class="wiki-nav-empty">
             <template v-if="keyword">
-              <p>没有匹配「{{ keyword }}」的页面</p>
+              <p>没有匹配「{{ keyword }}」的笔记</p>
               <button type="button" @click="keyword = ''">清除搜索</button>
             </template>
             <template v-else>
               <p>目录还是空的</p>
-              <span>先新建一页，或用导入把已有文档变成页面。</span>
+              <span>先新建一篇，或用导入把已有文档变成笔记。</span>
             </template>
           </div>
           <ul v-else class="wiki-tree">
@@ -443,7 +443,7 @@ onMounted(load)
 
         <div class="wiki-nav-foot">
           <button type="button" class="wiki-btn primary" :disabled="!workspaceId" @click="newPage">
-            <span aria-hidden="true">＋</span>新建页面
+            <span aria-hidden="true">＋</span>新建笔记
           </button>
           <button type="button" class="wiki-btn ghost" :disabled="!workspaceId || importing" @click="triggerImport">
             {{ importing ? '导入中…' : '导入' }}
@@ -470,7 +470,7 @@ onMounted(load)
 
         <div v-if="reading" class="wiki-blank">
           <span class="wiki-spinner" aria-hidden="true" />
-          <p>正在打开页面…</p>
+          <p>正在打开笔记…</p>
         </div>
 
         <div v-else-if="!workspaceId" class="wiki-blank">
@@ -484,28 +484,28 @@ onMounted(load)
               <path d="M12 11.2v5M9.5 13.7h5" />
             </svg>
           </div>
-          <h2>{{ pages.length ? '选一个页面继续' : '写下第一页知识' }}</h2>
+          <h2>{{ pages.length ? '选一篇笔记继续' : '写下第一篇笔记' }}</h2>
           <p>
             {{ pages.length
-              ? '从左侧目录选择页面阅读或编辑，也可以新建一篇。'
-              : '把零散的笔记整理成结构化页面，保存后立刻可被 AI 检索引用。' }}
+              ? '从左侧目录选择笔记阅读或编辑，也可以新建一篇。'
+              : '把零散的想法整理成结构化笔记，保存后立刻可被 AI 检索引用。' }}
           </p>
           <div class="wiki-welcome-actions">
-            <button type="button" class="wiki-btn primary" @click="newPage">新建页面</button>
+            <button type="button" class="wiki-btn primary" @click="newPage">新建笔记</button>
             <button type="button" class="wiki-btn ghost" @click="triggerImport">导入文档</button>
           </div>
         </div>
 
         <template v-else>
           <div class="wiki-doc-bar">
-            <nav class="wiki-crumbs" aria-label="页面层级">
+            <nav class="wiki-crumbs" aria-label="笔记层级">
               <span class="wiki-crumb-space">{{ workspace?.name || '当前空间' }}</span>
               <template v-for="crumb in breadcrumb" :key="crumb.id">
                 <span class="wiki-crumb-sep" aria-hidden="true">/</span>
                 <button type="button" class="wiki-crumb" :title="crumb.title" @click="selectPage(crumb)">{{ crumb.title }}</button>
               </template>
               <span v-if="isNew" class="wiki-crumb-sep" aria-hidden="true">/</span>
-              <span v-if="isNew" class="wiki-crumb current">未保存的新页面</span>
+              <span v-if="isNew" class="wiki-crumb current">未保存的新笔记</span>
             </nav>
 
             <div class="wiki-doc-actions">
@@ -530,8 +530,8 @@ onMounted(load)
             <input
               v-model="draft.title"
               class="wiki-title"
-              placeholder="无标题页面"
-              aria-label="页面标题"
+              placeholder="无标题笔记"
+              aria-label="笔记标题"
               @keydown.enter.prevent="previewMode = false"
             />
 
@@ -548,8 +548,8 @@ onMounted(load)
               v-if="!previewMode"
               v-model="draft.contentMd"
               class="wiki-editor"
-              placeholder="从这里开始写。支持标题、列表、表格、代码块，以及 [[页面名]] 形式的内部引用。"
-              aria-label="页面正文"
+              placeholder="从这里开始写。支持标题、列表、表格、代码块，以及 [[笔记名]] 形式的内部引用。"
+              aria-label="笔记正文"
               @keydown.ctrl.s.prevent="save"
               @keydown.meta.s.prevent="save"
             ></textarea>
@@ -557,14 +557,14 @@ onMounted(load)
 
             <details class="wiki-settings">
               <summary>
-                <span>页面设置</span>
-                <span class="wiki-settings-hint">上级页面 · 短链</span>
+                <span>笔记设置</span>
+                <span class="wiki-settings-hint">上级笔记 · 短链</span>
               </summary>
               <div class="wiki-settings-grid">
                 <label class="wiki-field">
-                  <span>上级页面</span>
-                  <select v-model="draft.parentId" aria-label="上级页面">
-                    <option value="">无（作为根页面）</option>
+                  <span>上级笔记</span>
+                  <select v-model="draft.parentId" aria-label="上级笔记">
+                    <option value="">无（作为根笔记）</option>
                     <option v-for="option in parentOptions" :key="option.id" :value="option.id">{{ option.title }}</option>
                   </select>
                 </label>
@@ -588,9 +588,9 @@ onMounted(load)
 
     <ConfirmDialog
       v-if="deleteOpen"
-      title="删除这个页面？"
-      :message="`「${draft.title || '未命名页面'}」及其正文会被移除，页面里的 [[引用]] 也会失效。此操作不可撤销。`"
-      confirm-text="删除页面"
+      title="删除这篇笔记？"
+      :message="`「${draft.title || '未命名笔记'}」及其正文会被移除，笔记里的 [[引用]] 也会失效。此操作不可撤销。`"
+      confirm-text="删除笔记"
       :busy="saving"
       danger
       @confirm="confirmRemove"

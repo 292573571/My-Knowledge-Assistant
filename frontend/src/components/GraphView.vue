@@ -253,7 +253,7 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
   <div class="graph-view">
     <div class="graph-toolbar">
       <span class="graph-stat">节点 {{ nodes.length }} · 边 {{ edges.length }}</span>
-      <span class="graph-hint">拖拽节点 / 滚轮缩放 / 空白处平移 · 点页面节点打开 · 点概念节点看关联页</span>
+      <span class="graph-hint">拖拽节点 / 滚轮缩放 / 空白处平移 · 点笔记节点打开 · 点概念节点看关联笔记</span>
       <span class="graph-spacer" />
       <button type="button" class="graph-btn" @click="relayout">重新布局</button>
       <button type="button" class="graph-btn" @click="resetView">重置视图</button>
@@ -269,7 +269,7 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
         </svg>
       </div>
       <strong>这个空间还没有图谱</strong>
-      <span>切回「页面」视图，用 <code>[[页面或概念名]]</code> 把页面串起来，保存后即可在这里看到关系网络。</span>
+      <span>切回「笔记」视图，用 <code>[[笔记或概念名]]</code> 把笔记串起来，保存后即可在这里看到关系网络。</span>
     </div>
 
     <svg
@@ -318,7 +318,7 @@ onBeforeUnmount(() => { if (rafId) cancelAnimationFrame(rafId) })
     </svg>
 
     <aside v-if="selectedId && termNeighbors.length" class="graph-panel">
-      <h4>「{{ byId.get(selectedId)?.name }}」关联页面</h4>
+      <h4>「{{ byId.get(selectedId)?.name }}」关联笔记</h4>
       <ul>
         <li v-for="p in termNeighbors" :key="p.id">
           <button type="button" class="graph-link" @click="openNeighbor(p.sourceId)">{{ p.name }} →</button>
