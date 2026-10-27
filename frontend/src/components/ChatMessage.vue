@@ -2,7 +2,9 @@
 import { computed, ref } from 'vue'
 import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
-import { groupSourcesByFile } from '../utils/sources'
+import { deduplicateDisplayedSources, groupSourcesByFile } from '../utils/sources'
+import { createWikiPage } from '../api/wikiPageApi'
+import { formatApiError } from '../api/apiError'
 
 const props = defineProps({
   message: {
@@ -12,6 +14,14 @@ const props = defineProps({
   streaming: {
     type: Boolean,
     default: false
+  },
+  workspaceId: {
+    type: String,
+    default: ''
+  },
+  question: {
+    type: String,
+    default: ''
   }
 })
 
@@ -35,6 +45,49 @@ const html = computed(() => renderMarkdown(displayContent.value))
 const roleLabel = computed(() => (props.message.role === 'user' ? '你' : '助手'))
 const isAssistant = computed(() => props.message.role === 'assistant')
 const displayedSources = computed(() => groupSourcesByFile(props.message.sources))
+const noteSaveable = computed(() => isAssistant.value && !props.streaming && !props.message.error
+  && !!props.message.content && !!props.workspaceId)
+
+// ============ 保存为知识笔记 ============
+const noteState = ref('idle') // idle | saving | done | error
+const noteError = ref('')
+const noteTitle = computed(() => {
+  const base = (props.question || displayContent.value.replace(/[#>*`\-\n]/g, ' ').trim()).slice(0, 60)
+  return base || 'AI 回答笔记'
+})
+const noteContent = computed(() => {
+  const parts = []
+  if (props.question) parts.push(`> 提问：${props.question}\n`)
+  parts.push(displayContent.value)
+  const sources = deduplicateDisplayedSources(props.message.sources || [])
+  if (sources.length) {
+    const lines = sources.map(source => {
+      const file = source.fileName || source.file || source.title || source.name || '未知文件'
+      const page = source.pageNumber ?? source.page
+      return `- ${file}${page != null && page !== '' ? `（第 ${page} 页）` : ''}`
+    })
+    parts.push(`\n## 来源\n${lines.join('\n')}`)
+  }
+  return parts.join('\n\n')
+})
+
+async function saveAsNote() {
+  if (noteState.value === 'saving' || noteState.value === 'done') return
+  noteState.value = 'saving'
+  noteError.value = ''
+  try {
+    await createWikiPage(props.workspaceId, {
+      title: noteTitle.value,
+      slug: '',
+      parentId: '',
+      contentMd: noteContent.value
+    })
+    noteState.value = 'done'
+  } catch (exception) {
+    noteState.value = 'error'
+    noteError.value = formatApiError(exception, '保存知识笔记失败。')
+  }
+}
 const isModelSupplement = computed(() => isAssistant.value && !props.message.error && !props.message.sources?.length
   && props.message.content?.includes('以上回答基于通用大模型知识'))
 function sourceLabel(group) {
@@ -106,6 +159,18 @@ async function copyCode(event) {
           {{ sourceLabel(group) }}
         </span>
       </div>
+      <div v-if="noteSaveable" class="message-actions">
+        <button
+          type="button"
+          class="message-action"
+          :class="{ done: noteState === 'done' }"
+          :disabled="noteState === 'saving' || noteState === 'done'"
+          @click="saveAsNote"
+        >
+          {{ noteState === 'saving' ? '保存中…' : noteState === 'done' ? '已存入知识笔记 ✓' : '保存为知识笔记' }}
+        </button>
+        <span v-if="noteState === 'error'" class="message-action-error">{{ noteError }}</span>
+      </div>
     </div>
   </article>
 </template>
@@ -138,5 +203,44 @@ async function copyCode(event) {
 
 .message-retry:hover {
   background: rgb(255 255 255 / 45%);
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.message-action {
+  padding: 5px 12px;
+  border: 1px solid var(--site-line, #d8e2d8);
+  border-radius: 8px;
+  color: var(--site-green, #2f6b49);
+  background: var(--site-green-soft, #eaf3e7);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.message-action:hover:not(:disabled) {
+  background: var(--site-green, #2f6b49);
+  color: #fff;
+  border-color: var(--site-green, #2f6b49);
+}
+
+.message-action:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.message-action.done {
+  color: var(--site-green, #2f6b49);
+  background: transparent;
+}
+
+.message-action-error {
+  color: #b4483c;
+  font-size: 12px;
 }
 </style>

@@ -17,7 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
-public class BochaWebSearchClient {
+public class BochaWebSearchClient implements WebSearchClient {
 
     private static final Logger log = LoggerFactory.getLogger(BochaWebSearchClient.class);
 
@@ -41,10 +41,17 @@ public class BochaWebSearchClient {
                 .build();
     }
 
+    @Override
+    public String name() {
+        return "bocha";
+    }
+
+    @Override
     public boolean isConfigured() {
         return !apiKey.isBlank();
     }
 
+    @Override
     public List<WebSearchResult> search(String query) {
         if (!isConfigured()) {
             log.debug("Bocha web search skipped: api key not configured");

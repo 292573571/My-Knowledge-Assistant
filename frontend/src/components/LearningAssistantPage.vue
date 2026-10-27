@@ -42,6 +42,16 @@ const error = ref('')
 const messagesEl = ref(null)
 
 const modeLabels = { AUTO: '自动判断', CHAT: '直接回答', GUIDED: '主题教学', REVIEW: '复习模式', PRACTICE: '实践模式' }
+
+// 「保存为知识笔记」：取该回答之前最近一条用户提问作为笔记标题依据
+function questionFor(message) {
+  const index = messages.value.indexOf(message)
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const item = messages.value[i]
+    if (item.role === 'user' && item.content) return item.content.trim()
+  }
+  return ''
+}
 const activeSession = computed(() => sessions.value.find(item => item.sessionId === activeSessionId.value))
 const isLearningMode = computed(() => ['GUIDED', 'REVIEW', 'PRACTICE'].includes(mode.value))
 const hoveredSource = ref(null)
@@ -577,7 +587,7 @@ function closeSourceOnPointerMove(event) {
             <div v-if="error" class="learning-empty-error" role="alert"><strong>暂时无法打开学习空间</strong><span>{{ error }}</span><button type="button" @click="loadSessions">重试</button></div>
           </div>
           <template v-for="message in messages" :key="message.id">
-            <ChatMessage :message="message" :streaming="message.streaming" @retry="regenerate(message)" />
+            <ChatMessage :message="message" :streaming="message.streaming" :workspace-id="workspaceId" :question="questionFor(message)" @retry="regenerate(message)" />
             <div v-if="message.role === 'assistant' && message.interrupted && message.streaming" class="stream-recovery hint" role="status">
               回答中断,正在自动恢复…
             </div>
