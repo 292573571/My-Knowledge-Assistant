@@ -2189,6 +2189,13 @@ textarea:focus-visible,
   height: auto;
   min-height: 100vh;
   overflow: visible;
+  /* 备案页脚固定在视口底部：内容不足一屏时也被推到最下 */
+  display: flex;
+  flex-direction: column;
+}
+
+.learning-portal.content-page > .site-footer {
+  margin-top: auto;
 }
 
 .portal-header {

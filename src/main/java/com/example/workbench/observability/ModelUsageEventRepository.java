@@ -50,7 +50,7 @@ public interface ModelUsageEventRepository extends JpaRepository<ModelUsageEvent
 
     @Query("""
             select count(m) as calls,
-                   sum(case when m.success = true then 1 else 0 end) as successCalls,
+                   coalesce(sum(case when m.success = true then 1 else 0 end), 0) as successCalls,
                    coalesce(sum(m.promptTokens), 0) as promptTokens,
                    coalesce(sum(m.completionTokens), 0) as completionTokens,
                    coalesce(sum(m.durationMs), 0) as totalDurationMs
