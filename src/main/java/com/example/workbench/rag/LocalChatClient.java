@@ -101,6 +101,13 @@ public class LocalChatClient {
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setUsageRecorder(com.example.workbench.observability.ModelUsageRecorder usageRecorder) {
+        this.usageRecorder = usageRecorder;
+    }
+
+    private com.example.workbench.observability.ModelUsageRecorder usageRecorder;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setRateLimiter(RateLimiter rateLimiter,
                                @Value("${app.rate-limit.model-calls-per-minute:30}") int callsPerMinute) {
         this.rateLimiter = rateLimiter;
@@ -228,6 +235,7 @@ public class LocalChatClient {
         }
 
         String conversationId = options.getOrDefault("conversationId", "default");
+        Long usageUserId = modelConfigContext == null ? null : modelConfigContext.get();
         List<String> candidates = resolved.models().stream()
                 .filter(model -> circuitBreaker == null || circuitBreaker.allowRequest(model))
                 .collect(Collectors.toList());
@@ -245,6 +253,7 @@ public class LocalChatClient {
             StringBuilder stepBuffer = new StringBuilder();
             Flux<String> step = withModelErrorGuard(
                             ModelOutputSanitizer.stream(streamModel(prompt, history, conversationId,
+                                    usageUserId,
                                     resolved.client(), model,
                                     primary ? resolved.requestTimeout() : resolved.fallbackRequestTimeout(),
                                     resolved.temperature(), resolved.maxOutputTokens()))
@@ -354,22 +363,40 @@ public class LocalChatClient {
     }
 
     private Flux<String> streamModel(
-            String prompt, List<ChatMessage> history, String conversationId, ChatClient client,
-            String model, Duration timeout, double resolvedTemperature, int resolvedMaxTokens) {
+            String prompt, List<ChatMessage> history, String conversationId, Long usageUserId,
+            ChatClient client, String model, Duration timeout,
+            double resolvedTemperature, int resolvedMaxTokens) {
         log.info("AI model stream started provider=openai-compatible model={} conversationId={} requestTimeoutMs={} promptLength={}",
                 model, conversationId, timeout.toMillis(), prompt == null ? 0 : prompt.length());
+        long startedAt = System.currentTimeMillis();
+        java.util.concurrent.atomic.AtomicReference<Usage> usageRef = new java.util.concurrent.atomic.AtomicReference<>();
         return client.prompt()
                 .messages(toSpringAiMessages(history))
                 .user(prompt)
                 .options(chatOptions(model, resolvedTemperature, resolvedMaxTokens))
                 .advisors(advisorSpec -> advisorSpec.param("conversationId", conversationId))
                 .stream()
-                .content()
+                .chatResponse()
+                .doOnNext(response -> {
+                    // 流式 usage 通常在最后一帧聚合返回，取最后一个非空值。
+                    Usage usage = response == null || response.getMetadata() == null
+                            ? null : response.getMetadata().getUsage();
+                    if (usage != null && usage.getTotalTokens() != null && usage.getTotalTokens() > 0) {
+                        usageRef.set(usage);
+                    }
+                })
+                .map(this::content)
+                .filter(java.util.Objects::nonNull)
                 .timeout(timeout)
-                .doOnComplete(() -> log.info(
-                        "AI model stream completed model={} conversationId={}", model, conversationId))
+                .doOnComplete(() -> {
+                    log.info("AI model stream completed model={} conversationId={}", model, conversationId);
+                    recordUsage(usageUserId, conversationId, model, "stream",
+                            usageRef.get(), System.currentTimeMillis() - startedAt, true);
+                })
                 .doOnError(error -> {
                     log.warn("AI model stream failed model={} conversationId={} errorType={}", model, conversationId, error.getClass().getSimpleName());
+                    recordUsage(usageUserId, conversationId, model, "stream",
+                            null, System.currentTimeMillis() - startedAt, false);
                 });
     }
 
@@ -383,6 +410,8 @@ public class LocalChatClient {
             log.warn("AI model skipped reason=chatClient_not_available model={}", resolved.models().isEmpty() ? "unknown" : resolved.models().get(0));
             return null;
         }
+        // ThreadLocal 的 userId 必须在当前调用线程捕获，后续重试/回调线程上读不到。
+        Long usageUserId = modelConfigContext == null ? null : modelConfigContext.get();
 
         String conversationId = options.getOrDefault("conversationId", "default");
         List<String> models = resolved.models();
@@ -431,11 +460,11 @@ public class LocalChatClient {
                                 model, conversationId, modelError.getErrorCode());
                         throw modelError;
                     }
-                    logModelResponse(response, model, conversationId, attempt, startedAt, content);
+                    logModelResponse(response, model, conversationId, attempt, startedAt, content, usageUserId);
                     if (circuitBreaker != null) circuitBreaker.recordSuccess(model);
                     return content;
                 } catch (RuntimeException exception) {
-                    boolean retryable = logModelError(exception, model, conversationId, attempt, startedAt, modelIndex < models.size() - 1);
+                    boolean retryable = logModelError(exception, model, conversationId, attempt, startedAt, modelIndex < models.size() - 1, usageUserId);
                     if (circuitBreaker != null) circuitBreaker.recordFailure(model);
                     if (retryable && attempt < maxAttempts) {
                         sleepBackoff(model, conversationId, attempt);
@@ -515,7 +544,8 @@ public class LocalChatClient {
                 .toList();
     }
 
-    private void logModelResponse(ChatResponse response, String model, String conversationId, int attempt, long startedAt, String content) {
+    private void logModelResponse(ChatResponse response, String model, String conversationId, int attempt,
+                                  long startedAt, String content, Long usageUserId) {
         ChatResponseMetadata responseMetadata = response == null ? null : response.getMetadata();
         Usage usage = responseMetadata == null ? null : responseMetadata.getUsage();
         Generation result = response == null ? null : response.getResult();
@@ -537,6 +567,22 @@ public class LocalChatClient {
                 content == null ? 0 : content.length(),
                 System.currentTimeMillis() - startedAt
         );
+        recordUsage(usageUserId, conversationId, model, "sync", usage, System.currentTimeMillis() - startedAt, true);
+    }
+
+    private void recordUsage(Long userId, String conversationId, String model, String mode,
+                             Usage usage, long durationMs, boolean success) {
+        if (usageRecorder == null) {
+            return;
+        }
+        Integer promptTokens = usage == null ? null : usage.getPromptTokens();
+        Integer completionTokens = usage == null ? null : usage.getCompletionTokens();
+        Integer totalTokens = usage == null ? null : usage.getTotalTokens();
+        if (totalTokens == null && promptTokens != null && completionTokens != null) {
+            totalTokens = Math.max(0, promptTokens) + Math.max(0, completionTokens);
+        }
+        usageRecorder.record(userId, conversationId, model, mode,
+                promptTokens, completionTokens, totalTokens, durationMs, success);
     }
 
     private boolean logModelError(
@@ -545,7 +591,8 @@ public class LocalChatClient {
             String conversationId,
             int attempt,
             long startedAt,
-            boolean willSwitchModel
+            boolean willSwitchModel,
+            Long usageUserId
     ) {
         Throwable rootCause = rootCause(exception);
         HttpStatusCodeException statusException = findHttpStatusException(exception);
@@ -570,6 +617,7 @@ public class LocalChatClient {
                 fallbackStrategy,
                 rootCause == null ? "null" : (rootCause.getMessage() != null ? rootCause.getMessage().substring(0, Math.min(200, rootCause.getMessage().length())) : "null")
         );
+        recordUsage(usageUserId, conversationId, model, "sync", null, System.currentTimeMillis() - startedAt, false);
         return retryable;
     }
 
