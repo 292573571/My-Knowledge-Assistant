@@ -37,11 +37,29 @@ public class UsageQueryService {
                         .map(item -> new DailyPoint(item.getDay(), item.getCalls(),
                                 item.getPromptTokens(), item.getCompletionTokens()))
                         .toList(),
-                byModel.stream()
-                        .map(item -> new ModelStat(item.getModel(), item.getCalls(),
-                                item.getPromptTokens(), item.getCompletionTokens(),
-                                Math.round(item.getAvgDurationMs())))
-                        .toList());
+                toModelStats(byModel));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ModelStat> modelStats(Long userId, int days) {
+        int clamped = Math.max(1, Math.min(90, days));
+        Instant since = Instant.now().minus(java.time.Duration.ofDays(clamped));
+        return toModelStats(repository.byModel(userId, since));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ModelStat> modelStatsAll(int days) {
+        int clamped = Math.max(1, Math.min(90, days));
+        Instant since = Instant.now().minus(java.time.Duration.ofDays(clamped));
+        return toModelStats(repository.byModelAll(since));
+    }
+
+    private List<ModelStat> toModelStats(List<ModelUsageEventRepository.ModelUsage> byModel) {
+        return byModel.stream()
+                .map(item -> new ModelStat(item.getModel(), item.getCalls(),
+                        item.getPromptTokens(), item.getCompletionTokens(),
+                        Math.round(item.getAvgDurationMs())))
+                .toList();
     }
 
     public record UsageSummary(

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { createPersonalModel, deletePersonalModel, fetchPersonalModels, testPersonalModel, testPersonalModelConfig, updatePersonalModel } from '../api/modelConfigApi'
-import { fetchUsageSummary } from '../api/usageApi'
+import { fetchUsageSummary, formatModelUsage } from '../api/usageApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ToastContainer from './ToastContainer.vue'
 
@@ -28,24 +28,6 @@ const usageOthers = computed(() => {
 
 function usageOf(model) {
   return usageByModel.value[model.model] || null
-}
-
-function fmtTokens(value) {
-  const num = typeof value === 'number' ? value : 0
-  if (num >= 100000000) return `${(num / 100000000).toFixed(1)} 亿`
-  if (num >= 10000) return `${(num / 10000).toFixed(1)} 万`
-  return num.toLocaleString('zh-CN')
-}
-
-function fmtDuration(value) {
-  const num = typeof value === 'number' ? value : 0
-  if (num >= 1000) return `${(num / 1000).toFixed(1)} 秒`
-  return `${num} ms`
-}
-
-function usageText(stats) {
-  if (!stats || !stats.calls) return '近 30 天暂无调用'
-  return `近 30 天：调用 ${stats.calls.toLocaleString('zh-CN')} 次 · 输入 ${fmtTokens(stats.promptTokens)} · 输出 ${fmtTokens(stats.completionTokens)} · 平均 ${fmtDuration(stats.avgDurationMs)}`
 }
 
 async function loadUsage() {
@@ -200,7 +182,7 @@ onMounted(() => {
                   <span class="maintenance-model-identifier">{{ model.model }}</span>
                   <span class="maintenance-model-tag chat">对话</span>
                   <span v-if="!model.enabled" class="maintenance-model-tag disabled">已停用</span>
-                  <span class="model-usage-line" :class="{ empty: !usageOf(model) || !usageOf(model).calls }">{{ usageText(usageOf(model)) }}</span>
+                  <span class="model-usage-line" :class="{ empty: !usageOf(model) || !usageOf(model).calls }">{{ formatModelUsage(usageOf(model)) }}</span>
                 </div>
                 <div class="maintenance-model-actions">
                   <button type="button" class="maintenance-model-btn" @click="editModel(model)">编辑</button>
@@ -216,7 +198,7 @@ onMounted(() => {
                     v-for="item in usageOthers"
                     :key="item.model"
                     class="model-usage-line"
-                  >{{ item.model }} · {{ usageText(item) }}</span>
+                  >{{ item.model }} · {{ formatModelUsage(item) }}</span>
                 </div>
               </article>
             </div>
@@ -247,16 +229,3 @@ onMounted(() => {
      <ConfirmDialog v-if="pendingDelete" title="删除个人模型？" :message="`将删除「${pendingDelete.name}」，删除后无法恢复。`" confirm-text="删除模型" danger @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </div>
 </template>
-
-<style scoped>
-.model-usage-line {
-  flex-basis: 100%;
-  font-size: 12px;
-  color: #2f6b49;
-  font-variant-numeric: tabular-nums;
-}
-
-.model-usage-line.empty {
-  color: #97a1b3;
-}
-</style>

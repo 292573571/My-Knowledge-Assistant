@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
+import { fetchUsageModelStats, formatModelUsage } from '../api/usageApi'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
 import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api/logApi'
 import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
@@ -39,6 +40,7 @@ const poolSuccess = ref('')
 const showPoolForm = ref(false)
 const editingPoolModel = ref(null)
 const testingModelId = ref(null)
+const poolUsageByModel = ref({})
 const poolForm = reactive({
   name: '', baseUrl: '', apiKey: '', model: '', modelType: 'CHAT',
   temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: '',
@@ -277,6 +279,7 @@ onMounted(() => {
   loadSummary()
   loadDocumentTasks()
   loadPool()
+  if (props.currentUser?.systemRole === 'SUPER_ADMIN') loadPoolUsage()
 })
 
 onBeforeUnmount(() => {
@@ -372,6 +375,22 @@ async function loadPool() {
   try { poolModels.value = await fetchModelPool() || [] }
   catch (e) { notifyError(formatApiError(e, '加载模型列表失败')) }
   finally { poolLoading.value = false }
+}
+
+async function loadPoolUsage() {
+  try {
+    const stats = await fetchUsageModelStats(30, 'all') || []
+    const map = {}
+    for (const item of stats) map[item.model] = item
+    poolUsageByModel.value = map
+  } catch (e) {
+    // 用量是辅助信息，加载失败不打扰模型池主流程
+    poolUsageByModel.value = {}
+  }
+}
+
+function poolUsageOf(model) {
+  return poolUsageByModel.value[model.model] || null
 }
 
 function openAddPoolModel() {
@@ -641,6 +660,7 @@ async function handleTestModel(model) {
             <span :class="['maintenance-model-tag', model.modelType === 'EMBEDDING' ? 'embedding' : 'chat']">{{ model.modelType === 'EMBEDDING' ? '嵌入' : '对话' }}</span>
             <span v-if="model.isDefault" class="maintenance-model-tag default">{{ model.modelType === 'EMBEDDING' ? '默认嵌入' : '默认对话' }}</span>
             <span v-if="!model.enabled" class="maintenance-model-tag disabled">已停用</span>
+            <span class="model-usage-line" :class="{ empty: !poolUsageOf(model) || !poolUsageOf(model).calls }">{{ formatModelUsage(poolUsageOf(model)) }}</span>
           </div>
           <div class="maintenance-model-actions">
             <button class="maintenance-model-btn" @click="openEditPoolModel(model)">编辑</button>

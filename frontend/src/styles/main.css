@@ -4799,6 +4799,8 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .maintenance-model-tag.disabled { background: #fceeed; color: var(--site-danger); }
 .maintenance-model-tag.chat { background: var(--site-green-soft); color: var(--site-green-dark); }
 .maintenance-model-tag.embedding { background: #e9f9ef; color: #1a6d3c; }
+.model-usage-line { flex-basis: 100%; font-size: 12px; color: #2f6b49; font-variant-numeric: tabular-nums; }
+.model-usage-line.empty { color: #97a1b3; }
 .maintenance-model-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .maintenance-model-btn {
   padding: 6px 13px; border: 1px solid var(--site-line-soft); border-radius: 8px;

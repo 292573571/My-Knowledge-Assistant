@@ -91,4 +91,28 @@ class UsageQueryServiceTest {
         assertThat(service.summary(1L, 500).days()).isEqualTo(90);
         assertThat(service.summary(1L, 0).days()).isEqualTo(1);
     }
+
+    @Test
+    void modelStatsUsesPerUserQuery() {
+        when(repository.byModel(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of());
+        assertThat(service.modelStats(7L, 30)).isEmpty();
+    }
+
+    @Test
+    void modelStatsAllUsesSystemWideQueryAndClampsDays() {
+        ModelUsageEventRepository.ModelUsage model =
+                mock(ModelUsageEventRepository.ModelUsage.class);
+        when(model.getModel()).thenReturn("deepseek-ai/DeepSeek-V4-Flash");
+        when(model.getCalls()).thenReturn(42L);
+        when(model.getPromptTokens()).thenReturn(4200L);
+        when(model.getCompletionTokens()).thenReturn(2100L);
+        when(model.getAvgDurationMs()).thenReturn(1500.6);
+        when(repository.byModelAll(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(model));
+
+        assertThat(service.modelStatsAll(500)).hasSize(1);
+        assertThat(service.modelStatsAll(500).get(0).model()).isEqualTo("deepseek-ai/DeepSeek-V4-Flash");
+        assertThat(service.modelStatsAll(500).get(0).calls()).isEqualTo(42);
+        assertThat(service.modelStatsAll(500).get(0).avgDurationMs()).isEqualTo(1501);
+    }
 }

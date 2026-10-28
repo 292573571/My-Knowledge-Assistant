@@ -84,6 +84,19 @@ public interface ModelUsageEventRepository extends JpaRepository<ModelUsageEvent
             """)
     List<ModelUsage> byModel(@Param("userId") Long userId, @Param("since") Instant since);
 
+    @Query("""
+            select m.model as model,
+                   count(m) as calls,
+                   coalesce(sum(m.promptTokens), 0) as promptTokens,
+                   coalesce(sum(m.completionTokens), 0) as completionTokens,
+                   coalesce(avg(m.durationMs), 0) as avgDurationMs
+            from ModelUsageEvent m
+            where m.createdAt >= :since
+            group by m.model
+            order by count(m) desc
+            """)
+    List<ModelUsage> byModelAll(@Param("since") Instant since);
+
     @Query(value = """
             select count(*) filter (where m.role = 'assistant') as assistant_messages,
                    count(*) filter (where m.role = 'assistant'
