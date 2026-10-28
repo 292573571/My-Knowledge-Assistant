@@ -5,7 +5,6 @@ import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
 import HomePage from './components/HomePage.vue'
 import ModelConfig from './components/ModelConfig.vue'
-import UsageDashboard from './components/UsageDashboard.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
 
 const LearningRecords = defineAsyncComponent(() => import('./components/LearningRecords.vue'))
@@ -53,7 +52,7 @@ let revealObserver = null
 let revealMutationObserver = null
 
 // 'graph' 已并入 knowledge 的 Wiki 视图，不再是独立导航项（旧链接在 readUrlState 里兼容）
-const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'usage', 'users', 'maintenance', 'profile'])
+const navigableSections = new Set(['home', 'assistant', 'records', 'knowledge', 'users', 'maintenance', 'profile'])
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search)
@@ -372,10 +371,6 @@ async function submitPasswordChange() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 9.5 6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7"/></svg>
             <span>知识库</span>
           </button>
-          <button :class="{ active: activeSection === 'usage' }" type="button" @click="navigateTo('usage')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M2 20h20"/></svg>
-            <span>用量</span>
-          </button>
           <button v-if="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :class="{ active: activeSection === 'users' }" type="button" @click="navigateTo('users')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 7.5a2.5 2.5 0 0 1 0 5M17 15a4 4 0 0 1 3.5 4"/></svg>
             <span>用户管理</span>
@@ -442,7 +437,6 @@ async function submitPasswordChange() {
         </div>
       </template>
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />
-      <UsageDashboard v-else-if="activeSection === 'usage'" />
       <ConfirmDialog v-if="logoutConfirmOpen" title="确认退出登录？" message="退出后需要重新输入账号和密码才能进入学习工作台。" confirm-text="退出登录" :busy="loggingOut" danger @confirm="handleLogout" @cancel="logoutConfirmOpen = false" />
       <WorkspaceManager v-if="workspaceManagerOpen" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :can-create-public="currentUser.systemRole === 'ADMIN' || currentUser.systemRole === 'SUPER_ADMIN'" :can-create-org="currentUser.systemRole === 'SUPER_ADMIN'" @close="workspaceManagerOpen = false" @created="handleWorkspaceCreated" />
         <ModelConfig v-if="modelConfigOpen" :current-user="currentUser" @close="modelConfigOpen = false" @saved="modelConfigVersion += 1" />

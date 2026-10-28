@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { createPersonalModel, deletePersonalModel, fetchPersonalModels, testPersonalModel, testPersonalModelConfig, updatePersonalModel } from '../api/modelConfigApi'
+import { fetchUsageSummary } from '../api/usageApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ToastContainer from './ToastContainer.vue'
 
@@ -16,6 +17,48 @@ const editingModelId = ref(null)
 const pendingDelete = ref(null)
 const testingModelId = ref(null)
 const testingForm = ref(false)
+const usageByModel = ref({})
+
+const usageOthers = computed(() => {
+  const configured = new Set(personalModels.value.map(model => model.model))
+  return Object.entries(usageByModel.value)
+    .filter(([model]) => !configured.has(model))
+    .map(([model, stats]) => ({ model, ...stats }))
+})
+
+function usageOf(model) {
+  return usageByModel.value[model.model] || null
+}
+
+function fmtTokens(value) {
+  const num = typeof value === 'number' ? value : 0
+  if (num >= 100000000) return `${(num / 100000000).toFixed(1)} 亿`
+  if (num >= 10000) return `${(num / 10000).toFixed(1)} 万`
+  return num.toLocaleString('zh-CN')
+}
+
+function fmtDuration(value) {
+  const num = typeof value === 'number' ? value : 0
+  if (num >= 1000) return `${(num / 1000).toFixed(1)} 秒`
+  return `${num} ms`
+}
+
+function usageText(stats) {
+  if (!stats || !stats.calls) return '近 30 天暂无调用'
+  return `近 30 天：调用 ${stats.calls.toLocaleString('zh-CN')} 次 · 输入 ${fmtTokens(stats.promptTokens)} · 输出 ${fmtTokens(stats.completionTokens)} · 平均 ${fmtDuration(stats.avgDurationMs)}`
+}
+
+async function loadUsage() {
+  try {
+    const summary = await fetchUsageSummary(30)
+    const map = {}
+    for (const item of summary?.models ?? []) map[item.model] = item
+    usageByModel.value = map
+  } catch (error) {
+    // 用量是辅助信息，加载失败不打扰模型管理主流程
+    usageByModel.value = {}
+  }
+}
 const customForm = reactive({
   name: '', baseUrl: '', apiKey: '', model: '',
   temperature: '', topP: '', maxOutputTokens: '', requestTimeoutMs: '', fallbackModels: ''
@@ -127,7 +170,10 @@ async function handleTestModel(model) {
   }
 }
 
-onMounted(loadModels)
+onMounted(() => {
+  loadModels()
+  loadUsage()
+})
 
 </script>
 
@@ -154,11 +200,23 @@ onMounted(loadModels)
                   <span class="maintenance-model-identifier">{{ model.model }}</span>
                   <span class="maintenance-model-tag chat">对话</span>
                   <span v-if="!model.enabled" class="maintenance-model-tag disabled">已停用</span>
+                  <span class="model-usage-line" :class="{ empty: !usageOf(model) || !usageOf(model).calls }">{{ usageText(usageOf(model)) }}</span>
                 </div>
                 <div class="maintenance-model-actions">
                   <button type="button" class="maintenance-model-btn" @click="editModel(model)">编辑</button>
                   <button type="button" class="maintenance-model-btn" :disabled="testingModelId === model.id" @click="handleTestModel(model)">{{ testingModelId === model.id ? '测试中...' : '测试' }}</button>
                   <button type="button" class="maintenance-model-btn danger" @click="pendingDelete = model">删除</button>
+                </div>
+              </article>
+              <article v-if="usageOthers.length" class="maintenance-model-row">
+                <div class="maintenance-model-info">
+                  <strong>其他模型</strong>
+                  <span class="model-usage-line">不含上面列表的历史/默认模型调用</span>
+                  <span
+                    v-for="item in usageOthers"
+                    :key="item.model"
+                    class="model-usage-line"
+                  >{{ item.model }} · {{ usageText(item) }}</span>
                 </div>
               </article>
             </div>
@@ -189,3 +247,16 @@ onMounted(loadModels)
      <ConfirmDialog v-if="pendingDelete" title="删除个人模型？" :message="`将删除「${pendingDelete.name}」，删除后无法恢复。`" confirm-text="删除模型" danger @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </div>
 </template>
+
+<style scoped>
+.model-usage-line {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #2f6b49;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-usage-line.empty {
+  color: #97a1b3;
+}
+</style>
