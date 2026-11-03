@@ -22,7 +22,8 @@ public class AuthFilter extends OncePerRequestFilter {
     public static final String AUTHENTICATED_USER_ATTRIBUTE = "authenticatedUser";
     public static final String AUTH_TOKEN_ATTRIBUTE = "authToken";
     public static final String SESSION_COOKIE = "workbench_session";
-    private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/register", "/api/auth/login", "/api/auth/send-code", "/api/health");
+    private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/register", "/api/auth/login", "/api/auth/send-code", "/api/health",
+            "/api/eval/gate");
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;

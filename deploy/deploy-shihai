@@ -132,8 +132,49 @@ remote_deploy() {
   fix_nginx_root
   systemctl start shihai
 
+  # 发版门禁：健康检查通过后再跑基线评测，未达标则回滚，避免退化版本留在线上。
+  run_eval_gate() {
+    local env_file=/etc/shihai/shihai.env
+    local switch=0 token='' suite=''
+    if [[ -r "$env_file" ]]; then
+      switch=$(grep -E '^EVAL_DEPLOY_GATE=' "$env_file" | tail -1 | cut -d= -f2- | tr -d "\"'[:space:]" || true)
+      token=$(grep -E '^EVAL_GATE_TOKEN=' "$env_file" | tail -1 | cut -d= -f2- | tr -d "\"'[:space:]" || true)
+      suite=$(grep -E '^EVAL_GATE_SUITE=' "$env_file" | tail -1 | cut -d= -f2- | tr -d "\"'[:space:]" || true)
+    fi
+    if [[ "${EVAL_DEPLOY_GATE:-$switch}" == "0" || -z "${EVAL_DEPLOY_GATE:-$switch}" ]]; then
+      echo "跳过评测门禁（未设置 EVAL_DEPLOY_GATE）"
+      return 0
+    fi
+    if [[ -z "$token" ]]; then
+      echo "评测门禁已开启但缺少 EVAL_GATE_TOKEN，按未通过处理" >&2
+      return 1
+    fi
+    local gate_url="http://127.0.0.1:8080/api/eval/gate"
+    local gate_timeout=${EVAL_GATE_TIMEOUT_SECONDS:-900}
+    echo "开始评测门禁 suite=${suite:-默认} 超时=${gate_timeout}s"
+    local body
+    body=$(curl --silent --show-error --max-time "$gate_timeout" -X POST \
+      -H "X-Ops-Token: ${token}" --get --data-urlencode "suite=${suite}" "$gate_url" 2>&1) || {
+      echo "评测门禁调用失败: ${body}" >&2
+      return 1
+    }
+    echo "评测门禁结果: ${body}"
+    if printf '%s' "$body" | grep -q '"passed":true'; then
+      return 0
+    fi
+    if [[ "${EVAL_DEPLOY_GATE:-$switch}" == "warn" ]]; then
+      echo "评测门禁未通过（warn 模式仅告警，不阻断发布）" >&2
+      return 0
+    fi
+    echo "评测门禁未通过，阻断本次发布" >&2
+    return 1
+  }
+
   for attempt in $(seq 1 "$startup_attempts"); do
     if curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null; then
+      if ! run_eval_gate; then
+        exit 1
+      fi
       activated=false
       cleanup_archive
       echo "服务器本地健康检查成功: ${revision}，等待公网健康检查后清理旧版本"

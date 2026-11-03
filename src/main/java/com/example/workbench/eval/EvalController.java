@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import com.example.workbench.pagination.PageResponse;
 
 @RestController
@@ -33,12 +34,15 @@ public class EvalController {
     private final EvalImportStorage evalImportStorage;
     private final EvalExecutionGuard executionGuard;
     private final EvalDraftService evalDraftService;
+    private final EvalGateService evalGateService;
     private final com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService;
 
     public EvalController(EvalRunner evalRunner, EvalCaseService evalCaseService, EvalRunStorage evalRunStorage,
                           EvalCaseImportService evalCaseImportService, EvalImportStorage evalImportStorage,
                           EvalExecutionGuard executionGuard, EvalDraftService evalDraftService,
+                          EvalGateService evalGateService,
                           com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService) {
+        this.evalGateService = evalGateService;
         this.evalRunner = evalRunner;
         this.evalCaseService = evalCaseService;
         this.evalRunStorage = evalRunStorage;
@@ -47,6 +51,23 @@ public class EvalController {
         this.executionGuard = executionGuard;
         this.evalDraftService = evalDraftService;
         this.adminAuthorizationService = adminAuthorizationService;
+    }
+
+    /**
+     * 发版门禁入口：由部署脚本携带运维令牌调用，不依赖登录会话。
+     *
+     * @param opsToken 运维令牌请求头
+     * @param suite 评测集合，空值使用服务端默认值
+     * @return 门禁判定结果
+     */
+    @PostMapping("/gate")
+    public EvalGateService.GateResult gate(
+            @org.springframework.web.bind.annotation.RequestHeader(value = "X-Ops-Token", required = false) String opsToken,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String suite) {
+        if (!evalGateService.authorized(opsToken)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "运维令牌无效");
+        }
+        return evalGateService.run(suite);
     }
 
     @GetMapping("/cases")
