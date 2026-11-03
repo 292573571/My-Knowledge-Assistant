@@ -38,6 +38,26 @@ public class EvalCaseService {
         return repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream().map(this::response).toList();
     }
 
+    /**
+     * 把某个评测集合下的用例整体迁移到另一个集合，典型用法是草稿题审核确认后转成基线回归题。
+     *
+     * @param user 当前用户
+     * @param from 源集合
+     * @param to 目标集合
+     * @return 迁移的用例数
+     */
+    @Transactional
+    public int moveSuite(AppUser user, EvalSuite from, EvalSuite to) {
+        if (from == to) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "源集合与目标集合不能相同");
+        }
+        List<EvalCaseEntity> matched = repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream()
+                .filter(item -> item.getSuite() == from)
+                .toList();
+        matched.forEach(item -> item.moveToSuite(to));
+        return matched.size();
+    }
+
     public PageResponse<EvalCaseResponse> page(AppUser user, int page, int size) {
         return PageResponse.of(list(user), page, size);
     }

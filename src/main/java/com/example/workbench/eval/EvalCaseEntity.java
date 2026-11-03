@@ -146,6 +146,15 @@ public class EvalCaseEntity {
     public String getExpectedStandaloneQuestion() { return expectedStandaloneQuestion; }
     public String getExpectedRetrievalQueries() { return expectedRetrievalQueries; }
 
+    /**
+     * 把用例迁移到另一个评测集合，供草稿题转基线使用。
+     *
+     * @param target 目标集合
+     */
+    void moveToSuite(EvalSuite target) {
+        this.suite = target.name();
+    }
+
     public void update(EvalCaseRequest request, String expectedSources, String expectedHeadingPaths,
                        String expectedKeywords, String forbiddenKeywords, String expectedPageNumbers,
                        String expectedRetrievalKeywords, String forbiddenRetrievalKeywords,

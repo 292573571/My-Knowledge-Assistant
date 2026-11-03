@@ -54,6 +54,14 @@ export function generateEvalDrafts(count = 5) {
   }, '生成草稿题失败。')
 }
 
+export function moveEvalCaseSuite(from = 'DRAFT', to = 'REGRESSION') {
+  return evalRequest(
+    `/api/eval/cases/move-suite?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    { method: 'POST' },
+    '迁移评测集失败。'
+  )
+}
+
 export function importEvalCases(file) {
   const body = new FormData()
   body.append('file', file)

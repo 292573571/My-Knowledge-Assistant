@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
-import { createEvalCase, deleteEvalCase, downloadEvalImport, fetchEvalCases, fetchEvalImports, fetchEvalRun, fetchEvalRuns, generateEvalDrafts, importEvalCases, runEvals, updateEvalCase } from '../api/ragApi'
+import { createEvalCase, deleteEvalCase, downloadEvalImport, fetchEvalCases, fetchEvalImports, fetchEvalRun, fetchEvalRuns, generateEvalDrafts, importEvalCases, moveEvalCaseSuite, runEvals, updateEvalCase } from '../api/ragApi'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import ConfirmDialog from './ConfirmDialog.vue'
 
@@ -202,6 +202,9 @@ async function submitImportCases() {
 
 const draftGenerating = ref(false)
 const draftProgress = ref('')
+const promoteConfirmOpen = ref(false)
+const promoting = ref(false)
+const draftCount = computed(() => evalCases.value.filter(item => (item.suite || 'REGRESSION') === 'DRAFT').length)
 
 async function generateDrafts() {
   if (draftGenerating.value) return
@@ -225,6 +228,22 @@ async function generateDrafts() {
   } finally {
     draftGenerating.value = false
     draftProgress.value = ''
+  }
+}
+
+async function confirmPromoteDrafts() {
+  if (promoting.value) return
+  promoting.value = true
+  evalError.value = ''
+  try {
+    const result = await moveEvalCaseSuite('DRAFT', 'REGRESSION')
+    promoteConfirmOpen.value = false
+    await loadEvalCases()
+    evalError.value = `已把 ${result?.moved || 0} 条草稿题转为 REGRESSION 基线题，发版门禁会跑这些题。`
+  } catch (exception) {
+    evalError.value = formatApiError(exception, '草稿转基线失败。')
+  } finally {
+    promoting.value = false
   }
 }
 
@@ -351,7 +370,7 @@ onMounted(loadEvalCases)
 
     <section v-if="!evalSummary && !historyOpen && !importsOpen" class="retrieval-eval-workbench" aria-labelledby="eval-workbench-title">
       <header class="retrieval-eval-workbench-header"><div><p class="retrieval-debug-kicker">EVALUATION WORKBENCH</p><h2 id="eval-workbench-title">评测题库</h2><p>选择题目后，运行基线或增强检索并比较质量指标。</p></div></header>
-      <div class="retrieval-eval-search"><label for="eval-case-query">筛选题目</label><input id="eval-case-query" v-model="caseQuery" type="search" placeholder="按 Case ID、问题、评测集或层级查询"><span>{{ filteredEvalCases.length }} 条结果</span><div class="retrieval-eval-search-actions"><button type="button" class="retrieval-eval-secondary" :disabled="draftGenerating" @click="generateDrafts">{{ draftGenerating ? (draftProgress || '生成中...') : '生成草稿题' }}</button><button type="button" class="retrieval-eval-secondary" :disabled="importsLoading" @click="openImportRecords">导入记录</button><button type="button" class="retrieval-eval-secondary" @click="beginImportCases">导入</button><button type="button" class="retrieval-eval-primary" @click="beginCreateCase">新增</button><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading" @click="loadEvalCases">{{ casesLoading ? '加载中...' : '刷新' }}</button></div></div>
+      <div class="retrieval-eval-search"><label for="eval-case-query">筛选题目</label><input id="eval-case-query" v-model="caseQuery" type="search" placeholder="按 Case ID、问题、评测集或层级查询"><span>{{ filteredEvalCases.length }} 条结果</span><div class="retrieval-eval-search-actions"><button type="button" class="retrieval-eval-secondary" :disabled="draftGenerating" @click="generateDrafts">{{ draftGenerating ? (draftProgress || '生成中...') : '生成草稿题' }}</button><button type="button" class="retrieval-eval-secondary" :disabled="promoting || !draftCount" @click="promoteConfirmOpen = true">{{ promoting ? '转换中...' : `草稿转基线${draftCount ? ` (${draftCount})` : ''}` }}</button><button type="button" class="retrieval-eval-secondary" :disabled="importsLoading" @click="openImportRecords">导入记录</button><button type="button" class="retrieval-eval-secondary" @click="beginImportCases">导入</button><button type="button" class="retrieval-eval-primary" @click="beginCreateCase">新增</button><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading" @click="loadEvalCases">{{ casesLoading ? '加载中...' : '刷新' }}</button></div></div>
       <div class="retrieval-eval-actions"><span><b>{{ selectedCaseIds.length }}</b> / {{ evalCases.length }} 已选</span><label class="retrieval-eval-run-filter">评测集<select v-model="runSuite"><option value="">全部</option><option v-for="suite in ['SMOKE', 'REGRESSION', 'FORMAT', 'SECURITY', 'FAILURE', 'NO_ANSWER', 'DRAFT']" :key="suite" :value="suite">{{ suite }}</option></select></label><label class="retrieval-eval-run-filter">层级<select v-model="runLayer"><option value="">全部</option><option v-for="layer in ['PARSER', 'RETRIEVAL', 'CONTEXT', 'GENERATION']" :key="layer" :value="layer">{{ layer }}</option></select></label><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading || !evalCases.length" @click="selectAllCases">全选</button><button type="button" class="retrieval-eval-secondary" :disabled="!selectedCaseIds.length" @click="clearCaseSelection">清空</button><i></i><button type="button" class="retrieval-eval-primary" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(false)">{{ evalLoading ? '评测中...' : '运行标准检索' }}</button><button type="button" class="retrieval-eval-primary enhanced" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(true)">{{ evalLoading ? '评测中...' : '运行增强检索' }}</button><button type="button" class="retrieval-eval-secondary retrieval-eval-records-button" :disabled="runsLoading" @click="openEvalHistory">{{ runsLoading ? '加载中...' : '检索记录' }}</button></div>
       <div v-if="casesLoading" class="retrieval-eval-empty">正在加载评测题...</div>
       <div v-else-if="!evalCases.length" class="retrieval-eval-empty">暂无评测题。请使用下方表单新增一条 Eval Case。</div>
@@ -382,6 +401,18 @@ onMounted(loadEvalCases)
       <div v-else-if="!evalImports.length" class="retrieval-eval-empty">暂无已保存的导入文件。</div>
       <div v-else class="retrieval-eval-import-records"><article v-for="item in evalImports" :key="item.id"><div><strong :title="item.originalFileName">{{ item.originalFileName }}</strong><span>{{ formatRunTime(item.createdAt) }} · {{ formatFileSize(item.fileSize) }}</span></div><p>已导入 <b>{{ item.importedCount }}</b> 条评测题</p><button type="button" class="retrieval-eval-secondary" @click="downloadImport(item)">下载</button></article></div>
     </section>
+
+    <Teleport to="body">
+      <ConfirmDialog
+        v-if="promoteConfirmOpen"
+        title="把草稿题转为基线题？"
+        :message="`将把 ${draftCount} 条 DRAFT 草稿题整体转为 REGRESSION 基线题，之后发版门禁和回归评测都会跑它们。请确认这些题已经审核过。`"
+        confirm-text="转为基线题"
+        :busy="promoting"
+        @confirm="confirmPromoteDrafts"
+        @cancel="promoteConfirmOpen = false"
+      />
+    </Teleport>
 
     <Teleport to="body">
       <ConfirmDialog

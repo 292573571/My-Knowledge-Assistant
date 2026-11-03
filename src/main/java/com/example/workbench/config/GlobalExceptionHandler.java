@@ -88,6 +88,18 @@ public class GlobalExceptionHandler {
         return respond(request, response, HttpStatus.NOT_FOUND, "资源不存在", "resource_not_found", false);
     }
 
+    /**
+     * 方法不匹配 405：路径存在但 HTTP 方法不对时应如实告知，避免被兜底处理器误报为 500。
+     */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<?> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException exception,
+            HttpServletRequest request, HttpServletResponse response) throws IOException {
+        log.debug("请求方法不支持 method={} uri={}", request.getMethod(), request.getRequestURI());
+        return respond(request, response, HttpStatus.METHOD_NOT_ALLOWED,
+                "请求方法不支持", "method_not_allowed", false);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> handleUnexpectedException(Exception exception,
                                                         HttpServletRequest request,

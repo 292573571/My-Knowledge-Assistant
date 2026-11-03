@@ -93,6 +93,15 @@ public class EvalController {
         return evalDraftService.generate(user, count);
     }
 
+    @PostMapping("/cases/move-suite")
+    public MoveSuiteResponse moveSuite(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "DRAFT") String from,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "REGRESSION") String to,
+            HttpServletRequest request) {
+        int moved = evalCaseService.moveSuite(user(request), EvalSuite.from(from), EvalSuite.from(to));
+        return new MoveSuiteResponse(moved, EvalSuite.from(from).name(), EvalSuite.from(to).name());
+    }
+
     @PostMapping(value = "/cases/import", consumes = "multipart/form-data")
     public EvalCaseImportResponse importCases(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
         return evalCaseImportService.importCases(user(request), file);
@@ -159,6 +168,16 @@ public class EvalController {
 
     private AppUser user(HttpServletRequest request) {
         return (AppUser) request.getAttribute(AuthFilter.AUTHENTICATED_USER_ATTRIBUTE);
+    }
+
+    /**
+     * 评测集合批量迁移结果。
+     *
+     * @param moved 迁移题数
+     * @param from 源集合
+     * @param to 目标集合
+     */
+    public record MoveSuiteResponse(int moved, String from, String to) {
     }
 
     private static final class EvalRunException extends RuntimeException {
