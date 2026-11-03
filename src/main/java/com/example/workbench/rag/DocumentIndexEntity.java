@@ -82,4 +82,8 @@ public class DocumentIndexEntity {
         return new DocumentIndexEntry(documentId, fileName, path, contentHash, chunkCount, ingestedAt,
                 category, indexStatus, ownerUserId, workspaceId, visibility);
     }
+
+    void changeVisibility(DocumentVisibility visibility) {
+        this.visibility = visibility;
+    }
 }

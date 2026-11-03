@@ -129,6 +129,10 @@ public class DocumentChunkEntity {
         return documentId;
     }
 
+    void changeVisibility(DocumentVisibility visibility) {
+        this.visibility = visibility;
+    }
+
     int chunkIndex() {
         return chunkIndex;
     }

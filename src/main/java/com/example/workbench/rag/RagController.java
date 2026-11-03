@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import java.util.Map;
@@ -52,6 +53,7 @@ public class RagController {
     private final AuditService auditService;
     private final DocumentTaskService documentTaskService;
     private final ConversationService conversationService;
+    private final DocumentVisibilityService documentVisibilityService;
 
     public RagController(
             DocumentIngestionService documentIngestionService,
@@ -63,7 +65,8 @@ public class RagController {
             WorkspaceService workspaceService,
             AuditService auditService,
             DocumentTaskService documentTaskService,
-            ConversationService conversationService
+            ConversationService conversationService,
+            DocumentVisibilityService documentVisibilityService
     ) {
         this.documentIngestionService = documentIngestionService;
         this.ragService = ragService;
@@ -75,6 +78,7 @@ public class RagController {
         this.auditService = auditService;
         this.documentTaskService = documentTaskService;
         this.conversationService = conversationService;
+        this.documentVisibilityService = documentVisibilityService;
     }
 
     @PostMapping("/ingest")
@@ -276,6 +280,26 @@ public class RagController {
                     AuditOutcome.SUCCESS, "NONE", requestId(request));
         } catch (RuntimeException exception) {
             record(user, targetWorkspace, AuditAction.DOCUMENT_DELETE, "DOCUMENT", documentId,
+                    auditService.outcome(exception), auditService.reasonCode(exception), requestId(request));
+            throw exception;
+        }
+    }
+
+    @PatchMapping("/documents/{documentId}/visibility")
+    public DocumentIndexEntry changeDocumentVisibility(@PathVariable String documentId,
+                                                       @RequestParam(required = false) String workspaceId,
+                                                       @Valid @RequestBody DocumentVisibilityRequest body,
+                                                       HttpServletRequest request) {
+        AppUser user = authenticatedUser(request);
+        String targetWorkspace = workspaceId == null || workspaceId.isBlank() ? "personal-" + user.getId() : workspaceId;
+        try {
+            DocumentIndexEntry updated = documentVisibilityService.change(
+                    user, documentId, workspaceId, body.visibility());
+            record(user, targetWorkspace, AuditAction.DOCUMENT_VISIBILITY_CHANGE, "DOCUMENT", documentId,
+                    AuditOutcome.SUCCESS, body.visibility().name(), requestId(request));
+            return updated;
+        } catch (RuntimeException exception) {
+            record(user, targetWorkspace, AuditAction.DOCUMENT_VISIBILITY_CHANGE, "DOCUMENT", documentId,
                     auditService.outcome(exception), auditService.reasonCode(exception), requestId(request));
             throw exception;
         }

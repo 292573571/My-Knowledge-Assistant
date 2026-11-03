@@ -1,14 +1,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
-import { deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
+import { changeDocumentVisibility, deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import { createUuid } from '../utils/uuid'
 
 const props = defineProps({
-  workspace: { type: Object, default: null }
+  workspace: { type: Object, default: null },
+  currentUser: { type: Object, default: null }
 })
 
 const documents = ref([])
@@ -50,6 +51,47 @@ let disposed = false
 const categoryLabels = {
   SOURCE: '原始资料',
   FORMAL_NOTE: '正式笔记'
+}
+
+const visibilityLabels = {
+  PRIVATE: '仅自己可见',
+  WORKSPACE: '空间内可见',
+  PUBLIC: '公开'
+}
+
+const updatingVisibilityId = ref('')
+
+const canManageVisibility = computed(() => {
+  if (props.workspace?.type === 'PERSONAL') return true
+  return ['OWNER', 'EDITOR'].includes(props.workspace?.role)
+})
+
+const isAdmin = computed(() => ['ADMIN', 'SUPER_ADMIN'].includes(props.currentUser?.systemRole))
+
+function visibilityOptions() {
+  const options = [
+    { value: 'PRIVATE', label: visibilityLabels.PRIVATE },
+    { value: 'WORKSPACE', label: visibilityLabels.WORKSPACE }
+  ]
+  if (isAdmin.value) options.push({ value: 'PUBLIC', label: visibilityLabels.PUBLIC })
+  return options
+}
+
+async function handleVisibilityChange(document, value, event) {
+  const previous = document.visibility || 'WORKSPACE'
+  if (value === previous) return
+  updatingVisibilityId.value = document.documentId
+  clearError()
+  try {
+    const updated = await changeDocumentVisibility(document.documentId, value, props.workspace?.id)
+    Object.assign(document, { visibility: updated?.visibility || value })
+    showNotice(`「${displayFileName(document)}」已设为${visibilityLabels[updated?.visibility || value]}`)
+  } catch (exception) {
+    if (event?.target) event.target.value = previous
+    showError(`可见性修改失败：${formatApiError(exception)}`)
+  } finally {
+    updatingVisibilityId.value = ''
+  }
 }
 
 const totalChunks = computed(() => {
@@ -603,7 +645,20 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
       </header>
       <div class="document-card-status-row">
          <div class="document-card-badges"><span>{{ categoryLabels[document.category || 'SOURCE'] }}</span><span class="indexed">{{ indexStatusLabels[document.indexStatus] || (document.indexStatus ? '处理中' : '已索引') }}</span></div>
-        <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
+        <div class="document-card-actions">
+          <label v-if="canManageVisibility" class="document-visibility-picker" :title="`修改「${displayFileName(document)}」的可见范围`">
+            <span>可见性</span>
+            <select
+              :value="document.visibility || 'WORKSPACE'"
+              :disabled="updatingVisibilityId === document.documentId"
+              @change="handleVisibilityChange(document, $event.target.value, $event)"
+            >
+              <option v-for="option in visibilityOptions()" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <span v-else class="document-visibility-static">{{ visibilityLabels[document.visibility] || '空间内可见' }}</span>
+          <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
+        </div>
       </div>
       <div class="document-card-details">
         <p><span>更新时间</span><time :datetime="document.ingestedAt">{{ formatTime(document.ingestedAt) }}</time></p>

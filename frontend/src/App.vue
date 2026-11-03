@@ -432,7 +432,7 @@ async function submitPasswordChange() {
             <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="selectKnowledgeTab('docs')">文档库</button>
             <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">知识笔记</button>
           </div>
-          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" @manage-workspace="workspaceManagerOpen = true" />
+          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" @manage-workspace="workspaceManagerOpen = true" />
           <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" @view-change="onWikiViewChange" />
         </div>
       </template>

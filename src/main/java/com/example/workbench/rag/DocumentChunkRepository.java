@@ -9,4 +9,7 @@ interface DocumentChunkRepository extends JpaRepository<DocumentChunkEntity, Str
 
     List<DocumentChunkEntity> findByDocumentIdAndChunkIndexBetweenOrderByChunkIndex(
             String documentId, int firstChunkIndex, int lastChunkIndex);
+
+    List<DocumentChunkEntity> findByDocumentIdAndWorkspaceIdOrderByChunkIndex(
+            String documentId, String workspaceId);
 }

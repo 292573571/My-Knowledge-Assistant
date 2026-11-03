@@ -46,6 +46,14 @@ export function fetchDocumentContent(documentId, workspaceId = '') {
   return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery(workspaceId)}`)
 }
 
+export function changeDocumentVisibility(documentId, visibility, workspaceId = '') {
+  return request(`/api/documents/${encodeURIComponent(documentId)}/visibility${workspaceQuery(workspaceId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ visibility })
+  })
+}
+
 export function uploadWorkspaceDocument(file, workspaceId = '', clientRequestId = '') {
   const form = new FormData()
   form.append('file', file)

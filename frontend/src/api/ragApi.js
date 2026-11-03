@@ -48,6 +48,12 @@ export function deleteEvalCase(id) {
   }, '删除评测题失败。')
 }
 
+export function generateEvalDrafts(count = 5) {
+  return evalRequest(`/api/eval/cases/generate-drafts?count=${encodeURIComponent(count)}`, {
+    method: 'POST'
+  }, '生成草稿题失败。')
+}
+
 export function importEvalCases(file) {
   const body = new FormData()
   body.append('file', file)

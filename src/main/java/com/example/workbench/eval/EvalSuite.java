@@ -11,7 +11,9 @@ public enum EvalSuite {
     FORMAT,
     SECURITY,
     FAILURE,
-    NO_ANSWER;
+    NO_ANSWER,
+    /** 由真实文档自动生成、等待人工审核的草稿题。 */
+    DRAFT;
 
     /**
      * 将外部输入转换为评测集合，空值和未知值兼容为回归集合。

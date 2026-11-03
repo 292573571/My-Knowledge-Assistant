@@ -2,7 +2,8 @@
 import DocumentPanel from './DocumentPanel.vue'
 
 defineProps({
-  workspace: { type: Object, default: null }
+  workspace: { type: Object, default: null },
+  currentUser: { type: Object, default: null }
 })
 
 defineEmits(['manage-workspace'])
@@ -29,7 +30,7 @@ defineEmits(['manage-workspace'])
       </div>
     </section>
     <section class="knowledge-card" data-reveal>
-      <DocumentPanel :workspace="workspace" />
+      <DocumentPanel :workspace="workspace" :current-user="currentUser" />
     </section>
   </main>
 </template>

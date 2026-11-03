@@ -32,16 +32,21 @@ public class EvalController {
     private final EvalCaseImportService evalCaseImportService;
     private final EvalImportStorage evalImportStorage;
     private final EvalExecutionGuard executionGuard;
+    private final EvalDraftService evalDraftService;
+    private final com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService;
 
     public EvalController(EvalRunner evalRunner, EvalCaseService evalCaseService, EvalRunStorage evalRunStorage,
                           EvalCaseImportService evalCaseImportService, EvalImportStorage evalImportStorage,
-                          EvalExecutionGuard executionGuard) {
+                          EvalExecutionGuard executionGuard, EvalDraftService evalDraftService,
+                          com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService) {
         this.evalRunner = evalRunner;
         this.evalCaseService = evalCaseService;
         this.evalRunStorage = evalRunStorage;
         this.evalCaseImportService = evalCaseImportService;
         this.evalImportStorage = evalImportStorage;
         this.executionGuard = executionGuard;
+        this.evalDraftService = evalDraftService;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @GetMapping("/cases")
@@ -56,6 +61,15 @@ public class EvalController {
     @ResponseStatus(HttpStatus.CREATED)
     public EvalCaseResponse create(@Valid @RequestBody EvalCaseRequest evalCase, HttpServletRequest request) {
         return evalCaseService.create(user(request), evalCase);
+    }
+
+    @PostMapping("/cases/generate-drafts")
+    public EvalDraftService.DraftGenerationResponse generateDrafts(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "5") int count,
+            HttpServletRequest request) {
+        AppUser user = user(request);
+        adminAuthorizationService.requireAdmin(user);
+        return evalDraftService.generate(user, count);
     }
 
     @PostMapping(value = "/cases/import", consumes = "multipart/form-data")

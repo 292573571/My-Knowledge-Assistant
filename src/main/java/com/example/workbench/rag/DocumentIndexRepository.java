@@ -11,6 +11,8 @@ public interface DocumentIndexRepository extends JpaRepository<DocumentIndexEnti
     List<DocumentIndexEntity> findAllByOrderByFileNameAsc();
     List<DocumentIndexEntity> findAllByDocumentId(String documentId);
 
+    java.util.Optional<DocumentIndexEntity> findByDocumentIdAndWorkspaceId(String documentId, String workspaceId);
+
     @Modifying
     @Transactional
     @Query("delete from DocumentIndexEntity item where item.documentId = :documentId "

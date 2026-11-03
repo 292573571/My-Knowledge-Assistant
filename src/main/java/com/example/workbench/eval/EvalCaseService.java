@@ -61,6 +61,27 @@ public class EvalCaseService {
     }
 
     @Transactional
+    public EvalCaseResponse createDraft(AppUser user, String question, List<String> expectedSources,
+                                        List<String> expectedKeywords) {
+        EvalCaseRequest request = new EvalCaseRequest(nextDraftCaseId(user), "rag", "fact", question,
+                false, true, false, expectedSources, List.of(), expectedKeywords, List.of(),
+                List.of(), List.of(), List.of(), "DRAFT", "RETRIEVAL", List.of(), null, null, List.of());
+        return response(repository.save(entity(user, request)));
+    }
+
+    private String nextDraftCaseId(AppUser user) {
+        int next = repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream()
+                .map(EvalCaseEntity::getCaseId)
+                .filter(caseId -> caseId != null && caseId.startsWith("draft-"))
+                .map(caseId -> caseId.substring("draft-".length()))
+                .filter(suffix -> suffix.chars().allMatch(Character::isDigit))
+                .mapToInt(Integer::parseInt)
+                .max()
+                .orElse(0) + 1;
+        return "draft-%03d".formatted(next);
+    }
+
+    @Transactional
     public List<EvalCase> selectedCases(AppUser user, List<Long> ids) {
         return selectedCases(user, ids, null, null);
     }

@@ -1337,6 +1337,14 @@ textarea:focus-visible,
 .document-card-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .document-card-status-row .danger { flex: 0 0 auto; width: auto; border: 1px solid #efced1; border-radius: 8px; padding: 5px 12px; color: #aa4650; background: #fff7f7; font-size: 11px; white-space: nowrap; }
 .document-card-status-row .danger:hover { background: #ffedef; }
+.document-card-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.document-visibility-picker { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--site-muted); }
+.document-visibility-picker select {
+  border: 1px solid var(--site-line-soft); border-radius: 8px; padding: 4px 6px;
+  color: #2f6b49; background: #f4faf6; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.document-visibility-picker select:disabled { opacity: .6; cursor: progress; }
+.document-visibility-static { font-size: 10px; color: var(--site-muted); }
 .document-card-details { display: grid; gap: 7px; border-top: 1px solid #edf0f5; border-bottom: 1px solid #edf0f5; padding: 11px 0; }
 .document-card-details p { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; margin: 0; font-size: 11px; line-height: 1.55; }
 .document-card-details p > span { color: #96a1b2; }

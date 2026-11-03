@@ -171,6 +171,34 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     }
 
     /**
+     * 仅刷新向量库侧的分块元数据（用于可见性变更）。
+     *
+     * <p>不写 PostgreSQL 稀疏表：调用方已在同一事务内更新 document_chunks，重复写入会重置
+     * 分块的 createdAt 与版本号。Chroma 的 add 走 upsert，因此无需先删后加，避免中途失败
+     * 造成「元数据没了、向量也没了」的空窗。</p>
+     *
+     * @param documents 已带有新可见性的分块
+     */
+    public void refreshVisibilityMetadata(List<SourceDocument> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return;
+        }
+        List<String> ids = documents.stream().map(SourceDocument::id).toList();
+        fallbackVectorStore.deleteByIds(ids);
+        fallbackVectorStore.addAll(documents);
+
+        org.springframework.ai.vectorstore.VectorStore chromaVectorStore = chromaVectorStoreProvider.getIfAvailable();
+        if (chromaVectorStore == null) {
+            return;
+        }
+        try {
+            chromaVectorStore.add(documents.stream().map(this::toSpringAiDocument).toList());
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Failed to refresh visibility metadata in Chroma", exception);
+        }
+    }
+
+    /**
      * 按精确 chunk ID 从 Chroma 恢复已经持久化的正文，不触发新的向量计算。
      *
      * @param ids chunk ID 列表
