@@ -19,6 +19,14 @@ remote_deploy() {
   local service_was_active=false
   local activated=false
 
+  # EXIT trap 执行时函数局部变量已出作用域，回滚与清理所需状态必须存到全局变量。
+  SHIHAI_DEPLOY_ARCHIVE=$archive
+  SHIHAI_DEPLOY_BACKUP_DIR=''
+  SHIHAI_DEPLOY_ACTIVATED=false
+  SHIHAI_DEPLOY_SERVICE_WAS_ACTIVE=false
+  SHIHAI_DEPLOY_APP_JAR=$app_jar
+  SHIHAI_DEPLOY_FRONTEND_ROOT=$frontend_root
+
   fix_nginx_root() {
     local expected_root="$frontend_root"
     local nginx_conf=/etc/nginx/conf.d/zhihai.conf
@@ -59,9 +67,10 @@ remote_deploy() {
 
   release_dir="$releases_root/$revision"
   backup_dir="$backups_root/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:12}"
+  SHIHAI_DEPLOY_BACKUP_DIR=$backup_dir
 
   cleanup_archive() {
-    rm -f "${archive:-}"
+    rm -f "${SHIHAI_DEPLOY_ARCHIVE:-}"
   }
 
   print_diagnostics() {
@@ -77,7 +86,7 @@ remote_deploy() {
 
   rollback() {
     local status=$?
-    if [[ $status -eq 0 || "${activated:-false}" != true ]]; then
+    if [[ $status -eq 0 || "${SHIHAI_DEPLOY_ACTIVATED:-false}" != true ]]; then
       cleanup_archive
       exit "$status"
     fi
@@ -85,17 +94,17 @@ remote_deploy() {
     echo "发布失败，恢复上一版本" >&2
     print_diagnostics
     systemctl stop shihai || true
-    if [[ -f "${backup_dir:-}/shihai.jar" ]]; then
-      install -m 640 "${backup_dir:-}/shihai.jar" "${app_jar:-}"
+    if [[ -f "${SHIHAI_DEPLOY_BACKUP_DIR:-}/shihai.jar" ]]; then
+      install -m 640 "${SHIHAI_DEPLOY_BACKUP_DIR}/shihai.jar" "${SHIHAI_DEPLOY_APP_JAR:-/opt/shihai/app/shihai.jar}"
     fi
-    if [[ -d "${backup_dir:-}/frontend" ]]; then
-      rm -rf "${frontend_root:-}"
-      mkdir -p "${frontend_root:-}"
-      cp -a "${backup_dir:-}/frontend/." "${frontend_root:-}/"
-      chmod -R a+rX "${frontend_root:-}"
-      chcon -R system_u:object_r:httpd_sys_content_t:s0 "${frontend_root:-}" 2>/dev/null || true
+    if [[ -d "${SHIHAI_DEPLOY_BACKUP_DIR:-}/frontend" ]]; then
+      rm -rf "${SHIHAI_DEPLOY_FRONTEND_ROOT:-}"
+      mkdir -p "${SHIHAI_DEPLOY_FRONTEND_ROOT:-}"
+      cp -a "${SHIHAI_DEPLOY_BACKUP_DIR}/frontend/." "${SHIHAI_DEPLOY_FRONTEND_ROOT:-}/"
+      chmod -R a+rX "${SHIHAI_DEPLOY_FRONTEND_ROOT:-}"
+      chcon -R system_u:object_r:httpd_sys_content_t:s0 "${SHIHAI_DEPLOY_FRONTEND_ROOT:-}" 2>/dev/null || true
     fi
-    if [[ "${service_was_active:-false}" == true ]]; then
+    if [[ "${SHIHAI_DEPLOY_SERVICE_WAS_ACTIVE:-false}" == true ]]; then
       systemctl start shihai || true
     fi
     cleanup_archive
@@ -112,6 +121,7 @@ remote_deploy() {
 
   if systemctl is-active --quiet shihai; then
     service_was_active=true
+    SHIHAI_DEPLOY_SERVICE_WAS_ACTIVE=true
   fi
   if [[ -f "$app_jar" ]]; then
     cp -a "$app_jar" "$backup_dir/shihai.jar"
@@ -122,6 +132,7 @@ remote_deploy() {
   fi
 
   activated=true
+  SHIHAI_DEPLOY_ACTIVATED=true
   systemctl stop shihai
   install -m 640 "$release_dir/backend/shihai.jar" "$app_jar"
   rm -rf "$frontend_root"
@@ -131,6 +142,12 @@ remote_deploy() {
   chcon -R system_u:object_r:httpd_sys_content_t:s0 "$frontend_root" 2>/dev/null || true
   fix_nginx_root
   systemctl start shihai
+
+  # 回滚自检用：激活后立即失败，验证 EXIT trap 能把上一版拉回来（仅 deploy-shihai self-test-rollback 会设置）
+  if [[ "${SHIHAI_DEPLOY_FORCE_FAIL:-0}" == "1" ]]; then
+    echo "自检注入：激活后立即失败，触发回滚" >&2
+    exit 1
+  fi
 
   # 发版门禁：健康检查通过后再跑基线评测，未达标则回滚，避免退化版本留在线上。
   run_eval_gate() {
@@ -176,6 +193,7 @@ remote_deploy() {
         exit 1
       fi
       activated=false
+      SHIHAI_DEPLOY_ACTIVATED=false
       cleanup_archive
       echo "服务器本地健康检查成功: ${revision}，等待公网健康检查后清理旧版本"
       exit 0
@@ -235,6 +253,296 @@ install_self() {
   echo "已更新 /usr/local/sbin/deploy-shihai"
 }
 
+# 数据备份：PostgreSQL（关键）+ 上传文件与配置 + 可选 Chroma 向量库。
+# 只在服务器上以 root 执行；默认保留 14 天。
+backup_data() {
+  local app_root=/opt/shihai
+  local data_root="$app_root/backups/data"
+  local env_file=/etc/shihai/shihai.env
+  local retention_days=${BACKUP_RETENTION_DAYS:-14}
+  local pg_user=${BACKUP_PG_USER:-postgres}
+  local pg_db=${BACKUP_PG_DB:-postgres}
+  local verify=false
+  local argument
+
+  for argument in "$@"; do
+    case "$argument" in
+      --verify) verify=true ;;
+      --help|-h) echo "用法: deploy-shihai backup [--verify]"; return 0 ;;
+      *) echo "未知参数: $argument" >&2; exit 2 ;;
+    esac
+  done
+
+  command -v docker >/dev/null 2>&1 || { echo "缺少 docker 命令，无法备份数据库" >&2; exit 1; }
+
+  exec 9>/run/lock/shihai-backup.lock
+  flock -n 9 || { echo "已有备份任务正在执行" >&2; exit 1; }
+
+  find_pg_container() {
+    local name
+    name=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null \
+      | awk 'tolower($2) ~ /pgvector/ {print $1; exit}')
+    if [[ -z "$name" ]] && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx my-pgvector; then
+      name=my-pgvector
+    fi
+    printf '%s' "$name"
+  }
+
+  find_chroma_container() {
+    docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null \
+      | awk 'tolower($2) ~ /chroma/ {print $1; exit}'
+  }
+
+  local pg_container
+  pg_container=$(find_pg_container)
+  if [[ -z "$pg_container" ]]; then
+    echo "未找到 PostgreSQL 容器（pgvector），备份中止" >&2
+    exit 1
+  fi
+
+  local stamp work archive
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  # flock 已保证不会并发，残留的临时目录一定是历史异常退出留下的，先清掉
+  find /tmp -maxdepth 1 -name 'shihai-backup.*' -exec rm -rf {} + 2>/dev/null || true
+  work=$(mktemp -d "${TMPDIR:-/tmp}/shihai-backup.XXXXXX")
+  archive="$data_root/shihai-backup-$stamp.tar.gz"
+  mkdir -p "$data_root"
+  chmod 700 "$data_root"
+  cleanup_work() { [[ -n "${SHIHAI_BACKUP_WORK:-}" ]] && rm -rf "${SHIHAI_BACKUP_WORK:-}"; return 0; }
+  SHIHAI_BACKUP_WORK=$work
+  trap cleanup_work EXIT
+
+  echo "备份开始: $stamp（数据库容器 $pg_container）"
+
+  # 1) PostgreSQL 全库自定义格式转储，并立即校验归档可读
+  docker exec "$pg_container" pg_dump -U "$pg_user" -d "$pg_db" -Fc -Z 6 > "$work/postgres.dump"
+  if [[ ! -s "$work/postgres.dump" ]]; then
+    echo "pg_dump 输出为空，备份失败" >&2
+    exit 1
+  fi
+  if ! docker exec -i "$pg_container" pg_restore -l < "$work/postgres.dump" > /dev/null; then
+    echo "转储文件无法被 pg_restore 解析，备份失败" >&2
+    exit 1
+  fi
+
+  # 2) 上传文件与用户资产（缺失则跳过，不阻断备份）
+  local file_targets=()
+  local dir
+  for dir in docs data; do
+    [[ -d "$app_root/$dir" ]] && file_targets+=("$dir")
+  done
+  if [[ ${#file_targets[@]} -gt 0 ]]; then
+    tar -czf "$work/files.tar.gz" -C "$app_root" "${file_targets[@]}"
+  fi
+
+  # 3) 环境变量（含数据库口令与模型密钥），单独存且保持 600
+  if [[ -f "$env_file" ]]; then
+    install -m 600 "$env_file" "$work/shihai.env"
+  fi
+
+  # 4) Chroma 向量库（可重建，尽力而为：找到挂载目录才备份）
+  local chroma_included=false
+  local chroma_container chroma_source=''
+  chroma_container=$(find_chroma_container)
+  if [[ "${BACKUP_INCLUDE_CHROMA:-1}" != "0" && -n "$chroma_container" ]]; then
+    chroma_source=$(docker inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}} {{end}}' "$chroma_container" 2>/dev/null \
+      | tr ' ' '\n' | awk -F'|' 'tolower($2) ~ /chroma|data/ {print $1; exit}')
+  fi
+  if [[ -n "$chroma_source" && -d "$chroma_source" ]]; then
+    if tar -czf "$work/chroma-data.tar.gz" -C "$(dirname "$chroma_source")" "$(basename "$chroma_source")"; then
+      chroma_included=true
+    else
+      rm -f "$work/chroma-data.tar.gz"
+    fi
+  fi
+
+  # 5) 清单与校验和
+  local revision='unknown'
+  revision=$(find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -1)
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || revision=unknown
+  local pg_bytes
+  pg_bytes=$(stat -c %s "$work/postgres.dump")
+  cat > "$work/manifest.txt" <<EOF
+created_at=$stamp
+revision=$revision
+pg_container=$pg_container
+pg_database=$pg_db
+pg_bytes=$pg_bytes
+files=${file_targets[*]:-none}
+env_included=$([[ -f "$work/shihai.env" ]] && echo yes || echo no)
+chroma_included=$chroma_included
+chroma_source=${chroma_source:-none}
+EOF
+  ( cd "$work" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs -r sha256sum > SHA256SUMS )
+
+  chmod -R go-rwx "$work"
+  tar -czf "$archive" -C "$work" .
+  chmod 600 "$archive"
+  sha256sum "$archive" | awk '{print $1}' > "$archive.sha256"
+
+  local archive_size
+  archive_size=$(du -h "$archive" | cut -f1)
+
+  # 6) 恢复演练：把转储还原到临时库并比对表数量，证明备份真的可用
+  if [[ "$verify" == true ]]; then
+    local check_db=shihai_restore_check
+    echo "开始恢复演练（临时库 $check_db）..."
+    docker exec "$pg_container" psql -U "$pg_user" -d postgres -q -c "drop database if exists $check_db" >/dev/null
+    docker exec "$pg_container" psql -U "$pg_user" -d postgres -q -c "create database $check_db" >/dev/null
+    if ! docker exec -i "$pg_container" pg_restore -U "$pg_user" -d "$check_db" --no-owner --no-privileges < "$work/postgres.dump" >/dev/null 2>&1; then
+      echo "恢复演练失败：pg_restore 报错" >&2
+      docker exec "$pg_container" psql -U "$pg_user" -d postgres -q -c "drop database if exists $check_db" >/dev/null || true
+      exit 1
+    fi
+    local live_tables restored_tables live_rows restored_rows
+    live_tables=$(docker exec "$pg_container" psql -U "$pg_user" -d "$pg_db" -Atc \
+      "select count(*) from pg_tables where schemaname='my_knowledge_assistant'")
+    restored_tables=$(docker exec "$pg_container" psql -U "$pg_user" -d "$check_db" -Atc \
+      "select count(*) from pg_tables where schemaname='my_knowledge_assistant'")
+    live_rows=$(printf '%s\n' "select format('select count(*) from %I.%I', schemaname, tablename) from pg_tables where schemaname='my_knowledge_assistant' \\gexec" \
+      | docker exec -i "$pg_container" psql -U "$pg_user" -d "$pg_db" -At | awk '{sum+=$1} END {print sum+0}')
+    restored_rows=$(printf '%s\n' "select format('select count(*) from %I.%I', schemaname, tablename) from pg_tables where schemaname='my_knowledge_assistant' \\gexec" \
+      | docker exec -i "$pg_container" psql -U "$pg_user" -d "$check_db" -At | awk '{sum+=$1} END {print sum+0}')
+    docker exec "$pg_container" psql -U "$pg_user" -d postgres -q -c "drop database if exists $check_db" >/dev/null || true
+    if [[ "$live_tables" != "$restored_tables" || "$restored_rows" != "$live_rows" ]]; then
+      echo "恢复演练失败：线上表 ${live_tables}/行 ${live_rows}，还原后 ${restored_tables}/行 ${restored_rows}" >&2
+      exit 1
+    fi
+    echo "恢复演练通过：表 ${restored_tables} 张、行 ${restored_rows} 条，与线上一致"
+  fi
+
+  # 7) 保留策略：删除超过 N 天的备份，但始终保留最新一份
+  local newest
+  newest=$(find "$data_root" -maxdepth 1 -name 'shihai-backup-*.tar.gz' -printf '%T@ %p\n' \
+    | sort -nr | head -1 | cut -d' ' -f2-)
+  find "$data_root" -maxdepth 1 -name 'shihai-backup-*.tar.gz' -mtime +"$retention_days" ! -path "$newest" -delete
+  find "$data_root" -maxdepth 1 -name 'shihai-backup-*.tar.gz.sha256' -mtime +"$retention_days" -delete
+
+  echo "备份完成: $archive (${archive_size})"
+  echo "  数据库: $(numfmt --to=iec "$pg_bytes" 2>/dev/null || echo "${pg_bytes}B")，容器 $pg_container"
+  echo "  文件: ${file_targets[*]:-无}"
+  echo "  Chroma: $([[ "$chroma_included" == true ]] && echo "已包含" || echo "已跳过（向量可由文档重建）")"
+  echo "  保留: 最近 ${retention_days} 天，共 $(find "$data_root" -maxdepth 1 -name 'shihai-backup-*.tar.gz' | wc -l) 份"
+}
+
+# 列出已有备份并展示最新一份的清单。
+list_backups() {
+  local data_root=/opt/shihai/backups/data
+  if [[ ! -d "$data_root" ]]; then
+    echo "还没有备份: $data_root 不存在"
+    exit 1
+  fi
+  local archives=()
+  mapfile -t archives < <(find "$data_root" -maxdepth 1 -name 'shihai-backup-*.tar.gz' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-)
+  if [[ ${#archives[@]} -eq 0 ]]; then
+    echo "还没有备份文件"
+    exit 1
+  fi
+  echo "备份目录: $data_root（共 ${#archives[@]} 份）"
+  local item size created
+  for item in "${archives[@]}"; do
+    size=$(du -h "$item" | cut -f1)
+    created=$(date -r "$item" '+%Y-%m-%d %H:%M')
+    printf '  %s  %6s  %s\n' "$created" "$size" "$(basename "$item")"
+  done
+  echo
+  echo "最新备份清单:"
+  tar -xzOf "${archives[0]}" ./manifest.txt | sed 's/^/  /'
+}
+
+# 回滚自检：用当前线上产物造一个发布包，注入「激活后失败」，确认脚本能把上一版恢复回来。
+self_test_rollback() {
+  local app_root=/opt/shihai
+  local app_jar=$app_root/app/shihai.jar
+  local frontend_root=$app_root/frontend/dist
+  local health_url=${HEALTH_URL:-http://127.0.0.1:8080/api/health}
+  [[ -f "$app_jar" ]] || { echo "找不到 $app_jar，无法自检" >&2; exit 1; }
+
+  local work rev
+  find /tmp -maxdepth 1 -name 'shihai-selftest.*' -exec rm -rf {} + 2>/dev/null || true
+  work=$(mktemp -d "${TMPDIR:-/tmp}/shihai-selftest.XXXXXX")
+  rev=$(printf 'f%.0s' {1..40})
+  mkdir -p "$work/pkg/backend" "$work/pkg/frontend"
+  cp -a "$app_jar" "$work/pkg/backend/shihai.jar"
+  cp -a "$frontend_root/." "$work/pkg/frontend/"
+  printf '%s\n' "$rev" > "$work/pkg/REVISION"
+  tar -czf "$work/release.tar.gz" -C "$work/pkg" .
+  chmod -R go-rwx "$work"
+
+  local jar_before jar_after status
+  jar_before=$(sha256sum "$app_jar" | cut -d' ' -f1)
+  echo "自检开始：当前 jar ${jar_before:0:12}，将发布一个注入失败的版本"
+
+  set +e
+  ( export SHIHAI_DEPLOY_FORCE_FAIL=1; remote_deploy "$work/release.tar.gz" "$rev" )
+  status=$?
+  set -e
+
+  jar_after=$(sha256sum "$app_jar" | cut -d' ' -f1)
+  local attempt health=000
+  for attempt in $(seq 1 30); do
+    health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$health_url" 2>/dev/null || echo 000)
+    [[ "$health" == "200" ]] && break
+    sleep 1
+  done
+
+  rm -rf "$app_root/releases/$rev" "$work"
+
+  echo "自检结果：注入失败退出码=$status（期望 1）"
+  echo "          jar 哈希 ${jar_after:0:12}（期望与开始一致）"
+  echo "          服务健康=$health（期望 200）"
+  if [[ "$status" == "1" && "$jar_before" == "$jar_after" && "$health" == "200" ]]; then
+    echo "回滚自检通过：失败版本已自动回滚到上一版"
+    return 0
+  fi
+  echo "回滚自检未通过，尝试恢复服务" >&2
+  systemctl start shihai || true
+  exit 1
+}
+
+# 安装每日备份定时器（systemd timer），默认 03:30 执行。
+install_backup_timer() {
+  local schedule=${1:-03:30}
+  if [[ ! "$schedule" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "用法: deploy-shihai install-backup-timer [HH:MM]" >&2
+    exit 2
+  fi
+  local hour=${schedule%%:*}
+  local minute=${schedule##*:}
+
+  cat > /etc/systemd/system/shihai-backup.service <<EOF
+[Unit]
+Description=shihai 数据备份（PostgreSQL + 上传文件）
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/deploy-shihai backup
+Nice=10
+IOSchedulingClass=best-effort
+EOF
+
+  cat > /etc/systemd/system/shihai-backup.timer <<EOF
+[Unit]
+Description=每天 ${schedule} 备份 shihai 数据
+
+[Timer]
+OnCalendar=*-*-* ${hour}:${minute}:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=shihai-backup.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now shihai-backup.timer >/dev/null
+  echo "已安装定时备份：每天 ${schedule}（易错过时间点会自动补跑）"
+  systemctl list-timers shihai-backup.timer --no-pager | head -3
+}
+
 release_local() {
   local project_root
   project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -254,6 +562,10 @@ release_local() {
   deploy-shihai remote <release.tar.gz> <40位Git提交ID>
   deploy-shihai cleanup <40位Git提交ID>
   deploy-shihai install <source-file>
+  deploy-shihai backup [--verify]              立即备份（--verify 额外做恢复演练）
+  deploy-shihai backup-list                    查看已有备份
+  deploy-shihai install-backup-timer [HH:MM]   安装每日备份定时器，默认 03:30
+  deploy-shihai self-test-rollback             验证失败发布能自动回滚（会重启一次服务）
 
 环境变量：
   DEPLOY_HOST        服务器地址，默认 175.178.229.209
@@ -440,6 +752,18 @@ elif [[ "${1:-}" == "cleanup" ]]; then
 elif [[ "${1:-}" == "install" ]]; then
   shift
   install_self "$@"
+elif [[ "${1:-}" == "backup" ]]; then
+  shift
+  backup_data "$@"
+elif [[ "${1:-}" == "install-backup-timer" ]]; then
+  shift
+  install_backup_timer "$@"
+elif [[ "${1:-}" == "backup-list" ]]; then
+  shift
+  list_backups "$@"
+elif [[ "${1:-}" == "self-test-rollback" ]]; then
+  shift
+  self_test_rollback "$@"
 else
   release_local "$@"
 fi
