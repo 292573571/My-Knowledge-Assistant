@@ -4,7 +4,7 @@ import { formatApiError } from '../api/apiError'
 import { fetchUsageModelStats, formatModelUsage } from '../api/usageApi'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
 import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api/logApi'
-import { fetchDocumentHealth, fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
+import { cleanupDocumentHealth, fetchDocumentHealth, fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
 import ToastContainer from './ToastContainer.vue'
@@ -185,6 +185,28 @@ const confirmation = computed(() => {
       danger: true
     }
   }
+  if (confirmTarget.value === 'health-cleanup-orphan') {
+    const plan = healthCleanupPlan.value
+    const names = healthCleanupFileNames(plan)
+    const more = (plan?.removed?.length || 0) > 6 ? ` 等 ${plan.removed.length} 项` : ''
+    return {
+      title: `清理 ${plan?.removedCount || 0} 个孤儿索引？`,
+      message: `将删除：${names}${more}。这些文档的索引和向量残留会一并清除，此操作不可恢复。`,
+      confirmText: '清理孤儿索引',
+      danger: true
+    }
+  }
+  if (confirmTarget.value === 'health-cleanup-duplicate') {
+    const plan = healthCleanupPlan.value
+    const names = healthCleanupFileNames(plan)
+    const more = (plan?.removed?.length || 0) > 6 ? ` 等 ${plan.removed.length} 项` : ''
+    return {
+      title: `去重：删除 ${plan?.removedCount || 0} 个重复副本？`,
+      message: `每组重复内容只保留分块最全的一份，将删除：${names}${more}。删除后无法恢复，请确认这些副本不再被各自空间引用。`,
+      confirmText: '删除重复副本',
+      danger: true
+    }
+  }
   return pendingAction.value === 'rebuild'
     ? {
         title: '重建当前空间索引？',
@@ -219,6 +241,8 @@ async function confirmDialogAction() {
     if (target === 'clear-logs') await clearAllLogs()
     else if (target === 'purge-audit') await purgeAllAuditEvents()
     else if (target === 'delete-model') await deletePoolModelConfirmed()
+    else if (target === 'health-cleanup-orphan') await runHealthCleanup('orphan')
+    else if (target === 'health-cleanup-duplicate') await runHealthCleanup('duplicate')
     else await confirmMaintenance()
   } finally {
     confirmTarget.value = ''
@@ -231,6 +255,7 @@ function cancelDialog() {
   confirmTarget.value = ''
   pendingAction.value = ''
   pendingPoolDelete.value = null
+  healthCleanupPlan.value = null
 }
 
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (document.chunkCount || 0), 0))
@@ -303,6 +328,48 @@ async function loadDocumentHealth() {
 function healthStatusText(status) {
   const labels = { INDEXED: '已索引', PENDING: '待索引', FAILED: '失败' }
   return labels[status] || status
+}
+
+const healthCleanupPlan = ref(null)
+const healthCleanupBusy = ref('')
+
+async function openHealthCleanupConfirm(scope) {
+  if (healthCleanupBusy.value) return
+  healthCleanupBusy.value = scope
+  try {
+    const plan = await cleanupDocumentHealth(scope, true)
+    if (!plan || !plan.removed?.length) {
+      notifyError('没有需要清理的项目。')
+      return
+    }
+    healthCleanupPlan.value = plan
+    confirmTarget.value = scope === 'orphan' ? 'health-cleanup-orphan' : 'health-cleanup-duplicate'
+  } catch (exception) {
+    notifyError(`清理预览失败：${formatApiError(exception)}`)
+  } finally {
+    healthCleanupBusy.value = ''
+  }
+}
+
+function healthCleanupFileNames(plan, limit = 6) {
+  return (plan?.removed || []).slice(0, limit).map((item) => item.fileName).join('、')
+}
+
+async function runHealthCleanup(scope) {
+  healthCleanupBusy.value = scope
+  healthLoading.value = true
+  try {
+    const result = await cleanupDocumentHealth(scope, false)
+    const label = scope === 'orphan' ? '孤儿索引' : '重复文档'
+    notifySuccess(`${label}清理完成：已删除 ${result?.removedCount ?? 0} 项。`)
+    await loadDocumentHealth()
+  } catch (exception) {
+    notifyError(`清理失败：${formatApiError(exception)}`)
+  } finally {
+    healthCleanupBusy.value = ''
+    healthLoading.value = false
+    healthCleanupPlan.value = null
+  }
 }
 
 function categoryText(category) {
@@ -687,7 +754,7 @@ async function handleTestModel(model) {
             <span v-for="(count, category) in health.byCategory" :key="`c-${category}`" class="maintenance-health-tag neutral">{{ categoryText(category) }} {{ count }}</span>
           </div>
           <div v-if="health.duplicates?.length" class="maintenance-health-group">
-            <h3>重复文档（同内容存在于多个空间）</h3>
+            <h3>重复文档（同内容存在于多个空间）<button type="button" class="secondary maintenance-health-cleanup" :disabled="healthLoading || Boolean(healthCleanupBusy)" @click="openHealthCleanupConfirm('duplicate')">{{ healthCleanupBusy === 'duplicate' ? '预览中...' : '一键去重' }}</button></h3>
             <ul>
               <li v-for="group in health.duplicates" :key="group.contentHash">
                 <code>{{ shortHash(group.contentHash) }}</code>
@@ -697,7 +764,7 @@ async function handleTestModel(model) {
             </ul>
           </div>
           <div v-if="health.orphanIndexes?.length" class="maintenance-health-group">
-            <h3>孤儿索引（有索引但分块缺失，检索会空转）</h3>
+            <h3>孤儿索引（有索引但分块缺失，检索会空转）<button type="button" class="secondary maintenance-health-cleanup" :disabled="healthLoading || Boolean(healthCleanupBusy)" @click="openHealthCleanupConfirm('orphan')">{{ healthCleanupBusy === 'orphan' ? '预览中...' : '一键清理' }}</button></h3>
             <ul>
               <li v-for="issue in health.orphanIndexes" :key="issue.documentId">
                 <span>{{ issue.fileName }}</span>

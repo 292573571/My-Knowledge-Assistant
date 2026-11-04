@@ -46,6 +46,12 @@ export function fetchDocumentHealth() {
   return request('/api/documents/health')
 }
 
+export function cleanupDocumentHealth(scope, dryRun = false) {
+  return request(`/api/documents/health/cleanup?scope=${encodeURIComponent(scope)}&dryRun=${dryRun}`, {
+    method: 'POST'
+  })
+}
+
 export function fetchDocumentContent(documentId, workspaceId = '') {
   return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery(workspaceId)}`)
 }

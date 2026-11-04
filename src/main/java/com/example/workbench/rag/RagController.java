@@ -242,6 +242,26 @@ public class RagController {
         return documentHealthService.report();
     }
 
+    /**
+     * 知识库健康治理：一键清理孤儿索引 / 重复文档。dryRun=true 只返回计划清单，不删除。
+     */
+    @PostMapping("/documents/health/cleanup")
+    public DocumentHealthService.CleanupResult documentHealthCleanup(@RequestParam String scope,
+                                                                     @RequestParam(defaultValue = "false") boolean dryRun,
+                                                                     HttpServletRequest request) {
+        requireAdmin(request);
+        if (!"orphan".equals(scope) && !"duplicate".equals(scope)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "未知清理范围: " + scope);
+        }
+        if (dryRun) {
+            return documentHealthService.planCleanup(scope);
+        }
+        return "orphan".equals(scope)
+                ? documentHealthService.cleanupOrphans()
+                : documentHealthService.cleanupDuplicates();
+    }
+
     @GetMapping("/documents/{documentId}/content")
     public DocumentContentResponse documentContent(@PathVariable String documentId,
                                                    @RequestParam(required = false) String workspaceId,

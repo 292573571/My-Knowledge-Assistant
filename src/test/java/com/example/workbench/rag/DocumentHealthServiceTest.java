@@ -1,7 +1,12 @@
 package com.example.workbench.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.workbench.workspace.DocumentVisibility;
@@ -20,14 +25,18 @@ class DocumentHealthServiceTest {
 
     private DocumentIndexRepository indexRepository;
     private DocumentChunkRepository chunkRepository;
+    private VectorStore vectorStore;
+    private DocumentIndexStore indexStore;
     private DocumentHealthService service;
 
     @BeforeEach
     void setUp() {
         indexRepository = mock(DocumentIndexRepository.class);
         chunkRepository = mock(DocumentChunkRepository.class);
+        vectorStore = mock(VectorStore.class);
+        indexStore = mock(DocumentIndexStore.class);
         service = new DocumentHealthService(indexRepository, chunkRepository,
-                new IngestionPathResolver(docsDir));
+                new IngestionPathResolver(docsDir), vectorStore, indexStore);
     }
 
     private DocumentIndexEntry entryOf(String documentId, String fileName, String hash, String workspaceId,
@@ -114,5 +123,97 @@ class DocumentHealthServiceTest {
                 .containsEntry("FORMAL_NOTE", 1L)
                 .containsEntry("WIKI_PAGE", 1L);
         assertThat(report.duplicates()).isEmpty();
+    }
+
+    @Test
+    void orphanCleanupPlanPreviewsWithoutDeleting() {
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 3, "INDEXED", "SOURCE"),
+                entryOf("doc-2", "b.pdf", "hash-2", "ws-1", 2, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(new Object[]{"doc-2", 2L}));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("orphan");
+
+        assertThat(plan.dryRun()).isTrue();
+        assertThat(plan.removedCount()).isEqualTo(1);
+        assertThat(plan.removed()).hasSize(1);
+        assertThat(plan.removed().get(0).documentId()).isEqualTo("doc-1");
+        verifyNoInteractions(vectorStore, indexStore);
+    }
+
+    @Test
+    void cleanupOrphansPurgesVectorIndexAndChunkRows() {
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 3, "INDEXED", "SOURCE"),
+                entryOf("doc-2", "b.pdf", "hash-2", "ws-1", 2, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(new Object[]{"doc-2", 2L}));
+
+        DocumentHealthService.CleanupResult result = service.cleanupOrphans();
+
+        assertThat(result.dryRun()).isFalse();
+        assertThat(result.removedCount()).isEqualTo(1);
+        assertThat(result.removed().get(0).documentId()).isEqualTo("doc-1");
+
+        verify(vectorStore).deleteByIds(argThat((List<String> ids) -> ids != null && ids.containsAll(
+                List.of("doc-1#chunk-0", "doc-1#chunk-1", "doc-1#chunk-2")) && ids.size() == 3));
+        verify(indexStore).delete("doc-1", "ws-1");
+        verify(chunkRepository).deleteByDocumentId("doc-1");
+        // 正常文档完全不受影响。
+        verify(indexStore, never()).delete("doc-2", "ws-1");
+    }
+
+    @Test
+    void cleanupOrphansIgnoresHealthyKnowledgeBase() {
+        givenDocuments(entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 2, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(new Object[]{"doc-1", 2L}));
+
+        DocumentHealthService.CleanupResult result = service.cleanupOrphans();
+
+        assertThat(result.removedCount()).isZero();
+        assertThat(result.removed()).isEmpty();
+        verify(vectorStore, never()).deleteByIds(anyList());
+        verifyNoInteractions(indexStore);
+    }
+
+    @Test
+    void cleanupDuplicatesKeepsEntryWithMostChunks() {
+        // doc-2 分块最全（5）应保留；doc-1（2）是同内容的多余副本；doc-3 与两者内容不同不受影响。
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 2, "INDEXED", "SOURCE"),
+                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 5, "INDEXED", "SOURCE"),
+                entryOf("doc-3", "b.pdf", "hash-2", "ws-1", 2, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-1", 2L}, new Object[]{"doc-2", 5L}, new Object[]{"doc-3", 2L}));
+
+        DocumentHealthService.CleanupResult result = service.cleanupDuplicates();
+
+        assertThat(result.scope()).isEqualTo("duplicate");
+        assertThat(result.removedCount()).isEqualTo(1);
+        assertThat(result.removed().get(0).documentId()).isEqualTo("doc-1");
+        assertThat(result.kept()).hasSize(1);
+        assertThat(result.kept().get(0).documentId()).isEqualTo("doc-2");
+        // 内容不同的 doc-3 完全不受影响。
+        verify(indexStore).delete("doc-1", "ws-1");
+        verify(indexStore, never()).delete("doc-2", "ws-2");
+        verify(indexStore, never()).delete("doc-3", "ws-1");
+    }
+
+    @Test
+    void duplicateCleanupPlanKeepsFirstOnEqualChunkCount() {
+        // 分块数并列时保留 fileName 升序的第一份（doc-1），删除 doc-2。
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 3, "INDEXED", "SOURCE"),
+                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 3, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-1", 3L}, new Object[]{"doc-2", 3L}));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
+
+        assertThat(plan.dryRun()).isTrue();
+        assertThat(plan.removed()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-2");
+        assertThat(plan.kept()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-1");
+        verifyNoInteractions(vectorStore, indexStore);
     }
 }
