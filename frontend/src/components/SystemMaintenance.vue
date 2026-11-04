@@ -4,7 +4,7 @@ import { formatApiError } from '../api/apiError'
 import { fetchUsageModelStats, formatModelUsage } from '../api/usageApi'
 import { createPoolModel, deletePoolModel, fetchModelPool, setDefaultPoolModel, testPoolModel, updatePoolModel } from '../api/modelConfigApi'
 import { fetchLogs, clearLogs, fetchAuditEvents, purgeAuditEvents } from '../api/logApi'
-import { fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
+import { fetchDocumentHealth, fetchDocuments, fetchDocumentTasks, ingestDocument, ingestDocuments, rebuildDocuments, syncDocuments } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import RetrievalDebug from './RetrievalDebug.vue'
 import ToastContainer from './ToastContainer.vue'
@@ -40,6 +40,9 @@ const poolSuccess = ref('')
 const showPoolForm = ref(false)
 const editingPoolModel = ref(null)
 const testingModelId = ref(null)
+const healthLoading = ref(false)
+const healthError = ref('')
+const health = ref(null)
 const poolUsageByModel = ref({})
 const poolForm = reactive({
   name: '', baseUrl: '', apiKey: '', model: '', modelType: 'CHAT',
@@ -279,7 +282,42 @@ onMounted(() => {
   loadSummary()
   loadDocumentTasks()
   loadPool()
-  if (props.currentUser?.systemRole === 'SUPER_ADMIN') loadPoolUsage()
+  if (props.currentUser?.systemRole === 'SUPER_ADMIN') {
+    loadPoolUsage()
+    loadDocumentHealth()
+  }
+})
+
+async function loadDocumentHealth() {
+  healthLoading.value = true
+  healthError.value = ''
+  try {
+    health.value = await fetchDocumentHealth()
+  } catch (exception) {
+    healthError.value = formatApiError(exception, '知识库健康报告加载失败。')
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+function healthStatusText(status) {
+  const labels = { INDEXED: '已索引', PENDING: '待索引', FAILED: '失败' }
+  return labels[status] || status
+}
+
+function categoryText(category) {
+  const labels = { SOURCE: '原始资料', FORMAL_NOTE: '正式笔记', WIKI_PAGE: 'Wiki 页面', LEARNING_RECORD: '学习记录' }
+  return labels[category] || category
+}
+
+function shortHash(hash) {
+  return typeof hash === 'string' && hash.length > 12 ? hash.slice(0, 12) : hash
+}
+
+const healthIssueCount = computed(() => {
+  if (!health.value) return 0
+  return (health.value.orphanIndexes?.length || 0) + (health.value.missingSources?.length || 0)
+    + (health.value.duplicates?.length || 0)
 })
 
 onBeforeUnmount(() => {
@@ -617,6 +655,67 @@ async function handleTestModel(model) {
             <button type="button" class="secondary" :disabled="Boolean(busyAction)" @click="importDirectory">导入目录</button>
           </div>
         </article>
+      </section>
+
+      <section v-if="currentUser?.systemRole === 'SUPER_ADMIN'" class="maintenance-section maintenance-health-section">
+        <header class="maintenance-section-heading">
+          <div>
+            <p class="maintenance-section-kicker">KNOWLEDGE HEALTH</p>
+            <h2>知识库健康</h2>
+            <span>全系统盘点：重复导入、索引空转与源文件丢失。</span>
+          </div>
+          <button type="button" class="secondary" :disabled="healthLoading" @click="loadDocumentHealth">{{ healthLoading ? '盘点中...' : '重新盘点' }}</button>
+        </header>
+        <p v-if="healthError" class="maintenance-message">{{ healthError }}</p>
+        <template v-if="health">
+          <div class="maintenance-health-stats">
+            <article class="maintenance-health-stat">
+              <strong>{{ health.totalDocuments }}</strong>
+              <span>文档总数</span>
+            </article>
+            <article class="maintenance-health-stat">
+              <strong>{{ health.totalChunks.toLocaleString('zh-CN') }}</strong>
+              <span>分块总数</span>
+            </article>
+            <article class="maintenance-health-stat" :class="{ warn: healthIssueCount > 0 }">
+              <strong>{{ healthIssueCount }}</strong>
+              <span>待处理问题</span>
+            </article>
+          </div>
+          <div class="maintenance-health-tags">
+            <span v-for="(count, status) in health.byStatus" :key="`s-${status}`" class="maintenance-health-tag">{{ healthStatusText(status) }} {{ count }}</span>
+            <span v-for="(count, category) in health.byCategory" :key="`c-${category}`" class="maintenance-health-tag neutral">{{ categoryText(category) }} {{ count }}</span>
+          </div>
+          <div v-if="health.duplicates?.length" class="maintenance-health-group">
+            <h3>重复文档（同内容存在于多个空间）</h3>
+            <ul>
+              <li v-for="group in health.duplicates" :key="group.contentHash">
+                <code>{{ shortHash(group.contentHash) }}</code>
+                <span>× {{ group.count }}</span>
+                <small>{{ group.documents.map(doc => doc.fileName).join('、') }}</small>
+              </li>
+            </ul>
+          </div>
+          <div v-if="health.orphanIndexes?.length" class="maintenance-health-group">
+            <h3>孤儿索引（有索引但分块缺失，检索会空转）</h3>
+            <ul>
+              <li v-for="issue in health.orphanIndexes" :key="issue.documentId">
+                <span>{{ issue.fileName }}</span>
+                <small>{{ issue.detail }}</small>
+              </li>
+            </ul>
+          </div>
+          <div v-if="health.missingSources?.length" class="maintenance-health-group">
+            <h3>源文件丢失（无法重建索引）</h3>
+            <ul>
+              <li v-for="issue in health.missingSources" :key="`${issue.documentId}-${issue.detail}`">
+                <span>{{ issue.fileName }}</span>
+                <small>{{ issue.detail }}</small>
+              </li>
+            </ul>
+          </div>
+          <p v-if="!healthIssueCount" class="maintenance-message ok">未发现问题：无重复文档、无孤儿索引、源文件齐全。</p>
+        </template>
       </section>
 
       <section class="maintenance-future-section">

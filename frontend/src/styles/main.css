@@ -3250,6 +3250,7 @@ textarea:focus-visible,
   .maintenance-card { min-height: 170px; padding: 17px; }
   .maintenance-future-section { padding: 15px; }
   .maintenance-future-grid { grid-template-columns: 1fr; }
+  .maintenance-health-stats { grid-template-columns: 1fr; }
   .maintenance-tabs { width: 100%; }
   .maintenance-tabs button { flex: 1; justify-content: center; }
   .profile-intro > img { width: 88px; height: 88px; }
@@ -4809,6 +4810,23 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .maintenance-model-tag.embedding { background: #e9f9ef; color: #1a6d3c; }
 .model-usage-line { flex-basis: 100%; font-size: 12px; color: #2f6b49; font-variant-numeric: tabular-nums; }
 .model-usage-line.empty { color: #97a1b3; }
+
+/* 知识库健康 */
+.maintenance-health-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.maintenance-health-stat { display: grid; gap: 2px; border: 1px solid var(--site-line-soft); border-radius: 11px; padding: 12px 14px; background: var(--site-card); }
+.maintenance-health-stat strong { font-size: 20px; color: var(--site-ink); font-variant-numeric: tabular-nums; }
+.maintenance-health-stat span { font-size: 11px; color: var(--site-muted); }
+.maintenance-health-stat.warn strong { color: var(--site-danger); }
+.maintenance-health-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.maintenance-health-tag { font-size: 11px; padding: 3px 10px; border-radius: 100px; background: #eafaf1; color: #167252; font-weight: 600; }
+.maintenance-health-tag.neutral { background: #f1f3f7; color: #66738a; }
+.maintenance-health-group { border: 1px solid #f5dede; border-radius: 11px; background: #fffafa; padding: 10px 14px; margin-bottom: 10px; }
+.maintenance-health-group h3 { font-size: 12px; color: var(--site-danger); margin: 0 0 6px; }
+.maintenance-health-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.maintenance-health-group li { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--site-ink-soft); flex-wrap: wrap; }
+.maintenance-health-group li code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8a6d1f; background: #fdf6e3; border-radius: 5px; padding: 1px 6px; }
+.maintenance-health-group li small { color: var(--site-muted); }
+.maintenance-message.ok { color: #167252; }
 .maintenance-model-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .maintenance-model-btn {
   padding: 6px 13px; border: 1px solid var(--site-line-soft); border-radius: 8px;

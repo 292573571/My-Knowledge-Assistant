@@ -42,6 +42,10 @@ export function fetchDocuments(workspaceId = '', pagination = null) {
   return request(`/api/documents${query}${suffix}`)
 }
 
+export function fetchDocumentHealth() {
+  return request('/api/documents/health')
+}
+
 export function fetchDocumentContent(documentId, workspaceId = '') {
   return request(`/api/documents/${encodeURIComponent(documentId)}/content${workspaceQuery(workspaceId)}`)
 }

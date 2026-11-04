@@ -54,6 +54,7 @@ public class RagController {
     private final DocumentTaskService documentTaskService;
     private final ConversationService conversationService;
     private final DocumentVisibilityService documentVisibilityService;
+    private final DocumentHealthService documentHealthService;
 
     public RagController(
             DocumentIngestionService documentIngestionService,
@@ -66,7 +67,8 @@ public class RagController {
             AuditService auditService,
             DocumentTaskService documentTaskService,
             ConversationService conversationService,
-            DocumentVisibilityService documentVisibilityService
+            DocumentVisibilityService documentVisibilityService,
+            DocumentHealthService documentHealthService
     ) {
         this.documentIngestionService = documentIngestionService;
         this.ragService = ragService;
@@ -79,6 +81,7 @@ public class RagController {
         this.documentTaskService = documentTaskService;
         this.conversationService = conversationService;
         this.documentVisibilityService = documentVisibilityService;
+        this.documentHealthService = documentHealthService;
     }
 
     @PostMapping("/ingest")
@@ -231,6 +234,12 @@ public class RagController {
                 || org.springframework.http.MediaType.IMAGE_JPEG.isCompatibleWith(mediaType)
                 || org.springframework.http.MediaType.IMAGE_GIF.isCompatibleWith(mediaType)
                 || org.springframework.http.MediaType.TEXT_PLAIN.isCompatibleWith(mediaType);
+    }
+
+    @GetMapping("/documents/health")
+    public DocumentHealthService.DocumentHealthResponse documentHealth(HttpServletRequest request) {
+        requireAdmin(request);
+        return documentHealthService.report();
     }
 
     @GetMapping("/documents/{documentId}/content")
