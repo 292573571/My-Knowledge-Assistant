@@ -211,7 +211,16 @@ cleanup_old_releases() {
   exec 9>"$lock_file"
   flock -n 9 || { echo "已有发布任务正在执行" >&2; exit 1; }
   find "$releases_root" -mindepth 1 -maxdepth 1 -type d ! -name "$revision" -exec rm -rf -- {} +
-  find "$backups_root" -mindepth 1 -maxdepth 1 -type d -exec rm -rf -- {} +
+  # 保留最近一次部署的备份：全部清空会让"当前版本出问题"时无副本可回滚。
+  if [[ -d "$backups_root" ]]; then
+    local keep_backup
+    keep_backup=$(find "$backups_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr | head -1 | cut -d' ' -f2-)
+    if [[ -n "$keep_backup" ]]; then
+      find "$backups_root" -mindepth 1 -maxdepth 1 -type d ! -path "$keep_backup" -exec rm -rf -- {} +
+      echo "保留最近备份: $(basename "$keep_backup")"
+    fi
+  fi
   echo "旧版本已清理，保留版本: $revision"
 }
 
