@@ -1,5 +1,6 @@
 <script setup>
 import DocumentPanel from './DocumentPanel.vue'
+import KnowledgeHealth from './KnowledgeHealth.vue'
 
 defineProps({
   workspace: { type: Object, default: null },
@@ -31,6 +32,9 @@ defineEmits(['manage-workspace'])
     </section>
     <section class="knowledge-card" data-reveal>
       <DocumentPanel :workspace="workspace" :current-user="currentUser" />
+    </section>
+    <section v-if="currentUser?.systemRole === 'SUPER_ADMIN'" class="knowledge-card" data-reveal>
+      <KnowledgeHealth />
     </section>
   </main>
 </template>
