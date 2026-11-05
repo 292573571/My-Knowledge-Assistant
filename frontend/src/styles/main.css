@@ -4823,6 +4823,37 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .maintenance-health-group { border: 1px solid #f5dede; border-radius: 11px; background: #fffafa; padding: 10px 14px; margin-bottom: 10px; }
 .maintenance-health-group h3 { font-size: 12px; color: var(--site-danger); margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
 .maintenance-health-cleanup { margin-left: auto; padding: 3px 10px; font-size: 11px; border-radius: 7px; }
+/* 知识库健康卡片按钮：对齐知识库页面的绿色动作风格（此前裸 secondary 吃到浏览器默认样式）。 */
+.maintenance-health-section .maintenance-section-heading button,
+.maintenance-health-section .maintenance-health-cleanup {
+  border: 1px solid #b8cbb9;
+  color: var(--site-green);
+  background: #f6f8ef;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.maintenance-health-section .maintenance-section-heading button {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.maintenance-health-section .maintenance-section-heading button:hover,
+.maintenance-health-section .maintenance-health-cleanup:hover {
+  border-color: var(--site-green);
+  background: var(--site-green);
+  color: #f8f7ef;
+}
+.maintenance-health-section .maintenance-section-heading button:disabled,
+.maintenance-health-section .maintenance-health-cleanup:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.maintenance-health-section .maintenance-health-cleanup:hover:not(:disabled) {
+  border-color: var(--site-green);
+  background: var(--site-green);
+  color: #f8f7ef;
+}
 .maintenance-health-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .maintenance-health-group li { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--site-ink-soft); flex-wrap: wrap; }
 .maintenance-health-group li code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8a6d1f; background: #fdf6e3; border-radius: 5px; padding: 1px 6px; }
