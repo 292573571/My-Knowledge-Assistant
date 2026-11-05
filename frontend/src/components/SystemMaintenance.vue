@@ -674,7 +674,7 @@ async function handleTestModel(model) {
       </section>
     </div>
 
-    <RetrievalDebug v-else-if="activeTool === 'retrieval'" embedded />
+    <RetrievalDebug v-else-if="activeTool === 'retrieval'" embedded :current-user="currentUser" />
 
     <section v-else-if="activeTool === 'logs'" class="log-viewer-section">
       <header class="log-viewer-header">
