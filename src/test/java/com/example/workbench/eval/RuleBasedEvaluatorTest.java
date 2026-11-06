@@ -204,6 +204,21 @@ class RuleBasedEvaluatorTest {
         assertThat(result.reason()).contains("forbidden retrieval keywords");
     }
 
+    @Test
+    void matchesKeywordsIgnoringWhitespaceInsertedByModel() {
+        EvalCase evalCase = new EvalCase("rag-011", "rag", "fact", "准备工作需要先生成什么？",
+                false, true, false, List.of("deploy.md"), List.of(),
+                List.of("生成jar包", "推送sql"), List.of());
+        RagChatResponse response = new RagChatResponse(
+                "准备工作需要先 生成 jar 包，然后推送 sql 脚本。",
+                List.of(new RagSource("deploy.md", 0, "", 0.1, "")));
+
+        EvalResult result = evaluator.evaluate(evalCase, response);
+
+        assertThat(result.matchedKeywords()).containsExactly("生成jar包", "推送sql");
+        assertThat(result.missingKeywords()).isEmpty();
+    }
+
     private EvalCase diagnosticCase(String type, List<Integer> pages, List<String> retrievalKeywords,
                                     List<String> forbiddenRetrievalKeywords) {
         String source = type.equals("pdf_page") ? "quality-page.pdf"

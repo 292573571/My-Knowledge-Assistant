@@ -56,7 +56,8 @@ public class RuleBasedEvaluator {
         boolean sourceMatched = anyContains(actualSources, nullSafe(evalCase.expectedSources()));
         boolean headingPathMatched = anyContains(actualHeadingPaths, nullSafe(evalCase.expectedHeadingPaths()));
         boolean keywordMatched = matchedKeywords.size() >= Math.ceil(nullSafe(evalCase.expectedKeywords()).size() / 2.0);
-        boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream().anyMatch(answer::contains);
+        boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream()
+                .anyMatch(keyword -> normalizeForKeywordMatch(answer).contains(normalizeForKeywordMatch(keyword)));
         List<RetrievalDebug> diagnostics = response.retrievalDebug() == null ? List.of() : response.retrievalDebug();
         List<RetrievalDebug> scopedDiagnostics = scopedDiagnostics(diagnostics, nullSafe(evalCase.expectedSources()));
         boolean pageMatched = pageMatched(response, scopedDiagnostics, nullSafeValues(evalCase.expectedPageNumbers()));
@@ -142,7 +143,8 @@ public class RuleBasedEvaluator {
     ) {
         boolean hasAnswer = !answer.isBlank();
         boolean noAnswerMatched = expressesNoAnswer(answer);
-        boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream().anyMatch(answer::contains);
+        boolean forbiddenMatched = nullSafe(evalCase.forbiddenKeywords()).stream()
+                .anyMatch(keyword -> normalizeForKeywordMatch(answer).contains(normalizeForKeywordMatch(keyword)));
         boolean modelFallbackUsed = usesModelFallback(answer);
         boolean disallowedModelFallback = modelFallbackUsed && !evalCase.allowModelFallback();
 
@@ -230,23 +232,34 @@ public class RuleBasedEvaluator {
             return true;
         }
         return diagnostics.stream().anyMatch(item -> {
-            String preview = item.preview() == null ? "" : item.preview().toLowerCase();
-            return expectedKeywords.stream().allMatch(keyword -> preview.contains(keyword.toLowerCase()));
+            String preview = normalizeForKeywordMatch(item.preview());
+            return expectedKeywords.stream().allMatch(keyword -> preview.contains(normalizeForKeywordMatch(keyword)));
         });
     }
 
     private boolean forbiddenRetrievalMatched(List<RetrievalDebug> diagnostics, List<String> forbiddenKeywords) {
         return diagnostics.stream().anyMatch(item -> {
-            String preview = item.preview() == null ? "" : item.preview().toLowerCase();
-            return forbiddenKeywords.stream().anyMatch(keyword -> preview.contains(keyword.toLowerCase()));
+            String preview = normalizeForKeywordMatch(item.preview());
+            return forbiddenKeywords.stream().anyMatch(keyword -> preview.contains(normalizeForKeywordMatch(keyword)));
         });
     }
 
     private List<String> matchedKeywords(String answer, List<String> expectedKeywords) {
-        String normalizedAnswer = answer.toLowerCase();
+        String normalizedAnswer = normalizeForKeywordMatch(answer);
         return expectedKeywords.stream()
-                .filter(keyword -> normalizedAnswer.contains(keyword.toLowerCase()))
+                .filter(keyword -> normalizedAnswer.contains(normalizeForKeywordMatch(keyword)))
                 .toList();
+    }
+
+    /**
+     * 关键词匹配归一化：模型输出常在词中间插空格（如「生成 jar 包」对应关键词「生成jar包」），
+     * 逐字比较会误判为未命中，导致门禁结果随措辞抖动。这里统一小写并去掉所有空白。
+     */
+    private String normalizeForKeywordMatch(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.toLowerCase().replaceAll("[\\s\\u00a0\\u3000]+", "");
     }
 
     private boolean expressesNoAnswer(String answer) {
