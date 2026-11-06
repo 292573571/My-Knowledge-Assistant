@@ -161,6 +161,33 @@ class EvalGateServiceTest {
         assertThat(failure.actualSources()).containsExactly("史上最全的Java面试题独家整理(2).pdf");
         assertThat(failure.missingKeywords()).containsExactly("数据源管理");
         assertThat(failure.reason()).isEqualTo("来源不匹配");
+        assertThat(failure.answer()).isEqualTo("答案");
+    }
+
+    @Test
+    void failedCaseAnswerIsTruncatedForLogs() throws Exception {
+        // 长答案只保留前 200 字，避免门禁 JSON 撑爆发版日志。
+        EvalGateService service = service(true, "secret-token", "");
+        List<EvalCase> cases = List.of(caseOf("case-1"));
+        String longAnswer = "答".repeat(500);
+        EvalResult failed = new EvalResult("draft-038", "rag", "fact", "问题",
+                false, true, false, false, 0.2, null, true, 0.2, "缺少本地依据", "Judge disabled", longAnswer,
+                List.of("doc.doc"), List.of(), List.of(), List.of(), List.of(), List.of("表类型维护"),
+                false, false, 0.0, true, false, false, List.of(), EvalSuite.SMOKE, EvalLayer.RETRIEVAL,
+                true, 0.0, 0.0, 0.0, 0.0, null);
+        EvalSummary summary = new EvalSummary("run-4", 6, 5, 1, 0.8333, 0.6, 0.5, 0.5,
+                0.1667, 0.0, 1.0, 6, 1.0, 0.5, 0.7222, 0.6, true, false,
+                List.of("unsupportedAnswerRate 0.167 > 0.050"), List.of(), List.of(failed));
+        when(userRepository.findFirstBySystemRole(SystemRole.SUPER_ADMIN)).thenReturn(Optional.of(admin));
+        when(evalCaseService.selectedCases(admin, null, "REGRESSION", null)).thenReturn(cases);
+        when(executionGuard.execute(eq(admin), eq(1), any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(2)).get());
+        when(evalRunner.run(cases, false, admin)).thenReturn(summary);
+
+        EvalGateService.GateFailure failure = service.run(null).failedCases().get(0);
+
+        assertThat(failure.answer()).hasSize(201).endsWith("…");
+        assertThat(failure.actualSources()).isEmpty();
     }
 
     private EvalCase caseOf(String caseId) {

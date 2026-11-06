@@ -20,6 +20,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class EvalGateService {
 
     private static final Logger log = LoggerFactory.getLogger(EvalGateService.class);
+    /** 未通过题目里答案摘要的最大长度。 */
+    private static final int ANSWER_PREVIEW_LIMIT = 200;
 
     private final EvalCaseService evalCaseService;
     private final EvalRunner evalRunner;
@@ -124,9 +126,20 @@ public class EvalGateService {
         return summary.results().stream()
                 .filter(result -> !result.passed())
                 .map(result -> new GateFailure(result.id(), result.question(), result.finalScore(),
-                        result.reason(), result.expectedSources(), result.actualSources(),
-                        result.missingKeywords()))
+                        result.reason(), abbreviate(result.answer()), result.expectedSources(),
+                        result.actualSources(), result.missingKeywords()))
                 .toList();
+    }
+
+    /** 截断答案摘要，避免门禁 JSON 在发版日志里被长答案淹没。 */
+    private String abbreviate(String answer) {
+        if (answer == null) {
+            return "";
+        }
+        String trimmed = answer.strip();
+        return trimmed.length() <= ANSWER_PREVIEW_LIMIT
+                ? trimmed
+                : trimmed.substring(0, ANSWER_PREVIEW_LIMIT) + "…";
     }
 
     private AppUser resolveOwner() {
@@ -172,14 +185,16 @@ public class EvalGateService {
      * @param question 题干
      * @param score 最终得分
      * @param reason 判定原因
+     * @param answer 答案摘要（截断）
      * @param expectedSources 期望来源
      * @param actualSources 实际命中来源
      * @param missingKeywords 缺失的关键词
      */
-    public record GateFailure(String id, String question, double score, String reason,
+    public record GateFailure(String id, String question, double score, String reason, String answer,
                               List<String> expectedSources, List<String> actualSources,
                               List<String> missingKeywords) {
         public GateFailure {
+            answer = answer == null ? "" : answer;
             expectedSources = expectedSources == null ? List.of() : List.copyOf(expectedSources);
             actualSources = actualSources == null ? List.of() : List.copyOf(actualSources);
             missingKeywords = missingKeywords == null ? List.of() : List.copyOf(missingKeywords);
