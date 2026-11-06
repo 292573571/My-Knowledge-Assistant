@@ -95,7 +95,7 @@ public class EvalGateService {
         if (cases.isEmpty()) {
             log.warn("Eval gate has no cases suite={} owner={}", requestedSuite, owner.getAccount());
             return new GateResult(false, requestedSuite, owner.getAccount(), 0, 0, 0.0, 0.0, 0.0, 0.0,
-                    null, List.of("评测集合 " + requestedSuite + " 没有可用题目，无法放行"));
+                    null, List.of("评测集合 " + requestedSuite + " 没有可用题目，无法放行"), List.of());
         }
         modelConfigContext.set(owner.getId());
         try {
@@ -112,10 +112,21 @@ public class EvalGateService {
                     requestedSuite, owner.getAccount(), summary.total(), summary.passRate(), summary.gatePassed());
             return new GateResult(summary.gatePassed(), requestedSuite, owner.getAccount(), summary.total(),
                     summary.passed(), summary.passRate(), summary.recallAt5(), summary.mrr(),
-                    summary.unsupportedAnswerRate(), summary.runId(), summary.gateFailures());
+                    summary.unsupportedAnswerRate(), summary.runId(), summary.gateFailures(),
+                    failedCases(summary));
         } finally {
             modelConfigContext.clear();
         }
+    }
+
+    /** 汇总未通过题目，便于发版日志直接定位是哪道题退化，无需再登库翻明细。 */
+    private List<GateFailure> failedCases(EvalSummary summary) {
+        return summary.results().stream()
+                .filter(result -> !result.passed())
+                .map(result -> new GateFailure(result.id(), result.question(), result.finalScore(),
+                        result.reason(), result.expectedSources(), result.actualSources(),
+                        result.missingKeywords()))
+                .toList();
     }
 
     private AppUser resolveOwner() {
@@ -143,12 +154,35 @@ public class EvalGateService {
      * @param unsupportedAnswerRate 无依据回答率
      * @param runId 运行标识
      * @param failures 未达标项说明
+     * @param failedCases 未通过题目明细
      */
     public record GateResult(boolean passed, String suite, String owner, int total, int passedCases,
                              double passRate, double recallAt5, double mrr, double unsupportedAnswerRate,
-                             String runId, List<String> failures) {
+                             String runId, List<String> failures, List<GateFailure> failedCases) {
         public GateResult {
             failures = failures == null ? List.of() : List.copyOf(failures);
+            failedCases = failedCases == null ? List.of() : List.copyOf(failedCases);
+        }
+    }
+
+    /**
+     * 单道未通过题目的诊断信息。
+     *
+     * @param id 题目标识
+     * @param question 题干
+     * @param score 最终得分
+     * @param reason 判定原因
+     * @param expectedSources 期望来源
+     * @param actualSources 实际命中来源
+     * @param missingKeywords 缺失的关键词
+     */
+    public record GateFailure(String id, String question, double score, String reason,
+                              List<String> expectedSources, List<String> actualSources,
+                              List<String> missingKeywords) {
+        public GateFailure {
+            expectedSources = expectedSources == null ? List.of() : List.copyOf(expectedSources);
+            actualSources = actualSources == null ? List.of() : List.copyOf(actualSources);
+            missingKeywords = missingKeywords == null ? List.of() : List.copyOf(missingKeywords);
         }
     }
 }

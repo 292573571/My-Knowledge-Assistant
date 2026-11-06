@@ -42,7 +42,7 @@ class EvalGateControllerTest {
         when(evalGateService.authorized("secret")).thenReturn(true);
         when(evalGateService.run("REGRESSION")).thenReturn(
                 new EvalGateService.GateResult(true, "REGRESSION", "admin", 10, 9, 0.9, 0.9, 0.8, 0.0,
-                        "run-1", List.of()));
+                        "run-1", List.of(), List.of()));
 
         EvalGateService.GateResult result = controller.gate("secret", "REGRESSION");
 

@@ -133,6 +133,36 @@ class EvalGateServiceTest {
         assertThat(modelConfigContext.get()).isNull();
     }
 
+    @Test
+    void failingSummaryListsFailedCasesForDeployLog() throws Exception {
+        // 门禁返回里要带上是哪道题没过，发版日志才能直接定位退化题。
+        EvalGateService service = service(true, "secret-token", "");
+        List<EvalCase> cases = List.of(caseOf("case-1"));
+        EvalResult failed = new EvalResult("draft-003", "rag", "fact", "泰山平台怎么配置数据源",
+                false, true, false, false, 0.4, null, true, 0.4, "来源不匹配", "Judge disabled", "答案",
+                List.of("泰山数据迁移平台操作手册.doc"), List.of("史上最全的Java面试题独家整理(2).pdf"),
+                List.of(), List.of(), List.of(), List.of("数据源管理"), true, false, 0.25, false, false, false,
+                List.of(), EvalSuite.SMOKE, EvalLayer.RETRIEVAL, true, 0.0, 0.0, 0.0, 0.0, null);
+        EvalSummary summary = new EvalSummary("run-3", 6, 4, 2, 0.6667, 0.6, 0.5, 0.5,
+                0.3333, 0.0, 1.0, 6, 1.0, 0.5, 0.7222, 0.6, true, false,
+                List.of("passRate 0.667 < 0.800"), List.of(), List.of(failed));
+        when(userRepository.findFirstBySystemRole(SystemRole.SUPER_ADMIN)).thenReturn(Optional.of(admin));
+        when(evalCaseService.selectedCases(admin, null, "REGRESSION", null)).thenReturn(cases);
+        when(executionGuard.execute(eq(admin), eq(1), any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(2)).get());
+        when(evalRunner.run(cases, false, admin)).thenReturn(summary);
+
+        EvalGateService.GateResult result = service.run(null);
+
+        assertThat(result.failedCases()).hasSize(1);
+        EvalGateService.GateFailure failure = result.failedCases().get(0);
+        assertThat(failure.id()).isEqualTo("draft-003");
+        assertThat(failure.question()).contains("泰山");
+        assertThat(failure.actualSources()).containsExactly("史上最全的Java面试题独家整理(2).pdf");
+        assertThat(failure.missingKeywords()).containsExactly("数据源管理");
+        assertThat(failure.reason()).isEqualTo("来源不匹配");
+    }
+
     private EvalCase caseOf(String caseId) {
         return new EvalCase(caseId, "rag", "fact", "问题", false, true, false,
                 List.of(), List.of(), List.of(), List.of());

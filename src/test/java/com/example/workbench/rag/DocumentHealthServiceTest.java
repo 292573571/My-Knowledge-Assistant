@@ -41,8 +41,13 @@ class DocumentHealthServiceTest {
 
     private DocumentIndexEntry entryOf(String documentId, String fileName, String hash, String workspaceId,
                                        int chunkCount, String status, String category) {
+        return entryOf(documentId, fileName, hash, workspaceId, chunkCount, status, category, Instant.now());
+    }
+
+    private DocumentIndexEntry entryOf(String documentId, String fileName, String hash, String workspaceId,
+                                       int chunkCount, String status, String category, Instant ingestedAt) {
         return new DocumentIndexEntry(documentId, fileName, "docs/workspaces/" + workspaceId + "/" + fileName,
-                hash, chunkCount, Instant.now(), category, status, "u1", workspaceId, DocumentVisibility.WORKSPACE);
+                hash, chunkCount, ingestedAt, category, status, "u1", workspaceId, DocumentVisibility.WORKSPACE);
     }
 
     private void givenDocuments(DocumentIndexEntry... entries) {
@@ -176,14 +181,16 @@ class DocumentHealthServiceTest {
     }
 
     @Test
-    void cleanupDuplicatesKeepsEntryWithMostChunks() {
-        // doc-2 分块最全（5）应保留；doc-1（2）是同内容的多余副本；doc-3 与两者内容不同不受影响。
+    void cleanupDuplicatesKeepsMostRecentlyIngested() {
+        // 重建索引后的新版（doc-2，分块更少但入库更晚）应当保留；旧版 doc-1 虽然分块更多但解析更脏，删除。
+        Instant old = Instant.parse("2026-10-01T00:00:00Z");
+        Instant fresh = Instant.parse("2026-11-06T00:00:00Z");
         givenDocuments(
-                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 2, "INDEXED", "SOURCE"),
-                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 5, "INDEXED", "SOURCE"),
-                entryOf("doc-3", "b.pdf", "hash-2", "ws-1", 2, "INDEXED", "SOURCE"));
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 15, "INDEXED", "SOURCE", old),
+                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 12, "INDEXED", "SOURCE", fresh),
+                entryOf("doc-3", "b.pdf", "hash-2", "ws-1", 2, "INDEXED", "SOURCE", old));
         when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
-                new Object[]{"doc-1", 2L}, new Object[]{"doc-2", 5L}, new Object[]{"doc-3", 2L}));
+                new Object[]{"doc-1", 15L}, new Object[]{"doc-2", 12L}, new Object[]{"doc-3", 2L}));
 
         DocumentHealthService.CleanupResult result = service.cleanupDuplicates();
 
@@ -199,11 +206,12 @@ class DocumentHealthServiceTest {
     }
 
     @Test
-    void duplicateCleanupPlanKeepsFirstOnEqualChunkCount() {
-        // 分块数并列时保留 fileName 升序的第一份（doc-1），删除 doc-2。
+    void duplicateCleanupPlanKeepsFirstOnEqualIngestTimeAndChunkCount() {
+        // 入库时间与分块数都并列时，保留 fileName 升序的第一份（doc-1），删除 doc-2。
+        Instant same = Instant.parse("2026-11-06T00:00:00Z");
         givenDocuments(
-                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 3, "INDEXED", "SOURCE"),
-                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 3, "INDEXED", "SOURCE"));
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 3, "INDEXED", "SOURCE", same),
+                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 3, "INDEXED", "SOURCE", same));
         when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
                 new Object[]{"doc-1", 3L}, new Object[]{"doc-2", 3L}));
 
@@ -215,5 +223,23 @@ class DocumentHealthServiceTest {
         assertThat(plan.kept()).extracting(DocumentHealthService.DocumentRef::documentId)
                 .containsExactly("doc-1");
         verifyNoInteractions(vectorStore, indexStore);
+    }
+
+    @Test
+    void duplicateCleanupPlanFallsBackToChunkCountOnEqualIngestTime() {
+        // 入库时间相同（同一批导入）时，分块更全的 doc-2 胜出。
+        Instant same = Instant.parse("2026-11-06T00:00:00Z");
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "hash-1", "ws-1", 2, "INDEXED", "SOURCE", same),
+                entryOf("doc-2", "a-copy.pdf", "hash-1", "ws-2", 5, "INDEXED", "SOURCE", same));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-1", 2L}, new Object[]{"doc-2", 5L}));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
+
+        assertThat(plan.kept()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-2");
+        assertThat(plan.removed()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-1");
     }
 }

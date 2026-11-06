@@ -2,6 +2,7 @@ package com.example.workbench.rag;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -200,15 +201,36 @@ public class DocumentHealthService {
         return new DuplicatePlan(removals, keeps, removalEntries);
     }
 
-    /** 保留分块最全的一份；并列时保持 fileName 升序的第一份（严格大于才替换），保证结果可复现。 */
+    /**
+     * 保留最近入库的一份：重建索引后新解析器的产物更新，应当胜出（旧版本可能带域代码等解析脏数据）。
+     * 入库时间相同再比分块数（多的更全），仍相同按 fileName 升序取第一份，保证结果可复现。
+     */
     private DocumentIndexEntry keepEntry(List<DocumentIndexEntry> group) {
         DocumentIndexEntry keep = group.get(0);
         for (DocumentIndexEntry candidate : group) {
-            if (candidate.chunkCount() > keep.chunkCount()) {
+            if (isPreferred(candidate, keep)) {
                 keep = candidate;
             }
         }
         return keep;
+    }
+
+    private boolean isPreferred(DocumentIndexEntry candidate, DocumentIndexEntry current) {
+        Instant candidateAt = candidate.ingestedAt();
+        Instant currentAt = current.ingestedAt();
+        if (candidateAt != null && currentAt != null && !candidateAt.equals(currentAt)) {
+            return candidateAt.isAfter(currentAt);
+        }
+        if (candidateAt != null && currentAt == null) {
+            return true;
+        }
+        if (candidateAt == null && currentAt != null) {
+            return false;
+        }
+        if (candidate.chunkCount() != current.chunkCount()) {
+            return candidate.chunkCount() > current.chunkCount();
+        }
+        return false;
     }
 
     private void purge(DocumentIndexEntry entry) {
