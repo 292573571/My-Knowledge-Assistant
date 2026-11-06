@@ -169,7 +169,7 @@ public class EvalRunner {
                 ? "eval-" + evalCase.id()
                 : "user-" + ownerUserId + ":eval-" + evalCase.id();
         RagChatResponse response = ragService.chatForEvaluation(new RagChatRequest(conversationId, evalCase.question()),
-                new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled));
+                new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled, false));
         EvalResult ruleResult = evaluator.evaluate(evalCase, response);
 
         if (!judgeEnabled) {

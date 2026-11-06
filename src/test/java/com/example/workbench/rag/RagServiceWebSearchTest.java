@@ -60,6 +60,24 @@ class RagServiceWebSearchTest {
         assertThat(response.sources()).isEmpty();
     }
 
+    @Test
+    void evaluationPathSkipsWebSearchEvenWhenGloballyEnabled() {
+        // 评测链路显式关闭联网兜底：门禁只衡量本地知识库能力，不能靠联网搜索凑答案。
+        VectorStore vectorStore = Mockito.mock(VectorStore.class);
+        LocalChatClient chatClient = Mockito.mock(LocalChatClient.class);
+        WebSearchService webSearchService = Mockito.mock(WebSearchService.class);
+        when(vectorStore.similaritySearch(Mockito.anyString(), Mockito.anyInt())).thenReturn(List.of());
+        when(chatClient.generate(Mockito.anyString())).thenReturn("纯模型直答的回答，包含足够字数的内容以通过校验。");
+        RagService service = serviceWithWebSearch(vectorStore, chatClient, webSearchService, true);
+
+        RagChatResponse response = service.chatForEvaluation(
+                new RagChatRequest("eval-case-1", "手册目录中数据源管理在哪一页"),
+                new RagChatOptions(false, false, false));
+
+        verify(webSearchService, never()).search(Mockito.anyString());
+        assertThat(response.sources()).isEmpty();
+    }
+
     private RagService serviceWithWebSearch(
             VectorStore vectorStore,
             LocalChatClient chatClient,

@@ -382,6 +382,8 @@ public class RagService {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
         String question = request.message();
+        // 评测链路会关掉联网兜底，避免"本地没查到就联网"污染检索质量指标。
+        boolean webSearchAllowed = webSearchEnabled && options.webSearchAllowed();
         // 历史仅用于补足当前问题语境；最终事实依据仍应来自本次检索到的文档。
         List<ChatMessage> history = recentHistory(user, request, conversationId);
         // 相同问题重复提交时，上一轮答案不能参与上下文判断，否则同问会被改写成不同意图。
@@ -443,7 +445,7 @@ public class RagService {
             // 完全无本地证据时：开启联网搜索则优先调用博查实时检索，否则走模型兜底。
             String route;
             RagChatResponse response;
-            if (webSearchEnabled) {
+            if (webSearchAllowed) {
                 log.info(
                         "RAG route selected route=WEB_FALLBACK reason=no_local_candidates conversationId={}",
                         conversationId
@@ -475,13 +477,13 @@ public class RagService {
                     retrievedSources.size(),
                     sources.size()
             );
-            RagChatResponse response = webSearchEnabled
+            RagChatResponse response = webSearchAllowed
                     ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
                     : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
             rememberForLegacyTests(user, conversationId, question, response.answer());
             log.info(
                     "RAG chat completed route={} conversationId={} sources={} durationMs={}",
-                    webSearchEnabled ? "WEB_FALLBACK" : "MODEL_FALLBACK_LOCAL_CONTEXT_INSUFFICIENT",
+                    webSearchAllowed ? "WEB_FALLBACK" : "MODEL_FALLBACK_LOCAL_CONTEXT_INSUFFICIENT",
                     conversationId,
                     response.sources().size(),
                     System.currentTimeMillis() - startedAt
@@ -513,7 +515,7 @@ public class RagService {
                     conversationId,
                     sources.size()
             );
-            RagChatResponse fallback = webSearchEnabled
+            RagChatResponse fallback = webSearchAllowed
                     ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
                     : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
             rememberForLegacyTests(user, conversationId, question, fallback.answer());
@@ -522,8 +524,8 @@ public class RagService {
 
         // 礼貌拒绝兜底：当模型被无关 PDF 误导而礼貌拒绝（"抱歉，我无法..."），且
         // 本轮尚有联网搜索可用，让用户重定向到联网答案而不是拿到拒绝答案。
-        // 仅在 webSearchEnabled 时启用，避免在没有联网开关时增加额外延迟。
-        if (webSearchEnabled && isModelPoliteRefusal(answer)) {
+        // 仅在本次请求允许联网时启用，避免在没有联网开关时增加额外延迟。
+        if (webSearchAllowed && isModelPoliteRefusal(answer)) {
             log.warn(
                     "RAG model-polite-refusal detected, retrying with web search conversationId={} refusedHead={}",
                     conversationId,
