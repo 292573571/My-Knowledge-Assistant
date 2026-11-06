@@ -6,9 +6,11 @@ package com.example.workbench.rag;
  * @param queryRewriteEnabled 是否启用问题改写
  * @param multiQueryEnabled 是否启用多查询召回
  * @param webSearchAllowed 本次请求是否允许联网搜索兜底（评测链路置 false，只衡量本地知识库能力）
- * @param qualityGateAllowed 本次请求是否允许答案接地质量门裁决（评测链路置 false：
- *        质量门是给在线聊天防幻觉的额外保险，其 LLM 裁决存在不确定性，
- *        评测要衡量的是「检索→回答」基线能力，不应被裁判的抖动污染指标）
+ * @param qualityGateAllowed 本次请求是否允许质量门 LLM 裁决（评测链路置 false：
+ *        同时旁路召回候选筛选 relevantSources 与答案接地裁决 approvesAnswer 两处 LLM 判定，
+ *        只保留本地规则（阈值/重排/强信号）过滤；质量门是给在线聊天防幻觉的额外保险，
+ *        其 LLM 裁决存在不确定性，评测要衡量的是「检索→回答」基线能力，
+ *        不应被裁判的抖动污染指标）
  */
 public record RagChatOptions(
         boolean queryRewriteEnabled,

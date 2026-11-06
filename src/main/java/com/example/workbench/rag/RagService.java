@@ -430,7 +430,7 @@ public class RagService {
                 question, conversationContext.standaloneQuestion(), ownerUserId(conversationId),
                 readableWorkspaceIds, options);
         List<SourceDocument> sources = applyRetrievalPolicy(
-                question, retrievedSources, request.workspaceId(), readableWorkspaceIds, true);
+                question, retrievedSources, request.workspaceId(), readableWorkspaceIds, options.qualityGateAllowed());
         log.info(
                 "RAG retrieval completed conversationId={} retrieved={} usedInContext={} bestScore={} durationMs={}",
                 conversationId,

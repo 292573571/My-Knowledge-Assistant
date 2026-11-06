@@ -101,7 +101,9 @@ class RagServiceWebSearchTest {
                 new RagChatRequest("eval-case-2", "Kettle 里转换和作业有什么区别？"),
                 new RagChatOptions(false, false, false, false));
 
-        // 质量门裁判不应被调用：即使它要判 FAIL，评测链路也直接采信生成答案与本地来源。
+        // 质量门的 LLM 裁决（候选筛选 + 答案接地）都不应被调用：
+        // 即使它要判 FAIL/KEEP:none，评测链路也直接采信本地规则过滤后的候选与生成答案。
+        verify(qualityGate, never()).relevantSources(Mockito.anyString(), Mockito.anyList());
         verify(qualityGate, never()).approvesAnswer(Mockito.anyString(), Mockito.anyString(), Mockito.anyList());
         assertThat(response.sources()).isNotEmpty();
         assertThat(response.answer()).contains("转换");
