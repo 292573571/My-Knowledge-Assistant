@@ -509,7 +509,9 @@ public class RagService {
 
         String answer = sanitizePresentedAnswer(generatedAnswer, question);
 
-        if (!qualityGate.approvesAnswer(question, answer, sources)) {
+        // 评测链路(qualityGateAllowed=false)旁路答案接地质量门：其 LLM 裁决有抖动，
+        // 会把有依据的答案误判 FAIL 后强转兜底并清空 sources，污染评测指标。
+        if (options.qualityGateAllowed() && !qualityGate.approvesAnswer(question, answer, sources)) {
             log.info(
                     "RAG local answer grounding failed conversationId={} action=use_fallback sources={}",
                     conversationId,
