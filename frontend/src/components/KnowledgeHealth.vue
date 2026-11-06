@@ -37,15 +37,44 @@ const confirmation = computed(() => {
     }
   }
   const plan = healthCleanupPlan.value
-  const names = healthCleanupFileNames(plan)
-  const more = (plan?.removed?.length || 0) > 6 ? ` 等 ${plan.removed.length} 项` : ''
   return {
     title: `去重：删除 ${plan?.removedCount || 0} 个重复副本？`,
-    message: `每组重复内容只保留最近入库的一份（重建索引后的新解析产物会胜出），将删除：${names}${more}。删除后无法恢复，请确认这些副本不再被各自空间引用。`,
+    message: '每组重复内容只保留最近入库的一份，其余副本连同索引与向量一并删除，不可恢复。请逐条核对下面的保留项与删除项。',
     confirmText: '删除重复副本',
     danger: true
   }
 })
+
+// 公开副本被删、却保留工作空间副本时，后果是「公开检索/评测整体看不到这份文档」，
+// 必须在确认前置顶告警——这是去重最容易踩的坑。
+const duplicateVisibilityRisk = computed(() => {
+  const plan = healthCleanupPlan.value
+  if (confirmTarget.value !== 'health-cleanup-duplicate' || !plan) return ''
+  const removedPublic = (plan.removed || []).filter((item) => item.visibility === 'PUBLIC')
+  if (!removedPublic.length) return ''
+  const keptPublic = (plan.kept || []).some((item) => item.visibility === 'PUBLIC')
+  if (keptPublic) return ''
+  return `将删除 ${removedPublic.length} 份「公开」副本、保留非公开副本：公开检索、评测与其他用户都会看不到这份内容。`
+})
+
+const visibilityLabels = { PUBLIC: '公开', WORKSPACE: '工作空间', PRIVATE: '私有' }
+
+function visibilityText(visibility) {
+  return visibilityLabels[visibility] || visibility || '未知可见性'
+}
+
+function workspaceText(workspaceId) {
+  if (!workspaceId) return '未知空间'
+  if (workspaceId.startsWith('personal-')) return '个人空间'
+  return `空间 ${workspaceId.slice(0, 8)}`
+}
+
+function formatIngestTime(ingestedAt) {
+  if (!ingestedAt) return '入库时间未知'
+  const date = new Date(ingestedAt)
+  if (Number.isNaN(date.getTime())) return '入库时间未知'
+  return date.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 onMounted(() => loadDocumentHealth())
 
@@ -181,7 +210,7 @@ async function runHealthCleanup(scope) {
           <li v-for="group in health.duplicates" :key="group.contentHash">
             <code>{{ shortHash(group.contentHash) }}</code>
             <span>× {{ group.count }}</span>
-            <small>{{ group.documents.map(doc => doc.fileName).join('、') }}</small>
+            <small>{{ group.documents.map(doc => `${doc.fileName}（${visibilityText(doc.visibility)}）`).join('、') }}</small>
           </li>
         </ul>
       </div>
@@ -205,7 +234,39 @@ async function runHealthCleanup(scope) {
       </div>
       <p v-if="!healthIssueCount" class="maintenance-message ok">未发现问题：无重复文档、无孤儿索引、源文件齐全。</p>
     </template>
-    <ConfirmDialog v-if="confirmTarget" v-bind="confirmation" :busy="Boolean(healthCleanupBusy)" @confirm="runHealthCleanup(confirmTarget === 'health-cleanup-orphan' ? 'orphan' : 'duplicate')" @cancel="confirmTarget = ''; healthCleanupPlan = null" />
+    <ConfirmDialog v-if="confirmTarget" v-bind="confirmation" :busy="Boolean(healthCleanupBusy)" @confirm="runHealthCleanup(confirmTarget === 'health-cleanup-orphan' ? 'orphan' : 'duplicate')" @cancel="confirmTarget = ''; healthCleanupPlan = null">
+      <template v-if="confirmTarget === 'health-cleanup-duplicate' && healthCleanupPlan">
+        <p v-if="duplicateVisibilityRisk" class="health-cleanup-risk">{{ duplicateVisibilityRisk }}</p>
+        <div class="health-cleanup-block keep">
+          <p class="health-cleanup-block-title">保留 {{ healthCleanupPlan.kept?.length || 0 }} 份（最近入库）</p>
+          <ul>
+            <li v-for="ref in healthCleanupPlan.kept" :key="`keep-${ref.documentId}`">
+              <span class="health-cleanup-badge keep">保留</span>
+              <span class="health-cleanup-name">{{ ref.fileName }}</span>
+              <small>{{ visibilityText(ref.visibility) }} · {{ workspaceText(ref.workspaceId) }} · {{ formatIngestTime(ref.ingestedAt) }} 入库 · {{ ref.chunkCount }} 块</small>
+            </li>
+          </ul>
+        </div>
+        <div class="health-cleanup-block remove">
+          <p class="health-cleanup-block-title">删除 {{ healthCleanupPlan.removed?.length || 0 }} 份</p>
+          <ul>
+            <li v-for="ref in healthCleanupPlan.removed" :key="`drop-${ref.documentId}`">
+              <span class="health-cleanup-badge remove">删除</span>
+              <span class="health-cleanup-name">{{ ref.fileName }}</span>
+              <small>{{ visibilityText(ref.visibility) }} · {{ workspaceText(ref.workspaceId) }} · {{ formatIngestTime(ref.ingestedAt) }} 入库 · {{ ref.chunkCount }} 块</small>
+            </li>
+          </ul>
+        </div>
+      </template>
+      <template v-else-if="confirmTarget === 'health-cleanup-orphan' && healthCleanupPlan">
+        <ul class="health-cleanup-plain">
+          <li v-for="ref in healthCleanupPlan.removed" :key="`orphan-${ref.documentId}`">
+            <span class="health-cleanup-name">{{ ref.fileName }}</span>
+            <small>{{ visibilityText(ref.visibility) }} · {{ workspaceText(ref.workspaceId) }}</small>
+          </li>
+        </ul>
+      </template>
+    </ConfirmDialog>
     <ToastContainer ref="toast" />
   </section>
 </template>

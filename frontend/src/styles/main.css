@@ -1259,6 +1259,7 @@ textarea:focus-visible,
    box-shadow: 0 30px 90px rgba(24, 38, 29, .28), 0 4px 16px rgba(24, 38, 29, .08);
    animation: confirm-dialog-in .18s ease-out;
 }
+.confirm-dialog:has(.confirm-dialog-details) { width: min(560px, 100%); }
 .confirm-dialog-close { position: absolute; top: 15px; right: 15px; display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; color: var(--site-muted, #718074); background: transparent; font-size: 24px; line-height: 1; cursor: pointer; }
 .confirm-dialog-close:hover { color: var(--site-ink, #1b2b20); background: var(--site-green-soft, #e5eee1); }
 .confirm-dialog-icon { display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid #c6ddc5; border-radius: 15px; color: var(--site-green, #1d5939); background: var(--site-green-soft, #e5eee1); }
@@ -1269,6 +1270,26 @@ textarea:focus-visible,
 .confirm-dialog-eyebrow.danger { color: #b23f4a; }
 .confirm-dialog-copy h2 { margin: 0 0 8px; color: var(--site-ink, #202d45); font-size: 20px; letter-spacing: -.02em; }
 .confirm-dialog-copy p { margin: 0; color: var(--site-muted, #718097); font-size: 13px; line-height: 1.7; }
+/* 确认弹窗的结构化明细（如去重时逐份列出保留/删除副本的可见性、空间、入库时间） */
+.confirm-dialog-details { display: grid; gap: 10px; margin-top: 12px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.health-cleanup-risk {
+  margin: 0; border: 1px solid #f0c9c6; border-radius: 10px; padding: 8px 10px;
+  color: #b23f4a; background: #fff4f2; font-size: 12px; line-height: 1.6;
+}
+.health-cleanup-block { border: 1px solid var(--site-line-soft, #e2e7dd); border-radius: 10px; padding: 9px 11px; background: #fbfcf8; }
+.health-cleanup-block.remove { border-color: #f0d4d1; background: #fffafa; }
+.health-cleanup-block-title { margin: 0 0 6px; font-size: 11px; font-weight: 800; color: #4d6b4f; }
+.health-cleanup-block.remove .health-cleanup-block-title { color: #b23f4a; }
+.health-cleanup-block ul, .health-cleanup-plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.health-cleanup-block li, .health-cleanup-plain li {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  font-size: 12px; color: var(--site-ink-soft, #45525f);
+}
+.health-cleanup-badge { flex: 0 0 auto; border-radius: 100px; padding: 1px 8px; font-size: 10px; font-weight: 800; }
+.health-cleanup-badge.keep { color: #167252; background: #e9f8f0; }
+.health-cleanup-badge.remove { color: #b23f4a; background: #fdeeee; }
+.health-cleanup-name { font-weight: 600; color: var(--site-ink, #202d45); word-break: break-all; }
+.health-cleanup-block small, .health-cleanup-plain small { color: var(--site-muted, #718097); font-size: 11px; }
 .confirm-dialog-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; border-top: 1px solid var(--site-line-soft, #e6ebe1); padding-top: 18px; }
 .confirm-dialog-actions button { min-width: 88px; border-radius: 10px; padding: 10px 15px; font-size: 13px; font-weight: 750; cursor: pointer; transition: transform .16s, background .16s, border-color .16s; }
 .confirm-dialog-actions button:not(:disabled):active { transform: translateY(1px); }

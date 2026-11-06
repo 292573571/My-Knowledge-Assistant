@@ -75,7 +75,7 @@ public class DocumentHealthService {
                 .filter(group -> group.getValue().size() > 1)
                 .map(group -> new DuplicateGroup(group.getKey(), group.getValue().size(),
                         group.getValue().stream()
-                                .map(entry -> new DocumentRef(entry.documentId(), entry.fileName(), entry.workspaceId()))
+                                .map(this::toRef)
                                 .toList()))
                 .sorted(Comparator.comparingInt(DuplicateGroup::count).reversed()
                         .thenComparing(group -> group.contentHash()))
@@ -283,7 +283,9 @@ public class DocumentHealthService {
     }
 
     private DocumentRef toRef(DocumentIndexEntry entry) {
-        return new DocumentRef(entry.documentId(), entry.fileName(), entry.workspaceId());
+        return new DocumentRef(entry.documentId(), entry.fileName(), entry.workspaceId(),
+                entry.visibility() == null ? null : entry.visibility().name(),
+                entry.ingestedAt(), entry.chunkCount());
     }
 
     private DocumentIssue toIssue(DocumentIndexEntry entry) {
@@ -304,7 +306,12 @@ public class DocumentHealthService {
     public record DuplicateGroup(String contentHash, int count, List<DocumentRef> documents) {
     }
 
-    public record DocumentRef(String documentId, String fileName, String workspaceId) {
+    /**
+     * 文档引用。除定位信息外带上可见性、入库时间与分块数：
+     * 去重时同一份内容常以同名文件存在于多个空间，只给文件名用户无法判断会删掉哪一份。
+     */
+    public record DocumentRef(String documentId, String fileName, String workspaceId,
+                              String visibility, Instant ingestedAt, int chunkCount) {
     }
 
     public record DocumentIssue(String documentId, String fileName, String workspaceId,

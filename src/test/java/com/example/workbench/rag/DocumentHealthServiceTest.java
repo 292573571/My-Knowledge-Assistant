@@ -46,8 +46,15 @@ class DocumentHealthServiceTest {
 
     private DocumentIndexEntry entryOf(String documentId, String fileName, String hash, String workspaceId,
                                        int chunkCount, String status, String category, Instant ingestedAt) {
+        return entryOf(documentId, fileName, hash, workspaceId, chunkCount, status, category, ingestedAt,
+                DocumentVisibility.WORKSPACE);
+    }
+
+    private DocumentIndexEntry entryOf(String documentId, String fileName, String hash, String workspaceId,
+                                       int chunkCount, String status, String category, Instant ingestedAt,
+                                       DocumentVisibility visibility) {
         return new DocumentIndexEntry(documentId, fileName, "docs/workspaces/" + workspaceId + "/" + fileName,
-                hash, chunkCount, ingestedAt, category, status, "u1", workspaceId, DocumentVisibility.WORKSPACE);
+                hash, chunkCount, ingestedAt, category, status, "u1", workspaceId, visibility);
     }
 
     private void givenDocuments(DocumentIndexEntry... entries) {
@@ -295,5 +302,35 @@ class DocumentHealthServiceTest {
                 .containsExactly("doc-2");
         assertThat(plan.removed()).extracting(DocumentHealthService.DocumentRef::documentId)
                 .containsExactly("doc-1");
+    }
+
+    @Test
+    void duplicateCleanupPlanExposesVisibilityAndIngestTimeForEachCopy() {
+        // 同名同内容、跨可见性的两份副本：预览必须给出可见性/入库时间/分块数，
+        // 否则用户只看到重复的文件名，无法判断会删掉公开副本还是工作空间副本。
+        Instant old = Instant.parse("2026-11-05T02:00:00Z");
+        Instant fresh = Instant.parse("2026-11-06T01:00:00Z");
+        givenDocuments(
+                entryOf("doc-public", "手册.doc", "hash-1", "ws-1", 12, "INDEXED", "SOURCE", old,
+                        DocumentVisibility.PUBLIC),
+                entryOf("doc-workspace", "手册.doc", "hash-1", "ws-2", 12, "INDEXED", "SOURCE", fresh,
+                        DocumentVisibility.WORKSPACE));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-public", 12L}, new Object[]{"doc-workspace", 12L}));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
+
+        assertThat(plan.kept()).singleElement().satisfies(ref -> {
+            assertThat(ref.documentId()).isEqualTo("doc-workspace");
+            assertThat(ref.visibility()).isEqualTo("WORKSPACE");
+            assertThat(ref.ingestedAt()).isEqualTo(fresh);
+            assertThat(ref.chunkCount()).isEqualTo(12);
+            assertThat(ref.workspaceId()).isEqualTo("ws-2");
+        });
+        assertThat(plan.removed()).singleElement().satisfies(ref -> {
+            assertThat(ref.documentId()).isEqualTo("doc-public");
+            assertThat(ref.visibility()).isEqualTo("PUBLIC");
+            assertThat(ref.ingestedAt()).isEqualTo(old);
+        });
     }
 }

@@ -34,6 +34,9 @@ useDialogFocus(dialogRef, cancel)
            <span :class="['confirm-dialog-eyebrow', { danger }]">{{ danger ? '需要确认的操作' : '确认操作' }}</span>
            <h2 :id="titleId">{{ title }}</h2>
            <p :id="messageId">{{ message }}</p>
+           <div v-if="$slots.default" class="confirm-dialog-details">
+             <slot />
+           </div>
          </div>
         <div class="confirm-dialog-actions">
           <button type="button" class="confirm-cancel" :disabled="busy" @click="cancel">取消</button>
