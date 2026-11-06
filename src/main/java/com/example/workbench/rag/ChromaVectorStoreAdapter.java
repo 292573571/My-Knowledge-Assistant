@@ -204,6 +204,7 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
      * @param ids chunk ID 列表
      * @return Chroma 中仍存在的文档片段
      */
+    @Override
     public List<SourceDocument> documentsByIds(List<String> ids) {
         ChromaApi api = chromaApiProvider.getIfAvailable();
         ChromaVectorStoreProperties properties = chromaPropertiesProvider.getIfAvailable();

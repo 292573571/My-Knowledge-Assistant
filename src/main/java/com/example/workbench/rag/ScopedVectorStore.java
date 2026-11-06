@@ -24,4 +24,13 @@ public interface ScopedVectorStore extends VectorStore {
         return similaritySearch(query, topK, ownerUserId,
                 (workspaceId == null || workspaceId.isBlank()) ? null : Set.of(workspaceId));
     }
+
+    /**
+     * 按精确 chunk ID 恢复已持久化的分块（含元数据），不触发新的向量计算。
+     * 返回空列表表示向量库不可用或分块不存在，调用方需自行降级。
+     *
+     * @param ids chunk ID 列表（形如 {@code documentId#chunk-N}）
+     * @return 向量库中仍存在的文档分块
+     */
+    List<SourceDocument> documentsByIds(List<String> ids);
 }

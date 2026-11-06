@@ -52,6 +52,14 @@ public class InMemoryVectorStore implements ScopedVectorStore {
         return scopedSearch(query, topK, ownerUserId, readableWorkspaceIds, true);
     }
 
+    @Override
+    public List<SourceDocument> documentsByIds(List<String> ids) {
+        return vectorDocuments.stream()
+                .map(VectorDocument::document)
+                .filter(document -> ids.contains(document.id()))
+                .toList();
+    }
+
     private List<SourceDocument> scopedSearch(String query, int topK, String ownerUserId, Set<String> readableWorkspaceIds,
                                              boolean scoped) {
         Map<String, Double> queryVector = embed(query);

@@ -12,6 +12,7 @@ function notifySuccess(msg) { toast.value?.success(msg) }
 const health = ref(null)
 const healthLoading = ref(false)
 const healthError = ref('')
+const healthRefreshedAt = ref('')
 const healthCleanupPlan = ref(null)
 const healthCleanupBusy = ref('')
 const confirmTarget = ref('')
@@ -39,7 +40,7 @@ const confirmation = computed(() => {
   const more = (plan?.removed?.length || 0) > 6 ? ` 等 ${plan.removed.length} 项` : ''
   return {
     title: `去重：删除 ${plan?.removedCount || 0} 个重复副本？`,
-    message: `每组重复内容只保留分块最全的一份，将删除：${names}${more}。删除后无法恢复，请确认这些副本不再被各自空间引用。`,
+    message: `每组重复内容只保留最近入库的一份（重建索引后的新解析产物会胜出），将删除：${names}${more}。删除后无法恢复，请确认这些副本不再被各自空间引用。`,
     confirmText: '删除重复副本',
     danger: true
   }
@@ -52,6 +53,7 @@ async function loadDocumentHealth() {
   healthError.value = ''
   try {
     health.value = await fetchDocumentHealth()
+    healthRefreshedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (exception) {
     healthError.value = formatApiError(exception, '知识库健康报告加载失败。')
   } finally {
@@ -120,7 +122,7 @@ async function runHealthCleanup(scope) {
       <div>
         <p class="maintenance-section-kicker">KNOWLEDGE HEALTH</p>
         <h2>知识库健康</h2>
-        <span>全系统盘点：重复导入、索引空转与源文件丢失。</span>
+        <span>全系统盘点：重复导入、索引空转与源文件丢失。<template v-if="healthRefreshedAt">（盘点于 {{ healthRefreshedAt }}）</template></span>
       </div>
       <button type="button" class="secondary" :disabled="healthLoading" @click="loadDocumentHealth">{{ healthLoading ? '盘点中...' : '重新盘点' }}</button>
     </header>

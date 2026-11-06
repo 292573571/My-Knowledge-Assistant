@@ -19,7 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 知识库健康度报告（管理员口径，全系统）。
  *
- * <p>盘点四类问题：索引状态分布、跨空间重复文档（同内容哈希）、
+ * <p>盘点四类问题：索引状态分布、跨空间重复文档（按向量库元数据中的裸内容哈希识别，
+ * 向量库不可用时回退到索引表的作用域哈希）、
  * 孤儿索引（声称有分块但分块表没有行）、源文件丢失（重导入/重建依赖源文件）。
  * 同时提供孤儿索引与重复文档的一键清理：删除动作覆盖向量库、索引清单和分块表三处，
  * 与 {@link DocumentIngestionService#deleteDocument} 的删除语义保持一致。</p>
@@ -34,13 +35,13 @@ public class DocumentHealthService {
     private final DocumentIndexRepository indexRepository;
     private final DocumentChunkRepository chunkRepository;
     private final IngestionPathResolver pathResolver;
-    private final VectorStore vectorStore;
+    private final ScopedVectorStore vectorStore;
     private final DocumentIndexStore indexStore;
 
     public DocumentHealthService(DocumentIndexRepository indexRepository,
                                  DocumentChunkRepository chunkRepository,
                                  IngestionPathResolver pathResolver,
-                                 VectorStore vectorStore,
+                                 ScopedVectorStore vectorStore,
                                  DocumentIndexStore indexStore) {
         this.indexRepository = indexRepository;
         this.chunkRepository = chunkRepository;
@@ -67,8 +68,9 @@ public class DocumentHealthService {
                 .map(DocumentIndexEntry::category)
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 
+        Map<String, String> rawHashes = rawContentHashes(documents);
         List<DuplicateGroup> duplicates = documents.stream()
-                .collect(Collectors.groupingBy(DocumentIndexEntry::contentHash))
+                .collect(Collectors.groupingBy(entry -> duplicateKey(entry, rawHashes)))
                 .entrySet().stream()
                 .filter(group -> group.getValue().size() > 1)
                 .map(group -> new DuplicateGroup(group.getKey(), group.getValue().size(),
@@ -146,8 +148,8 @@ public class DocumentHealthService {
     }
 
     /**
-     * 清理重复文档：每个同内容哈希分组只保留分块最全的一份（并列取文件名靠前者），其余删除。
-     * 重复必然跨空间（同空间上传时已按 contentHash 去重），删除的是其他空间里的多余副本。
+     * 清理重复文档：每个同内容分组只保留最近入库的一份（并列再比分块数与文件名），其余删除。
+     * 重复通常跨空间（同空间上传时已按作用域哈希去重），删除的是其他空间里的多余副本。
      */
     @Transactional
     public CleanupResult cleanupDuplicates() {
@@ -186,8 +188,11 @@ public class DocumentHealthService {
         List<DocumentRef> removals = new ArrayList<>();
         List<DocumentRef> keeps = new ArrayList<>();
         List<DocumentIndexEntry> removalEntries = new ArrayList<>();
-        allDocuments().stream()
-                .collect(Collectors.groupingBy(DocumentIndexEntry::contentHash, LinkedHashMap::new, Collectors.toList()))
+        List<DocumentIndexEntry> documents = allDocuments();
+        Map<String, String> rawHashes = rawContentHashes(documents);
+        documents.stream()
+                .collect(Collectors.groupingBy(entry -> duplicateKey(entry, rawHashes),
+                        LinkedHashMap::new, Collectors.toList()))
                 .values().stream()
                 .filter(group -> group.size() > 1)
                 .forEach(group -> {
@@ -199,6 +204,38 @@ public class DocumentHealthService {
                     });
                 });
         return new DuplicatePlan(removals, keeps, removalEntries);
+    }
+
+    /**
+     * 重复分组键。PG 的 content_hash 存的是工作区作用域化哈希（sha256(workspaceId + 裸哈希)），
+     * 天生跨空间不同，直接分组永远检测不到跨空间重复；
+     * 因此取向量库元数据里的裸内容哈希作键，向量库不可用或元数据缺失时回退到作用域哈希（退化为旧行为）。
+     */
+    private String duplicateKey(DocumentIndexEntry entry, Map<String, String> rawHashes) {
+        return rawHashes.getOrDefault(entry.documentId(), entry.contentHash());
+    }
+
+    /** 按文档取每份的 chunk-0，从向量库元数据读裸内容哈希。失败返回空映射（调用方回退）。 */
+    private Map<String, String> rawContentHashes(List<DocumentIndexEntry> documents) {
+        if (documents.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<String> probeIds = documents.stream()
+                    .map(entry -> entry.documentId() + "#chunk-0")
+                    .toList();
+            Map<String, String> hashes = new HashMap<>();
+            for (SourceDocument document : vectorStore.documentsByIds(probeIds)) {
+                if (document.documentId() != null && document.contentHash() != null
+                        && !document.contentHash().isBlank()) {
+                    hashes.put(document.documentId(), document.contentHash());
+                }
+            }
+            return hashes;
+        } catch (RuntimeException exception) {
+            log.warn("Document health raw content hash lookup failed, falling back to scoped hash", exception);
+            return Map.of();
+        }
     }
 
     /**

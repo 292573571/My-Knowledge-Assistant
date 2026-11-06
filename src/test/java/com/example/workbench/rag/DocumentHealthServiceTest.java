@@ -25,7 +25,7 @@ class DocumentHealthServiceTest {
 
     private DocumentIndexRepository indexRepository;
     private DocumentChunkRepository chunkRepository;
-    private VectorStore vectorStore;
+    private ScopedVectorStore vectorStore;
     private DocumentIndexStore indexStore;
     private DocumentHealthService service;
 
@@ -33,7 +33,7 @@ class DocumentHealthServiceTest {
     void setUp() {
         indexRepository = mock(DocumentIndexRepository.class);
         chunkRepository = mock(DocumentChunkRepository.class);
-        vectorStore = mock(VectorStore.class);
+        vectorStore = mock(ScopedVectorStore.class);
         indexStore = mock(DocumentIndexStore.class);
         service = new DocumentHealthService(indexRepository, chunkRepository,
                 new IngestionPathResolver(docsDir), vectorStore, indexStore);
@@ -77,6 +77,58 @@ class DocumentHealthServiceTest {
                 .extracting(DocumentHealthService.DocumentRef::workspaceId)
                 .containsExactlyInAnyOrder("ws-1", "ws-2");
         assertThat(report.orphanIndexes()).isEmpty();
+    }
+
+    @Test
+    void detectsDuplicatesByRawHashFromVectorMetadata() {
+        // PG 的 content_hash 是工作区作用域哈希（同内容跨空间必然不同），
+        // 重复识别必须取向量库元数据里的裸内容哈希。
+        givenDocuments(
+                entryOf("doc-1", "a.pdf", "scoped-1", "ws-1", 3, "INDEXED", "SOURCE"),
+                entryOf("doc-2", "a.pdf", "scoped-2", "ws-2", 3, "INDEXED", "SOURCE"),
+                entryOf("doc-3", "b.pdf", "scoped-3", "ws-1", 2, "INDEXED", "SOURCE"));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-1", 3L}, new Object[]{"doc-2", 3L}, new Object[]{"doc-3", 2L}));
+        when(vectorStore.documentsByIds(anyList())).thenReturn(List.of(
+                chunkOf("doc-1", "raw-1"),
+                chunkOf("doc-2", "raw-1"),
+                chunkOf("doc-3", "raw-2")));
+
+        DocumentHealthService.DocumentHealthResponse report = service.report();
+
+        assertThat(report.duplicates()).hasSize(1);
+        assertThat(report.duplicates().get(0).contentHash()).isEqualTo("raw-1");
+        assertThat(report.duplicates().get(0).count()).isEqualTo(2);
+        assertThat(report.duplicates().get(0).documents())
+                .extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactlyInAnyOrder("doc-1", "doc-2");
+    }
+
+    @Test
+    void duplicateCleanupUsesRawHashAndKeepsLatestIngested() {
+        givenDocuments(
+                entryOf("doc-old", "a.pdf", "scoped-old", "ws-1", 15, "INDEXED", "SOURCE",
+                        Instant.parse("2026-09-21T06:04:18Z")),
+                entryOf("doc-new", "a.pdf", "scoped-new", "ws-2", 12, "INDEXED", "SOURCE",
+                        Instant.parse("2026-11-06T02:30:55Z")));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-old", 15L}, new Object[]{"doc-new", 12L}));
+        // 两份作用域哈希不同，但向量库裸哈希相同 → 识别为重复；保留最近入库的干净版（分块反而少）。
+        when(vectorStore.documentsByIds(anyList())).thenReturn(List.of(
+                chunkOf("doc-old", "raw-1"),
+                chunkOf("doc-new", "raw-1")));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
+
+        assertThat(plan.removedCount()).isEqualTo(1);
+        assertThat(plan.removed().get(0).documentId()).isEqualTo("doc-old");
+        assertThat(plan.kept().get(0).documentId()).isEqualTo("doc-new");
+    }
+
+    private SourceDocument chunkOf(String documentId, String rawHash) {
+        return new SourceDocument(documentId + "#chunk-0", "content", "title", "source", "path", 0,
+                documentId, "a.pdf", rawHash, 0.0, "", 0, 0, 7, "text-paragraph",
+                "SOURCE", "u1", "ws-1", DocumentVisibility.WORKSPACE);
     }
 
     @Test
@@ -222,7 +274,9 @@ class DocumentHealthServiceTest {
                 .containsExactly("doc-2");
         assertThat(plan.kept()).extracting(DocumentHealthService.DocumentRef::documentId)
                 .containsExactly("doc-1");
-        verifyNoInteractions(vectorStore, indexStore);
+        // dryRun 只做只读的裸哈希探测，不触发任何删除。
+        verify(vectorStore, never()).deleteByIds(anyList());
+        verifyNoInteractions(indexStore);
     }
 
     @Test
