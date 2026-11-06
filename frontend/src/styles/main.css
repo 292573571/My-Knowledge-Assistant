@@ -4859,6 +4859,20 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 .maintenance-health-group li code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8a6d1f; background: #fdf6e3; border-radius: 5px; padding: 1px 6px; }
 .maintenance-health-group li small { color: var(--site-muted); }
 .maintenance-message.ok { color: #167252; }
+/* 盘点进行中的可感知反馈：按钮转圈 + 状态条 + 旧数据淡出，避免「点了没反应」的错觉。 */
+.maintenance-health-section .maintenance-section-heading button { display: inline-flex; align-items: center; gap: 6px; }
+.maintenance-health-spinner {
+  width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%;
+  border: 2px solid rgba(29, 89, 57, .22); border-top-color: var(--site-green);
+  animation: maintenance-health-spin .7s linear infinite;
+}
+@keyframes maintenance-health-spin { to { transform: rotate(360deg); } }
+.maintenance-message.scanning {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  border-color: #cfdcc8; color: #4a5b43; background: #f7f9f1;
+}
+.maintenance-message.scanning small { color: #8b9784; }
+.maintenance-health-stats.stale { opacity: .5; transition: opacity .2s ease; }
 .maintenance-model-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .maintenance-model-btn {
   padding: 6px 13px; border: 1px solid var(--site-line-soft); border-radius: 8px;

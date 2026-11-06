@@ -13,6 +13,7 @@ const health = ref(null)
 const healthLoading = ref(false)
 const healthError = ref('')
 const healthRefreshedAt = ref('')
+const healthElapsed = ref(0)
 const healthCleanupPlan = ref(null)
 const healthCleanupBusy = ref('')
 const confirmTarget = ref('')
@@ -46,19 +47,43 @@ const confirmation = computed(() => {
   }
 })
 
-onMounted(loadDocumentHealth)
+onMounted(() => loadDocumentHealth())
 
-async function loadDocumentHealth() {
+async function loadDocumentHealth(options = {}) {
+  // 首屏自动盘点静默进行；只有用户点「重新盘点」才用 Toast 明确告知结果。
+  const manual = options?.manual === true
+  if (healthLoading.value) return
   healthLoading.value = true
   healthError.value = ''
+  const startedAt = Date.now()
   try {
     health.value = await fetchDocumentHealth()
     healthRefreshedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    healthElapsed.value = Date.now() - startedAt
+    if (manual) notifySuccess(healthSummaryMessage(health.value, healthElapsed.value))
   } catch (exception) {
     healthError.value = formatApiError(exception, '知识库健康报告加载失败。')
+    if (manual) notifyError(`盘点失败：${healthError.value}`)
   } finally {
     healthLoading.value = false
   }
+}
+
+function refreshDocumentHealth() {
+  return loadDocumentHealth({ manual: true })
+}
+
+// 盘点结果的一句话摘要：文档/分块规模 + 发现的问题，让用户点完按钮能立刻知道「成功了没、发现什么」。
+function healthSummaryMessage(report, elapsedMs) {
+  if (!report) return '盘点完成。'
+  const headline = `盘点完成：${report.totalDocuments ?? 0} 个文档 / ${(report.totalChunks ?? 0).toLocaleString('zh-CN')} 个分块`
+  const findings = []
+  if (report.duplicates?.length) findings.push(`${report.duplicates.length} 组重复文档`)
+  if (report.orphanIndexes?.length) findings.push(`${report.orphanIndexes.length} 个孤儿索引`)
+  if (report.missingSources?.length) findings.push(`${report.missingSources.length} 个源文件丢失`)
+  const tail = findings.length ? `，发现 ${findings.join('、')}` : '，未发现问题'
+  const cost = elapsedMs >= 800 ? `（耗时 ${(elapsedMs / 1000).toFixed(1)} 秒）` : ''
+  return `${headline}${tail}${cost}`
 }
 
 function healthStatusText(status) {
@@ -99,7 +124,6 @@ function healthCleanupFileNames(plan, limit = 6) {
 
 async function runHealthCleanup(scope) {
   healthCleanupBusy.value = scope
-  healthLoading.value = true
   try {
     const result = await cleanupDocumentHealth(scope, false)
     const label = scope === 'orphan' ? '孤儿索引' : '重复文档'
@@ -109,7 +133,6 @@ async function runHealthCleanup(scope) {
     notifyError(`清理失败：${formatApiError(exception)}`)
   } finally {
     healthCleanupBusy.value = ''
-    healthLoading.value = false
     healthCleanupPlan.value = null
     confirmTarget.value = ''
   }
@@ -124,11 +147,17 @@ async function runHealthCleanup(scope) {
         <h2>知识库健康</h2>
         <span>全系统盘点：重复导入、索引空转与源文件丢失。<template v-if="healthRefreshedAt">（盘点于 {{ healthRefreshedAt }}）</template></span>
       </div>
-      <button type="button" class="secondary" :disabled="healthLoading" @click="loadDocumentHealth">{{ healthLoading ? '盘点中...' : '重新盘点' }}</button>
+      <button type="button" class="secondary" :disabled="healthLoading" @click="refreshDocumentHealth">
+        <span v-if="healthLoading" class="maintenance-health-spinner" aria-hidden="true"></span>
+        {{ healthLoading ? '盘点中…' : '重新盘点' }}
+      </button>
     </header>
-    <p v-if="healthError" class="maintenance-message">{{ healthError }}</p>
+    <p v-if="healthLoading" class="maintenance-message scanning" role="status">
+      正在盘点知识库，扫描索引、分块与源文件完整性，请稍候…<small v-if="healthRefreshedAt">当前展示的是 {{ healthRefreshedAt }} 的盘点结果</small>
+    </p>
+    <p v-if="healthError" class="maintenance-message error">{{ healthError }}</p>
     <template v-if="health">
-      <div class="maintenance-health-stats">
+      <div class="maintenance-health-stats" :class="{ stale: healthLoading }">
         <article class="maintenance-health-stat">
           <strong>{{ health.totalDocuments }}</strong>
           <span>文档总数</span>
