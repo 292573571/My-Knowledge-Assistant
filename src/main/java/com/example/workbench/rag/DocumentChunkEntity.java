@@ -18,6 +18,8 @@ import org.hibernate.annotations.Comment;
  */
 public class DocumentChunkEntity {
 
+    private static final SearchTokenizer SEARCH_TOKENIZER = new SearchTokenizer();
+
     @Id
     @Column(length = 196)
     @Comment("文档分块唯一标识")
@@ -86,6 +88,9 @@ public class DocumentChunkEntity {
     @Column(name = "document_version", nullable = false)
     @Comment("文档索引版本")
     private long documentVersion;
+    @Column(name = "search_tokens", columnDefinition = "text")
+    @Comment("jieba 分词检索文本，search_vector 由此列生成")
+    private String searchTokens;
 
     protected DocumentChunkEntity() {
     }
@@ -113,6 +118,7 @@ public class DocumentChunkEntity {
         this.pageNumber = sourceDocument.pageNumber();
         this.createdAt = Instant.now();
         this.documentVersion = 1;
+        this.searchTokens = SEARCH_TOKENIZER.tokenize(searchableText());
     }
 
     SourceDocument toSourceDocument(double score) {
@@ -123,6 +129,10 @@ public class DocumentChunkEntity {
 
     String searchableText() {
         return String.join("\n", value(fileName), value(title), value(headingPath), value(content));
+    }
+
+    String searchTokens() {
+        return searchTokens;
     }
 
     String documentId() {

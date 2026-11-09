@@ -9,7 +9,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 public class PostgresSparseRetriever implements SparseRetriever {
 
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "[A-Za-z][A-Za-z0-9_.:/+#-]{1,}|[A-Z0-9][A-Z0-9_.:/+#-]{1,}|[\\p{IsHan}]{2,}");
-    private static final Set<String> STOP_WORDS = Set.of("什么", "如何", "为什么", "可以", "是否", "这个", "那个", "哪些", "以及");
     private final DocumentChunkRepository repository;
+    private final SearchTokenizer searchTokenizer;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -33,9 +30,11 @@ public class PostgresSparseRetriever implements SparseRetriever {
      * 创建 PostgreSQL 稀疏检索器。
      *
      * @param repository 文档分块仓库
+     * @param searchTokenizer 中文分词器，查询侧与入库侧共用同一套切分
      */
-    public PostgresSparseRetriever(DocumentChunkRepository repository) {
+    public PostgresSparseRetriever(DocumentChunkRepository repository, SearchTokenizer searchTokenizer) {
         this.repository = repository;
+        this.searchTokenizer = searchTokenizer;
     }
 
     /**
@@ -156,21 +155,12 @@ public class PostgresSparseRetriever implements SparseRetriever {
             return List.of();
         }
         LinkedHashSet<String> terms = new LinkedHashSet<>();
-        var matcher = TOKEN_PATTERN.matcher(query);
-        while (matcher.find() && terms.size() < 12) {
-            String term = matcher.group().toLowerCase(Locale.ROOT);
-            if (!STOP_WORDS.contains(term)) {
-                if (term.codePoints().allMatch(codePoint -> Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN)
-                        && term.codePointCount(0, term.length()) > 2) {
-                    List<Integer> codePoints = term.codePoints().boxed().toList();
-                    for (int index = 0; index < codePoints.size() - 1 && terms.size() < 12; index++) {
-                        terms.add(new String(new int[]{codePoints.get(index), codePoints.get(index + 1)}, 0, 2));
-                    }
-                } else {
-                    terms.add(term);
-                    addOcrIdentifierVariants(terms, term);
-                }
+        for (String term : searchTokenizer.words(query)) {
+            if (terms.size() >= 12) {
+                break;
             }
+            terms.add(term);
+            addOcrIdentifierVariants(terms, term);
         }
         return new ArrayList<>(terms);
     }
