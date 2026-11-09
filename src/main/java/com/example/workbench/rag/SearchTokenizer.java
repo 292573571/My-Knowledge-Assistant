@@ -44,6 +44,31 @@ public class SearchTokenizer {
      * @return 去重后的词列表
      */
     public List<String> words(String text) {
+        List<String> words = new ArrayList<>(segmentWords(text));
+        Set<String> seen = java.util.Collections.newSetFromMap(new java.util.LinkedHashMap<>());
+        for (String word : words) {
+            seen.add(word);
+        }
+        Matcher hanRun = HAN_RUN_PATTERN.matcher(text == null ? "" : text);
+        while (hanRun.find()) {
+            String run = hanRun.group();
+            for (int index = 0; index < run.length() - 1; index++) {
+                addWord(words, seen, run.substring(index, index + 2));
+            }
+        }
+        return words;
+    }
+
+    /**
+     * 严格分词：只保留 jieba 切分结果，不补充相邻二字组。
+     *
+     * <p>检索侧需要二字组扩大召回，评测判分侧不能——补充二字组会把关键词拆得过碎，
+     * 让「部分命中」被误判为整体命中。判分词元覆盖率时使用本方法。</p>
+     *
+     * @param text 原始文本
+     * @return 去重后的词列表
+     */
+    public List<String> segmentWords(String text) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
@@ -51,13 +76,6 @@ public class SearchTokenizer {
         Set<String> seen = java.util.Collections.newSetFromMap(new java.util.LinkedHashMap<>());
         for (SegToken token : segmenter.process(text, JiebaSegmenter.SegMode.INDEX)) {
             addWord(words, seen, token.word);
-        }
-        Matcher hanRun = HAN_RUN_PATTERN.matcher(text);
-        while (hanRun.find()) {
-            String run = hanRun.group();
-            for (int index = 0; index < run.length() - 1; index++) {
-                addWord(words, seen, run.substring(index, index + 2));
-            }
         }
         return words;
     }

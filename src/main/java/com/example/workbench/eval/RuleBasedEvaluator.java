@@ -2,6 +2,7 @@ package com.example.workbench.eval;
 
 import com.example.workbench.rag.RagChatResponse;
 import com.example.workbench.rag.RetrievalDebug;
+import com.example.workbench.rag.SearchTokenizer;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,20 +11,29 @@ import org.springframework.stereotype.Component;
 @Component
 public class RuleBasedEvaluator {
 
+    /**
+     * 关键词词元覆盖率阈值：关键词整体未原样出现时，允许其词元被答案覆盖到这个比例即算命中，
+     * 用于吸收「语法冲突 / 命名冲突和语法解析错误」这类同义改写。
+     */
+    private static final double KEYWORD_TOKEN_COVERAGE_THRESHOLD = 0.6;
+
     private final EvalRetrievalMetrics retrievalMetrics;
+    private final SearchTokenizer searchTokenizer;
 
     RuleBasedEvaluator() {
-        this(new EvalRetrievalMetrics());
+        this(new EvalRetrievalMetrics(), new SearchTokenizer());
     }
 
     /**
      * 创建规则评测器。
      *
      * @param retrievalMetrics 检索排名指标计算器
+     * @param searchTokenizer 关键词词元切分器
      */
     @Autowired
-    public RuleBasedEvaluator(EvalRetrievalMetrics retrievalMetrics) {
+    public RuleBasedEvaluator(EvalRetrievalMetrics retrievalMetrics, SearchTokenizer searchTokenizer) {
         this.retrievalMetrics = retrievalMetrics;
+        this.searchTokenizer = searchTokenizer;
     }
 
     public EvalResult evaluate(EvalCase evalCase, RagChatResponse response) {
@@ -247,8 +257,31 @@ public class RuleBasedEvaluator {
     private List<String> matchedKeywords(String answer, List<String> expectedKeywords) {
         String normalizedAnswer = normalizeForKeywordMatch(answer);
         return expectedKeywords.stream()
-                .filter(keyword -> normalizedAnswer.contains(normalizeForKeywordMatch(keyword)))
+                .filter(keyword -> keywordMatched(keyword, normalizedAnswer))
                 .toList();
+    }
+
+    /**
+     * 单关键词命中判定：先按原样匹配；未原样出现时退到词元覆盖率。
+     *
+     * <p>模型回答常用同义词或换语序复述同一结论（「语法冲突」说成「命名冲突和语法解析错误」），
+     * 纯子串比较会把正确答案判成未命中，让门禁结果随措辞抖动。这里允许关键词的 jieba 词元
+     * 被答案覆盖 60% 即算命中；同时保留原样匹配快路径，且不做二字组补充，避免判别力被稀释。</p>
+     */
+    private boolean keywordMatched(String keyword, String normalizedAnswer) {
+        String normalizedKeyword = normalizeForKeywordMatch(keyword);
+        if (normalizedKeyword.isEmpty()) {
+            return false;
+        }
+        if (normalizedAnswer.contains(normalizedKeyword)) {
+            return true;
+        }
+        List<String> tokens = searchTokenizer.segmentWords(normalizedKeyword);
+        if (tokens.size() < 2) {
+            return false;
+        }
+        long covered = tokens.stream().filter(normalizedAnswer::contains).count();
+        return covered / (double) tokens.size() >= KEYWORD_TOKEN_COVERAGE_THRESHOLD;
     }
 
     /**

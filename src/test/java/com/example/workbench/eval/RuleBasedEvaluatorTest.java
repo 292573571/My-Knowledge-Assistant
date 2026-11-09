@@ -219,6 +219,38 @@ class RuleBasedEvaluatorTest {
         assertThat(result.missingKeywords()).isEmpty();
     }
 
+    @Test
+    void matchesKeywordWhenAnswerParaphrasesItWithCoveredTokens() {
+        EvalCase evalCase = new EvalCase("smoke-105", "rag", "fact", "DDL 建表语句为什么不能使用保留字？",
+                false, true, false, List.of("数据库脚本执行流程规范.docx"), List.of(),
+                List.of("保留字", "语法冲突", "解析歧义"), List.of());
+        RagChatResponse response = new RagChatResponse(
+                "DDL 建表语句中不能使用保留字作为列名或表名，主要是为了避免命名冲突和语法解析错误，"
+                        + "同时提升脚本的可移植性。",
+                List.of(new RagSource("数据库脚本执行流程规范.docx", 0, "", 0.1, "")));
+
+        EvalResult result = evaluator.evaluate(evalCase, response);
+
+        assertThat(result.matchedKeywords()).contains("保留字", "语法冲突");
+        assertThat(result.missingKeywords()).containsExactly("解析歧义");
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
+    void doesNotMatchKeywordWhenMostTokensAreMissing() {
+        EvalCase evalCase = new EvalCase("draft-008", "rag", "fact", "准备工作中需要先生成什么？",
+                false, true, false, List.of("泰山数据迁移平台操作手册.doc"), List.of(),
+                List.of("生成jar包", "jar包"), List.of());
+        RagChatResponse response = new RagChatResponse(
+                "准备工作中首先需要生成（或配置）的是表信息，所有操作都基于表进行。",
+                List.of(new RagSource("泰山数据迁移平台操作手册.doc", 0, "", 0.1, "")));
+
+        EvalResult result = evaluator.evaluate(evalCase, response);
+
+        assertThat(result.matchedKeywords()).isEmpty();
+        assertThat(result.passed()).isFalse();
+    }
+
     private EvalCase diagnosticCase(String type, List<Integer> pages, List<String> retrievalKeywords,
                                     List<String> forbiddenRetrievalKeywords) {
         String source = type.equals("pdf_page") ? "quality-page.pdf"
