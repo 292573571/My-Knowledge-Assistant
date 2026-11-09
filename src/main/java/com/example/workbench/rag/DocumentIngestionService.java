@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -898,11 +899,18 @@ public class DocumentIngestionService {
                 .toList();
         existingEntries.forEach(this::removeIndexedDocument);
 
-        Map<String, String> originalNamesByPath = existingEntries.stream()
-                .collect(Collectors.toMap(
-                        entry -> entry.path().replace('\\', '/'),
-                        entry -> originalFileName(entry.path(), access.workspaceId(), entry.fileName()),
-                        (left, right) -> left));
+        // 以「解析后的绝对路径」为键保留重建前的文件名与可见性：
+        // 历史条目的 path 可能是绝对路径、也可能是 docs/ 相对路径，字符串直接比对会漏配，
+        // 导致文件名退化成磁盘上的 UUID 名、PUBLIC 被重建成 WORKSPACE。
+        Map<Path, DocumentIndexEntry> priorEntriesBySource = new LinkedHashMap<>();
+        for (DocumentIndexEntry entry : existingEntries) {
+            try {
+                Path resolved = ingestionPathResolver.resolveIndexedPath(entry.path()).toAbsolutePath().normalize();
+                priorEntriesBySource.putIfAbsent(resolved, entry);
+            } catch (RuntimeException ignored) {
+                // 无法解析的历史路径不影响其它文档的重建
+            }
+        }
         List<Path> sources = new ArrayList<>(existingSources);
         for (Path source : supportedFiles(ingestionPathResolver.workspaceDirectory(access))) {
             if (!sources.contains(source)) {
@@ -913,9 +921,13 @@ public class DocumentIngestionService {
         progress.accept(new RebuildProgress(sources.size(), 0, 0, 0, 0));
         for (Path source : sources) {
             String sourcePath = ingestionPathResolver.workspaceRelativePath(source).replace('\\', '/');
+            DocumentIndexEntry prior = priorEntriesBySource.get(source.toAbsolutePath().normalize());
+            String originalName = prior != null
+                    ? originalFileName(prior.path(), access.workspaceId(), prior.fileName())
+                    : source.getFileName().toString();
+            DocumentVisibility priorVisibility = prior == null ? null : prior.visibility();
             try {
-                results.add(ingestWorkspacePath(source, true, access,
-                        originalNamesByPath.getOrDefault(sourcePath, source.getFileName().toString())));
+                results.add(ingestWorkspacePath(source, true, access, originalName, priorVisibility));
             } catch (RuntimeException exception) {
                 results.add(new IngestDocumentResult(source.getFileName().toString(), sourcePath, null,
                         "failed", 0, exception.getMessage()));
@@ -1310,17 +1322,28 @@ public class DocumentIngestionService {
     }
 
     private IngestDocumentResult ingestWorkspacePath(Path path, boolean force, WorkspaceAccessContext access) {
-        return ingestWorkspacePath(path, force, access, path.getFileName().toString());
+        return ingestWorkspacePath(path, force, access, path.getFileName().toString(), null);
     }
 
     private IngestDocumentResult ingestWorkspacePath(
             Path path, boolean force, WorkspaceAccessContext access, String originalFileName) {
+        return ingestWorkspacePath(path, force, access, originalFileName, null);
+    }
+
+    /**
+     * 处理空间内单个文档路径。
+     *
+     * @param visibilityOverride 重建索引时沿用原条目的可见性；为 {@code null} 时按空间类型推导
+     */
+    private IngestDocumentResult ingestWorkspacePath(
+            Path path, boolean force, WorkspaceAccessContext access, String originalFileName,
+            DocumentVisibility visibilityOverride) {
         if (!ingestionPathResolver.isIndexableDocument(path)) {
             return new IngestDocumentResult(path.getFileName().toString(), ingestionPathResolver.workspaceRelativePath(path), null,
                     "failed", 0, "Unsupported document type");
         }
         // 解析与文件拷贝不触碰共享状态，移出锁外，避免大文件解析期间阻塞其他摄入操作。
-        IngestedFile sourceCandidate = ingestWorkspaceFile(path, originalFileName, access);
+        IngestedFile sourceCandidate = ingestWorkspaceFile(path, originalFileName, access, visibilityOverride);
         if (sourceCandidate.indexEntry() == null) {
             return new IngestDocumentResult(originalFileName, ingestionPathResolver.workspaceRelativePath(path), null,
                     "skipped", 0, "Document is empty");
@@ -1339,7 +1362,7 @@ public class DocumentIngestionService {
             }
         }
 
-        IngestedFile ingested = ingestWorkspaceFile(managedPath, originalFileName, access);
+        IngestedFile ingested = ingestWorkspaceFile(managedPath, originalFileName, access, visibilityOverride);
         if (ingested.indexEntry() == null) {
             return new IngestDocumentResult(path.getFileName().toString(), ingestionPathResolver.workspaceRelativePath(path), null,
                     "skipped", 0, "Document is empty");
@@ -1472,6 +1495,11 @@ public class DocumentIngestionService {
         return ingestWorkspaceFile(path, originalFileName, access, (stage, progress) -> { });
     }
 
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
+                                              DocumentVisibility visibilityOverride) {
+        return ingestWorkspaceFile(path, originalFileName, access, visibilityOverride, (stage, progress) -> { });
+    }
+
     private String originalFileName(String sourcePath, String workspaceId, String fallback) {
         if (documentTaskRepository == null) return fallback;
         return documentTaskRepository
@@ -1484,11 +1512,22 @@ public class DocumentIngestionService {
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
                                               BiConsumer<String, Integer> progress) {
-        return ingestWorkspaceFile(path, originalFileName, access, null, progress);
+        return ingestWorkspaceFile(path, originalFileName, access, null, null, progress);
+    }
+
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
+                                              DocumentVisibility visibilityOverride, BiConsumer<String, Integer> progress) {
+        return ingestWorkspaceFile(path, originalFileName, access, null, visibilityOverride, progress);
     }
 
     private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
                                               String taskId, BiConsumer<String, Integer> progress) {
+        return ingestWorkspaceFile(path, originalFileName, access, taskId, null, progress);
+    }
+
+    private IngestedFile ingestWorkspaceFile(Path path, String originalFileName, WorkspaceAccessContext access,
+                                              String taskId, DocumentVisibility visibilityOverride,
+                                              BiConsumer<String, Integer> progress) {
         try {
             byte[] sourceContent = readBoundedBytes(path);
             progress.accept(ingestionPathResolver.isImageDocument(originalFileName) ? "OCR" : "PARSING", 25);
@@ -1497,7 +1536,8 @@ public class DocumentIngestionService {
             // ORG 文档必须按 WORKSPACE 可见性存储：组织文档对下属团队可见依赖
             // effectiveReadableWorkspaceIds 的祖先/子孙展开，而不是 PUBLIC 的全局放行。
             // 若标记为 PUBLIC，任何登录用户都能跨组织检索到这些文档。
-            DocumentVisibility visibility = switch (access.type()) {
+            // 重建索引传入原条目可见性覆盖，避免把用户手动公开的文档重置回 WORKSPACE。
+            DocumentVisibility visibility = visibilityOverride != null ? visibilityOverride : switch (access.type()) {
                 case PERSONAL -> DocumentVisibility.PRIVATE;
                 case TEAM -> DocumentVisibility.WORKSPACE;
                 case ORG -> DocumentVisibility.WORKSPACE;

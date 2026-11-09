@@ -686,6 +686,30 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
+    void rebuildPreservesPublicVisibilityAndOriginalNameForAbsolutePathEntries() throws Exception {
+        // 回归锁：历史条目 path 可能是绝对路径，重建时按字符串比相对路径会漏配，
+        // 导致文件名退化成磁盘 UUID 名；同时 PUBLIC 会被 access.type() 重置成 WORKSPACE。
+        Path workspaceDirectory = Files.createDirectories(docsDirectory.resolve("workspaces/team-1"));
+        Path source = workspaceDirectory.resolve("2f1c9d70-1111-4a2b-9c3d-000000000001.md");
+        Files.writeString(source, "# Guide\n\nManually published workspace knowledge.");
+        DocumentIndexEntry entry = new DocumentIndexEntry(
+                "guide-doc", "团队指南.md", source.toAbsolutePath().toString(), "guide-hash", 1,
+                java.time.Instant.ofEpochMilli(100L), "SOURCE", "INDEXED", "2", "team-1",
+                DocumentVisibility.PUBLIC);
+        indexStore.upsertAll(List.of(entry));
+        WorkspaceAccessContext editor = new WorkspaceAccessContext("2", "team-1", WorkspaceRole.EDITOR, WorkspaceType.TEAM);
+
+        service.rebuildDocuments(editor);
+
+        assertThat(service.listVisibleIndexedDocuments(editor)).singleElement().satisfies(rebuilt -> {
+            assertThat(rebuilt.visibility()).isEqualTo(DocumentVisibility.PUBLIC);
+            assertThat(rebuilt.fileName()).isEqualTo("团队指南.md");
+        });
+        assertThat(service.listDocuments()).allSatisfy(document ->
+                assertThat(document.visibility()).isEqualTo(DocumentVisibility.PUBLIC));
+    }
+
+    @Test
     void identicalContentInDifferentWorkspacesUsesDifferentDocumentAndChunkIds() {
         byte[] content = "# Shared Template\n\nThe same bytes in two isolated workspaces.".getBytes();
         WorkspaceDocumentUploadResponse first = service.uploadWorkspaceDocument(
