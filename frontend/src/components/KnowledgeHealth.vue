@@ -39,7 +39,7 @@ const confirmation = computed(() => {
   const plan = healthCleanupPlan.value
   return {
     title: `去重：删除 ${plan?.removedCount || 0} 个重复副本？`,
-    message: '每组重复内容只保留最近入库的一份，其余副本连同索引与向量一并删除，不可恢复。请逐条核对下面的保留项与删除项。',
+    message: '每组重复内容只保留一份：公开副本优先（公开检索与评测的唯一入口），同级再取最近入库。其余副本连同索引与向量一并删除，不可恢复，请逐条核对下面的保留项与删除项。',
     confirmText: '删除重复副本',
     danger: true
   }
@@ -238,7 +238,7 @@ async function runHealthCleanup(scope) {
       <template v-if="confirmTarget === 'health-cleanup-duplicate' && healthCleanupPlan">
         <p v-if="duplicateVisibilityRisk" class="health-cleanup-risk">{{ duplicateVisibilityRisk }}</p>
         <div class="health-cleanup-block keep">
-          <p class="health-cleanup-block-title">保留 {{ healthCleanupPlan.kept?.length || 0 }} 份（最近入库）</p>
+          <p class="health-cleanup-block-title">保留 {{ healthCleanupPlan.kept?.length || 0 }} 份（公开优先，其次最近入库）</p>
           <ul>
             <li v-for="ref in healthCleanupPlan.kept" :key="`keep-${ref.documentId}`">
               <span class="health-cleanup-badge keep">保留</span>

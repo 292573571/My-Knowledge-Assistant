@@ -305,9 +305,30 @@ class DocumentHealthServiceTest {
     }
 
     @Test
+    void duplicateCleanupKeepsPublicCopyOverNewerWorkspaceCopy() {
+        // 公开副本是全局检索/评测的唯一入口，优先级高于入库时间：旧公开副本胜过更新的工作空间副本。
+        Instant old = Instant.parse("2026-11-01T00:00:00Z");
+        Instant fresh = Instant.parse("2026-11-08T00:00:00Z");
+        givenDocuments(
+                entryOf("doc-public", "手册.doc", "hash-1", "ws-1", 10, "INDEXED", "SOURCE", old,
+                        DocumentVisibility.PUBLIC),
+                entryOf("doc-workspace", "手册.doc", "hash-1", "ws-2", 12, "INDEXED", "SOURCE", fresh,
+                        DocumentVisibility.WORKSPACE));
+        when(chunkRepository.countGroupedByDocumentId()).thenReturn(List.<Object[]>of(
+                new Object[]{"doc-public", 10L}, new Object[]{"doc-workspace", 12L}));
+
+        DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
+
+        assertThat(plan.kept()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-public");
+        assertThat(plan.removed()).extracting(DocumentHealthService.DocumentRef::documentId)
+                .containsExactly("doc-workspace");
+    }
+
+    @Test
     void duplicateCleanupPlanExposesVisibilityAndIngestTimeForEachCopy() {
         // 同名同内容、跨可见性的两份副本：预览必须给出可见性/入库时间/分块数，
-        // 否则用户只看到重复的文件名，无法判断会删掉公开副本还是工作空间副本。
+        // 否则用户只看到重复的文件名，无法判断会删掉哪一份。公开副本按新策略优先保留。
         Instant old = Instant.parse("2026-11-05T02:00:00Z");
         Instant fresh = Instant.parse("2026-11-06T01:00:00Z");
         givenDocuments(
@@ -321,16 +342,16 @@ class DocumentHealthServiceTest {
         DocumentHealthService.CleanupResult plan = service.planCleanup("duplicate");
 
         assertThat(plan.kept()).singleElement().satisfies(ref -> {
-            assertThat(ref.documentId()).isEqualTo("doc-workspace");
-            assertThat(ref.visibility()).isEqualTo("WORKSPACE");
-            assertThat(ref.ingestedAt()).isEqualTo(fresh);
-            assertThat(ref.chunkCount()).isEqualTo(12);
-            assertThat(ref.workspaceId()).isEqualTo("ws-2");
-        });
-        assertThat(plan.removed()).singleElement().satisfies(ref -> {
             assertThat(ref.documentId()).isEqualTo("doc-public");
             assertThat(ref.visibility()).isEqualTo("PUBLIC");
             assertThat(ref.ingestedAt()).isEqualTo(old);
+            assertThat(ref.chunkCount()).isEqualTo(12);
+            assertThat(ref.workspaceId()).isEqualTo("ws-1");
+        });
+        assertThat(plan.removed()).singleElement().satisfies(ref -> {
+            assertThat(ref.documentId()).isEqualTo("doc-workspace");
+            assertThat(ref.visibility()).isEqualTo("WORKSPACE");
+            assertThat(ref.ingestedAt()).isEqualTo(fresh);
         });
     }
 }

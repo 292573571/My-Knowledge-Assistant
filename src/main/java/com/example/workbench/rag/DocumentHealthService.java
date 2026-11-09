@@ -148,7 +148,8 @@ public class DocumentHealthService {
     }
 
     /**
-     * 清理重复文档：每个同内容分组只保留最近入库的一份（并列再比分块数与文件名），其余删除。
+     * 清理重复文档：每个同内容分组只保留一份——可见性优先（公开 &gt; 工作空间 &gt; 私有，公开副本是
+     * 全局检索与评测的唯一入口），同级再取最近入库（并列比分块数与文件名），其余删除。
      * 重复通常跨空间（同空间上传时已按作用域哈希去重），删除的是其他空间里的多余副本。
      */
     @Transactional
@@ -239,8 +240,10 @@ public class DocumentHealthService {
     }
 
     /**
-     * 保留最近入库的一份：重建索引后新解析器的产物更新，应当胜出（旧版本可能带域代码等解析脏数据）。
-     * 入库时间相同再比分块数（多的更全），仍相同按 fileName 升序取第一份，保证结果可复现。
+     * 保留优先级：可见性（公开 &gt; 工作空间 &gt; 私有）→ 最近入库 → 分块数（多的更全）→ fileName 升序。
+     * 公开副本优先的原因：公开副本是全局检索、评测与其他用户可见的唯一入口，删除它等于全员失明；
+     * 即使它是旧解析产物，也应保留，宁可用确认弹窗里的明细让用户自行核查。
+     * 入库时间相同再比分块数，仍相同按 fileName 升序取第一份，保证结果可复现。
      */
     private DocumentIndexEntry keepEntry(List<DocumentIndexEntry> group) {
         DocumentIndexEntry keep = group.get(0);
@@ -253,6 +256,11 @@ public class DocumentHealthService {
     }
 
     private boolean isPreferred(DocumentIndexEntry candidate, DocumentIndexEntry current) {
+        int candidateRank = visibilityRank(candidate);
+        int currentRank = visibilityRank(current);
+        if (candidateRank != currentRank) {
+            return candidateRank < currentRank;
+        }
         Instant candidateAt = candidate.ingestedAt();
         Instant currentAt = current.ingestedAt();
         if (candidateAt != null && currentAt != null && !candidateAt.equals(currentAt)) {
@@ -268,6 +276,17 @@ public class DocumentHealthService {
             return candidate.chunkCount() > current.chunkCount();
         }
         return false;
+    }
+
+    private int visibilityRank(DocumentIndexEntry entry) {
+        if (entry.visibility() == null) {
+            return 2;
+        }
+        return switch (entry.visibility()) {
+            case PUBLIC -> 0;
+            case WORKSPACE -> 1;
+            case PRIVATE -> 2;
+        };
     }
 
     private void purge(DocumentIndexEntry entry) {
