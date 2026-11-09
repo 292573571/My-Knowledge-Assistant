@@ -259,18 +259,22 @@ public class RagService {
     }
 
     public RagChatResponse chat(AppUser user, RagChatRequest request, RagChatOptions options) {
-        return chatInternal(user, request, options, false);
+        return chatInternal(user, request, options, false, false);
     }
 
     /**
      * 执行一次带检索快照的 RAG 问答，供离线评测复用生成时的真实候选。
+     *
+     * <p>评测只允许命中 PUBLIC 文档：评测账号自身的 PRIVATE 文档同样不进上下文。
+     * 否则运营往评测账号个人空间上传文档就会改变基线分数，且 SECURITY 套件
+     * （验证私有内容不会被公开检索命中）会因为「自己读自己的私有文档」而恒通过。</p>
      *
      * @param request 问答请求
      * @param options 本次请求的检索开关
      * @return 带同轮检索快照的回答
      */
     public RagChatResponse chatForEvaluation(RagChatRequest request, RagChatOptions options) {
-        return chatInternal(null, request, options, true);
+        return chatInternal(null, request, options, true, true);
     }
 
     /**
@@ -377,7 +381,8 @@ public class RagService {
         return matcher.matches() ? matcher.group(2) : null;
     }
 
-    private RagChatResponse chatInternal(AppUser user, RagChatRequest request, RagChatOptions options, boolean includeDebug) {
+    private RagChatResponse chatInternal(AppUser user, RagChatRequest request, RagChatOptions options, boolean includeDebug,
+                                         boolean publicOnlyRetrieval) {
         try {
         long startedAt = System.currentTimeMillis();
         String conversationId = request.normalizedConversationId();
@@ -426,8 +431,10 @@ public class RagService {
         long retrievalStartedAt = System.currentTimeMillis();
         // 先多查询召回候选，再按阈值过滤为真正允许进入 Prompt 的上下文。
         Set<String> readableWorkspaceIds = resolveReadable(user, request.workspaceId());
+        // 评测链路强制只检索 PUBLIC：传空 owner 使向量库与稀疏检索都跳过 PRIVATE 分支。
+        String retrievalOwnerUserId = publicOnlyRetrieval ? "" : ownerUserId(conversationId);
         List<SourceDocument> retrievedSources = retrieveCandidates(
-                question, conversationContext.standaloneQuestion(), ownerUserId(conversationId),
+                question, conversationContext.standaloneQuestion(), retrievalOwnerUserId,
                 readableWorkspaceIds, options);
         List<SourceDocument> sources = applyRetrievalPolicy(
                 question, retrievedSources, request.workspaceId(), readableWorkspaceIds, options.qualityGateAllowed());
