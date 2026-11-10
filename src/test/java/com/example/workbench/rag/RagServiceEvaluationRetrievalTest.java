@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +29,8 @@ import org.springframework.beans.factory.support.StaticListableBeanFactory;
  * 「自己读自己的私有文档」而恒通过，等于没测。</p>
  */
 class RagServiceEvaluationRetrievalTest {
+
+    private LocalChatClient chatClient;
 
     @Test
     void evaluationRetrievalIgnoresConversationOwnerSoPrivateDocumentsNeverEnterContext() {
@@ -62,9 +66,50 @@ class RagServiceEvaluationRetrievalTest {
         assertThat(denseOwner.getValue()).isEqualTo("1");
     }
 
+    @Test
+    void evaluationWithModelFallbackDisallowedNeverCallsModelWhenNoLocalEvidence() {
+        ScopedVectorStore vectorStore = mock(ScopedVectorStore.class);
+        SparseRetriever sparseRetriever = mock(SparseRetriever.class);
+        stubEmptyRetrieval(vectorStore, sparseRetriever);
+
+        RagService service = service(vectorStore, sparseRetriever, true);
+        RagChatResponse response = service.chatForEvaluation(
+                new RagChatRequest("user-1:eval-security-priv-001", "deepseek-harness 的固定 commit 是什么？"),
+                new RagChatOptions(false, false, false, false, false));
+
+        // 拒答必须是确定性事件：不调用模型，直接返回固定文案。
+        verify(chatClient, never()).generate(anyString());
+        verify(chatClient, never()).generate(anyString(), ArgumentMatchers.<ChatMessage>anyList(),
+                ArgumentMatchers.<String, String>anyMap());
+        verify(chatClient, never()).call(anyString(), ArgumentMatchers.<SourceDocument>anyList(),
+                ArgumentMatchers.<ChatMessage>anyList(), ArgumentMatchers.<String, String>anyMap());
+        assertThat(response.answer()).contains("没有找到足够信息");
+    }
+
+    @Test
+    void evaluationWithModelFallbackAllowedStillCallsModelWhenNoLocalEvidence() {
+        ScopedVectorStore vectorStore = mock(ScopedVectorStore.class);
+        SparseRetriever sparseRetriever = mock(SparseRetriever.class);
+        stubEmptyRetrieval(vectorStore, sparseRetriever);
+
+        RagService service = service(vectorStore, sparseRetriever, true);
+        RagChatResponse response = service.chatForEvaluation(
+                new RagChatRequest("user-1:eval-context-001", "知识库支持哪些文档格式？"),
+                new RagChatOptions(false, false));
+
+        // 对照：未显式禁用时兜底行为不变，仍调用模型生成。
+        verify(chatClient, times(1)).generate(anyString());
+        assertThat(response.answer()).doesNotContain("没有找到足够信息");
+    }
+
     private void stubRetrieval(ScopedVectorStore vectorStore, SparseRetriever sparseRetriever) {
         when(vectorStore.similaritySearch(anyString(), anyInt(), anyString(), anyScopes()))
                 .thenReturn(List.of(publicSource()));
+        when(sparseRetriever.search(anyString(), anyInt(), anyString(), anyScopes())).thenReturn(List.of());
+    }
+
+    private void stubEmptyRetrieval(ScopedVectorStore vectorStore, SparseRetriever sparseRetriever) {
+        when(vectorStore.similaritySearch(anyString(), anyInt(), anyString(), anyScopes())).thenReturn(List.of());
         when(sparseRetriever.search(anyString(), anyInt(), anyString(), anyScopes())).thenReturn(List.of());
     }
 
@@ -73,9 +118,14 @@ class RagServiceEvaluationRetrievalTest {
     }
 
     private RagService service(ScopedVectorStore vectorStore, SparseRetriever sparseRetriever) {
+        return service(vectorStore, sparseRetriever, false);
+    }
+
+    private RagService service(ScopedVectorStore vectorStore, SparseRetriever sparseRetriever,
+            boolean modelFallbackEnabled) {
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
         beanFactory.addBean("sparseRetriever", sparseRetriever);
-        LocalChatClient chatClient = mock(LocalChatClient.class);
+        chatClient = mock(LocalChatClient.class);
         when(chatClient.call(anyString(), ArgumentMatchers.<SourceDocument>anyList(),
                 ArgumentMatchers.<ChatMessage>anyList(), ArgumentMatchers.<String, String>anyMap()))
                 .thenReturn("公开文档里提到的内容，用于让回答通过质量门禁的示例文本。");
@@ -86,7 +136,7 @@ class RagServiceEvaluationRetrievalTest {
                 ArgumentMatchers.<SourceDocument>anyList())).thenReturn(true);
         return new RagService(mock(DocumentIngestionService.class), vectorStore, chatClient,
                 new ConversationMemory(), mock(WebSearchService.class), qualityGate,
-                true, 5, 0.85, "distance", false, false, 3, false, false,
+                true, 5, 0.85, "distance", false, false, 3, modelFallbackEnabled, false,
                 beanFactory.getBeanProvider(SparseRetriever.class), true, 60, 4500, 2, false);
     }
 

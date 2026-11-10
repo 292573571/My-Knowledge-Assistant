@@ -460,7 +460,7 @@ public class RagService {
                 response = answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources);
                 route = "WEB_FALLBACK_NO_LOCAL_MATCH";
             } else {
-                response = answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+                response = answerWithModelFallback(options, conversationId, question, relevantHistory, retrievedSources, sources);
                 route = modelFallbackEnabled ? "MODEL_FALLBACK_NO_LOCAL_MATCH" : "LOCAL_KNOWLEDGE_NO_MATCH";
             }
             rememberForLegacyTests(user, conversationId, question, response.answer());
@@ -486,7 +486,7 @@ public class RagService {
             );
             RagChatResponse response = webSearchAllowed
                     ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
-                    : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+                    : answerWithModelFallback(options, conversationId, question, relevantHistory, retrievedSources, sources);
             rememberForLegacyTests(user, conversationId, question, response.answer());
             log.info(
                     "RAG chat completed route={} conversationId={} sources={} durationMs={}",
@@ -526,7 +526,7 @@ public class RagService {
             );
             RagChatResponse fallback = webSearchAllowed
                     ? answerWithWebSearch(conversationId, question, relevantHistory, retrievedSources, sources)
-                    : answerWithModelFallback(conversationId, question, relevantHistory, retrievedSources, sources);
+                    : answerWithModelFallback(options, conversationId, question, relevantHistory, retrievedSources, sources);
             rememberForLegacyTests(user, conversationId, question, fallback.answer());
             return withDebug(fallback, includeDebug, question, retrievedSources, sources);
         }
@@ -1014,13 +1014,16 @@ public class RagService {
     }
 
     private RagChatResponse answerWithModelFallback(
+            RagChatOptions chatOptions,
             String conversationId,
             String question,
             List<ChatMessage> history,
             List<SourceDocument> retrievedSources,
             List<SourceDocument> contextSources
     ) {
-        if (!modelFallbackEnabled) {
+        // 请求级禁用（评测链路）优先于全局开关：本地无证据时直接返回固定拒答文案，
+        // 不调用模型——兜底回答不可控，会让「应拒答」类评测随措辞抖动。
+        if (!modelFallbackEnabled || !chatOptions.modelFallbackAllowed()) {
             return new RagChatResponse(NO_CONTEXT_ANSWER, List.of(),
                     retrievalDebug(question, retrievedSources, contextSources), RagAnswerRoute.NO_KNOWLEDGE);
         }

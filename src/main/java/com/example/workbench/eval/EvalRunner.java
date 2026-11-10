@@ -168,8 +168,12 @@ public class EvalRunner {
         String conversationId = ownerUserId == null || ownerUserId.isBlank()
                 ? "eval-" + evalCase.id()
                 : "user-" + ownerUserId + ":eval-" + evalCase.id();
+        // 评测对「应拒答 / 必须有本地证据」的用例禁用模型兜底：本地无证据时直接返回
+        // 固定拒答文案，拒答成为确定性事件，不被模型兜底的措辞抖动污染。
+        boolean modelFallbackAllowed = evalCase.allowModelFallback() && !evalCase.expectNoAnswer();
         RagChatResponse response = ragService.chatForEvaluation(new RagChatRequest(conversationId, evalCase.question()),
-                new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled, false, false));
+                new RagChatOptions(enhanced || queryRewriteEnabled, enhanced || multiQueryEnabled, false, false,
+                        modelFallbackAllowed));
         EvalResult ruleResult = evaluator.evaluate(evalCase, response);
 
         if (!judgeEnabled) {
