@@ -310,6 +310,8 @@ public class RuleBasedEvaluator {
                 "无法回答",
                 "无法给出",
                 "没有相关数据",
+                "知识库中没有",
+                "没有直接对应",
                 "not found",
                 "no relevant information",
                 "cannot confirm"

@@ -136,7 +136,8 @@ class RuleBasedEvaluatorTest {
         for (String refusal : List.of(
                 "根据我目前掌握的信息，无法确定这个问题的答案。",
                 "我目前的知识库中没有相关数据，无法回答。",
-                "关于这个问题，我无法给出准确答案。"
+                "关于这个问题，我无法给出准确答案。",
+                "我目前的知识库中没有直接对应的内容。"
         )) {
             EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse(refusal, List.of()));
             assertThat(result.passed()).as("拒答措辞应被识别: %s", refusal).isTrue();
