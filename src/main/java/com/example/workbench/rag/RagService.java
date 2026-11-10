@@ -41,24 +41,6 @@ public class RagService {
     private static final Pattern FALLBACK_PROMPT_LEAK_LINE = Pattern.compile(
             "(?m)^\\s*(?:来源标记[:：].*|对于不确定、时效性强或需要核实的事实.*)\\R?");
 
-    /**
-     * 模型礼貌拒绝模板词：触发 LOCAL_KNOWLEDGE → MODEL_ANSWER 兜底重路由到联网搜索。
-     * 仅在答案前 100 字命中且答案总长 ≤ 200 字时算"礼貌拒绝"，避免误判合法回答中
-     * 偶尔出现的"抱歉"等谦词。
-     */
-    private static final List<String> MODEL_REFUSAL_MARKERS = List.of(
-            "抱歉", "对不起", "无法提供", "无法回答",
-            "无能力", "无信息", "缺少相关", "知识库中没有",
-            "超出", "建议您", "建议开启", "无足够",
-            "无依据", "暂无", "没有足够", "无法基于"
-    );
-    private static final int MODEL_REFUSAL_MAX_LENGTH = 200;
-    private static final int MODEL_REFUSAL_HEAD_LENGTH = 100;
-    /**
-     * 流式期间礼貌拒绝检测的探针长度：累积到约 30 个字符时做一次模板词命中判定。
-     * 设小一点能在用户还没读完拒绝话术时及时切断 + 切到 web search；设太大则错过最佳挽救时机。
-     */
-    private static final int MODEL_REFUSAL_PROBE_LENGTH = 30;
     private static final int RECENT_CONVERSATION_ROUNDS = 4;
     // 在线流式链路的 LLM 相关度筛选阈值：候选片段不超过该数量时跳过，超过时才启用语义把关。
     private static final int LLM_GATE_MIN_CANDIDATES = 3;
@@ -97,6 +79,8 @@ public class RagService {
     private final boolean adjacentEnabled;
     private final DocumentTaskRepository documentTaskRepository;
     private final DocumentDisplayNameResolver displayNameResolver;
+    /** 检索管线：查询改写 / 混合召回 / RRF 融合 / 相邻扩展（见 {@link RetrievalPipeline}）。 */
+    private final RetrievalPipeline retrievalPipeline;
 
     @Value("${workbench.rag.wiki-graph-expansion.enabled:false}")
     boolean wikiGraphExpansionEnabled = false;
@@ -133,6 +117,7 @@ public class RagService {
     @Autowired(required = false)
     public void setAiExecutor(@org.springframework.beans.factory.annotation.Qualifier("aiTaskExecutor") Executor aiExecutor) {
         this.aiExecutor = aiExecutor;
+        this.retrievalPipeline.setExecutor(aiExecutor);
     }
 
     /**
@@ -203,6 +188,19 @@ public class RagService {
         this.adjacentEnabled = adjacentEnabled;
         this.documentTaskRepository = documentTaskRepository;
         this.displayNameResolver = displayNameResolver;
+        this.retrievalPipeline = new RetrievalPipeline(
+                vectorStore,
+                this.sparseRetriever,
+                chatClient,
+                hybridEnabled,
+                this.rrfK,
+                topK,
+                queryRewriteEnabled,
+                multiQueryEnabled,
+                multiQueryMaxQueries,
+                adjacentEnabled,
+                this.scoreDirection
+        );
     }
 
     RagService(
@@ -529,7 +527,7 @@ public class RagService {
             log.warn(
                     "RAG model-polite-refusal detected, retrying with web search conversationId={} refusedHead={}",
                     conversationId,
-                    answer.substring(0, Math.min(answer.length(), MODEL_REFUSAL_HEAD_LENGTH))
+                    answer.substring(0, Math.min(answer.length(), StreamRefusalGuard.HEAD_LENGTH))
             );
             RagChatResponse webResponse = answerWithWebSearch(
                     conversationId, question, relevantHistory, retrievedSources, sources);
@@ -580,7 +578,7 @@ public class RagService {
 
     public List<SourceDocument> retrieve(String query, int topK) {
         long startedAt = System.currentTimeMillis();
-        List<SourceDocument> sources = similaritySearch(query, topK, "", null).stream()
+        List<SourceDocument> sources = retrievalPipeline.similaritySearch(query, topK, "", null).stream()
                 .filter(source -> isVisibleToOwner(source, ""))
                 .limit(topK)
                 .toList();
@@ -829,91 +827,8 @@ public class RagService {
             String question,
             List<ChatMessage> history
     ) {
-        reactor.core.publisher.Flux<String> guardedFlux = reactor.core.publisher.Flux.create(sink -> {
-            StringBuilder probe = new StringBuilder();
-            boolean[] resolved = {false};
-            boolean[] fellBack = {false};
-            List<String> probeBuffer = new ArrayList<>();
-
-            reactor.core.Disposable upstream = source.subscribe(
-                    token -> {
-                        if (resolved[0]) {
-                            if (!fellBack[0]) {
-                                sink.next(token);
-                            }
-                            return;
-                        }
-                        probeBuffer.add(token);
-                        probe.append(token);
-                        if (probe.length() < MODEL_REFUSAL_PROBE_LENGTH) {
-                            return;
-                        }
-                        resolved[0] = true;
-                        if (!isModelPoliteRefusal(probe.toString())) {
-                            for (String t : probeBuffer) {
-                                sink.next(t);
-                            }
-                            probeBuffer.clear();
-                            return;
-                        }
-                        fellBack[0] = true;
-                        log.warn(
-                                "RAG stream model-polite-refusal detected, switching to web search conversationId={} probeHead={}",
-                                conversationId,
-                                probe.substring(0, Math.min(probe.length(), MODEL_REFUSAL_HEAD_LENGTH))
-                        );
-                        RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
-                        // 替换 response 的 tokens 与 sources（让前端订阅时拿到正确的 web 数据）
-                        response.replaceTokens(webResponse.tokens());
-                         response.replaceSources(List.of());
-                         response.replaceRoute(RagAnswerRoute.WEB_FALLBACK);
-                        webResponse.tokens().subscribe(
-                                sink::next,
-                                sink::error,
-                                () -> sink.complete()
-                        );
-                    },
-                    err -> {
-                        if (!fellBack[0]) {
-                            sink.error(err);
-                        }
-                    },
-                    () -> {
-                        if (resolved[0]) {
-                            if (!fellBack[0]) {
-                                sink.complete();
-                            }
-                            return;
-                        }
-                        // 流完成但 probe 不足，做最终判定
-                        resolved[0] = true;
-                        if (!isModelPoliteRefusal(probe.toString())) {
-                            for (String t : probeBuffer) {
-                                sink.next(t);
-                            }
-                            sink.complete();
-                            return;
-                        }
-                        fellBack[0] = true;
-                        log.warn(
-                                "RAG stream short model-polite-refusal detected, switching to web search conversationId={} probeLength={}",
-                                conversationId,
-                                probe.length()
-                        );
-                        RagStreamResponse webResponse = streamWithWebSearch(conversationId, question, history);
-                        response.replaceTokens(webResponse.tokens());
-                         response.replaceSources(List.of());
-                         response.replaceRoute(RagAnswerRoute.WEB_FALLBACK);
-                        webResponse.tokens().subscribe(
-                                sink::next,
-                                sink::error,
-                                () -> sink.complete()
-                        );
-                    }
-            );
-            sink.onCancel(upstream::dispose);
-        });
-        response.replaceTokens(guardedFlux);
+        StreamRefusalGuard.arm(source, response, conversationId,
+                () -> streamWithWebSearch(conversationId, question, history), log);
     }
 
     private List<ChatMessage> recentHistory(AppUser user, RagChatRequest request, String conversationId) {
@@ -1079,24 +994,7 @@ public class RagService {
      */
     private reactor.core.publisher.Flux<String> instrument(
             reactor.core.publisher.Flux<String> source, StreamTiming timing, String path) {
-        if (source == null) {
-            return null;
-        }
-        java.util.concurrent.atomic.AtomicLong subscribedAt = new java.util.concurrent.atomic.AtomicLong();
-        java.util.concurrent.atomic.AtomicBoolean firstChunk = new java.util.concurrent.atomic.AtomicBoolean();
-        java.util.concurrent.atomic.AtomicInteger chunks = new java.util.concurrent.atomic.AtomicInteger();
-        return source
-                .doOnSubscribe(subscription -> subscribedAt.set(System.nanoTime()))
-                .doOnNext(chunk -> {
-                    chunks.incrementAndGet();
-                    if (firstChunk.compareAndSet(false, true)) {
-                        timing.markSince("firstChunk", subscribedAt.get());
-                    }
-                })
-                .doOnComplete(() -> logStreamTiming("finished", timing, "path=" + path + " outcome=completed chunks=" + chunks.get()))
-                .doOnError(error -> logStreamTiming("finished", timing,
-                        "path=" + path + " outcome=error:" + error.getClass().getSimpleName() + " chunks=" + chunks.get()))
-                .doOnCancel(() -> logStreamTiming("finished", timing, "path=" + path + " outcome=cancelled chunks=" + chunks.get()));
+        return StreamTiming.instrument(source, timing, path, streamTimingWarnMs, log);
     }
 
     /**
@@ -1105,52 +1003,13 @@ public class RagService {
      * @param phase prepared（检索与提示词构建完成）/ finished（流结束）
      */
     private void logStreamTiming(String phase, StreamTiming timing, String detail) {
-        long totalMs = timing.elapsedMs();
-        String message = "RAG stream {} conversationId={} totalMs={} {} stages=[{}]";
-        Object[] arguments = new Object[]{phase, timing.conversationId(), totalMs, detail, timing.describe()};
-        if (totalMs >= streamTimingWarnMs) {
-            log.warn(message, arguments);
-        } else {
-            log.info(message, arguments);
-        }
+        StreamTiming.logStreamTiming(phase, timing, detail, streamTimingWarnMs, log);
     }
 
     /**
      * 流式链路分段计时器。只用于性能排查，不参与任何业务判断，也不跨线程共享。
      * mark 记相对上一节点的耗时，markSince 记相对任意时刻的耗时（用于首字延迟）。
      */
-    private static final class StreamTiming {
-        private final String conversationId;
-        private final long startedAt = System.nanoTime();
-        private final List<String> stages = new ArrayList<>();
-        private long lastMarkedAt = startedAt;
-
-        private StreamTiming(String conversationId) {
-            this.conversationId = conversationId;
-        }
-
-        private void mark(String stage) {
-            markSince(stage, lastMarkedAt);
-        }
-
-        private void markSince(String stage, long sinceNanos) {
-            long now = System.nanoTime();
-            stages.add(stage + "=" + (now - sinceNanos) / 1_000_000L + "ms");
-            lastMarkedAt = now;
-        }
-
-        private long elapsedMs() {
-            return (System.nanoTime() - startedAt) / 1_000_000L;
-        }
-
-        private String conversationId() {
-            return conversationId;
-        }
-
-        private String describe() {
-            return String.join(" ", stages);
-        }
-    }
 
 
     String buildWebPrompt(String webContext, String question) {
@@ -1239,16 +1098,16 @@ public class RagService {
     }
 
     private String buildRetrievalQuery(String question) {
-        return buildRetrievalQuery(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return retrievalPipeline.buildQuery(question, retrievalPipeline.defaultOptions());
     }
 
     private String buildRetrievalQuery(String question, RagChatOptions options) {
-        return expandRetrievalQuery(rewriteQuery(question, options));
+        return retrievalPipeline.buildQuery(question, options);
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId) {
         return retrieveCandidates(question, null, ownerUserId, null,
-                new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+                retrievalPipeline.defaultOptions());
     }
 
     private List<SourceDocument> retrieveCandidates(String question, String ownerUserId, Set<String> readableWorkspaceIds, RagChatOptions options) {
@@ -1262,188 +1121,52 @@ public class RagService {
             Set<String> readableWorkspaceIds,
             RagChatOptions options
     ) {
-        List<String> queries = new ArrayList<>(retrievalQueries(question, options));
-        if (standaloneQuestion != null && !standaloneQuestion.isBlank()
-                && !standaloneQuestion.equalsIgnoreCase(question)) {
-            retrievalQueries(standaloneQuestion, options).stream()
-                    .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
-                    .forEach(queries::add);
-        }
-        return retrieveCandidates(queries, ownerUserId, readableWorkspaceIds);
+        RetrievalPipeline.Outcome outcome = retrievalPipeline.retrieve(
+                question, standaloneQuestion, ownerUserId, readableWorkspaceIds, options,
+                source -> isVisibleToOwner(source, ownerUserId, readableWorkspaceIds));
+        adoptRetrievalScope(ownerUserId, readableWorkspaceIds, outcome);
+        return outcome.sources();
     }
 
     private List<SourceDocument> retrieveCandidates(List<String> queries, String ownerUserId, Set<String> readableWorkspaceIds) {
-        LinkedHashMap<String, CandidateAccumulator> candidates = new LinkedHashMap<>();
-        int candidateLimit = Math.max(topK, topK * 3);
-        List<CompletableFuture<QueryRetrievalResult>> retrievals = queries.stream()
-                .map(query -> retrieveQueryInParallel(query, candidateLimit, ownerUserId, readableWorkspaceIds))
-                .toList();
+        RetrievalPipeline.Outcome outcome = retrievalPipeline.retrieve(
+                queries, ownerUserId, readableWorkspaceIds,
+                source -> isVisibleToOwner(source, ownerUserId, readableWorkspaceIds));
+        adoptRetrievalScope(ownerUserId, readableWorkspaceIds, outcome);
+        return outcome.sources();
+    }
 
-        for (CompletableFuture<QueryRetrievalResult> retrieval : retrievals) {
-            QueryRetrievalResult queryResult = retrieval.join();
-            String query = queryResult.query();
-            List<SourceDocument> denseResults = queryResult.denseResults();
-            for (int index = 0; index < denseResults.size(); index++) {
-                SourceDocument source = denseResults.get(index);
-                if (!isVisibleToOwner(source, ownerUserId, readableWorkspaceIds)) {
-                    continue;
-                }
-                candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
-                        .addDense(source, query, index + 1, reciprocalRank(index + 1));
-            }
-            if (hybridEnabled && sparseRetriever != null) {
-                List<SourceDocument> sparseResults = queryResult.sparseResults();
-                for (int index = 0; index < sparseResults.size(); index++) {
-                    SourceDocument source = sparseResults.get(index);
-                    if (!isVisibleToOwner(source, ownerUserId, readableWorkspaceIds)) {
-                        continue;
-                    }
-                    candidates.computeIfAbsent(stableSourceKey(source), ignored -> new CandidateAccumulator(source))
-                            .addSparse(source, query, index + 1, reciprocalRank(index + 1));
-                }
-            }
-        }
-
-        List<CandidateAccumulator> ranked = candidates.values().stream()
-                .sorted(Comparator.comparingDouble(CandidateAccumulator::fusionScore).reversed()
-                        .thenComparing(candidate -> stableSourceKey(candidate.source())))
-                .toList();
-        LinkedHashMap<String, CandidateTrace> traces = new LinkedHashMap<>();
-        List<SourceDocument> sources = new ArrayList<>();
-        for (int index = 0; index < ranked.size(); index++) {
-            CandidateAccumulator candidate = ranked.get(index);
-            SourceDocument source = candidate.resultSource();
-            sources.add(source);
-            traces.put(stableSourceKey(source), candidate.trace(index + 1));
-        }
-        retrievalTrace.set(traces);
+    /**
+     * 把一次检索的轨迹与作用域写入 ThreadLocal，供阈值判定、重排与调试日志复用。
+     *
+     * @param ownerUserId          当前用户
+     * @param readableWorkspaceIds 可读空间集合
+     * @param outcome              检索产物
+     */
+    private void adoptRetrievalScope(
+            String ownerUserId, Set<String> readableWorkspaceIds, RetrievalPipeline.Outcome outcome) {
+        retrievalTrace.set(outcome.traces());
         retrievalScope.set(new RetrievalScope(ownerUserId, primaryWorkspaceId(readableWorkspaceIds)));
-        return sources;
-    }
-
-    private CompletableFuture<QueryRetrievalResult> retrieveQueryInParallel(
-            String query, int candidateLimit, String ownerUserId, Set<String> readableWorkspaceIds
-    ) {
-        CompletableFuture<List<SourceDocument>> dense = CompletableFuture.supplyAsync(() -> {
-            List<SourceDocument> results = similaritySearch(query, candidateLimit, ownerUserId, readableWorkspaceIds);
-            return results;
-        }, aiExecutor);
-        CompletableFuture<List<SourceDocument>> sparse = hybridEnabled && sparseRetriever != null
-                ? CompletableFuture.supplyAsync(() -> {
-                    List<SourceDocument> results = safeSparseSearch(query, candidateLimit, ownerUserId, readableWorkspaceIds);
-                    return results;
-                }, aiExecutor)
-                : CompletableFuture.completedFuture(List.of());
-        return dense.thenCombine(sparse, (denseResults, sparseResults) ->
-                new QueryRetrievalResult(query, denseResults, sparseResults));
-    }
-
-    private List<SourceDocument> safeSparseSearch(
-            String query, int candidateLimit, String ownerUserId, Set<String> readableWorkspaceIds
-    ) {
-        try {
-            return sparseRetriever.search(query, candidateLimit, ownerUserId, readableWorkspaceIds);
-        } catch (RuntimeException exception) {
-            log.warn("RAG sparse retrieval failed, continuing with Dense only errorType={}",
-                    exception.getClass().getSimpleName());
-            return List.of();
-        }
-    }
-
-    private double reciprocalRank(int rank) {
-        return 1.0 / (rrfK + rank);
-    }
-
-    private List<SourceDocument> similaritySearch(String query, int limit, String ownerUserId, Set<String> readableWorkspaceIds) {
-        if (vectorStore instanceof ScopedVectorStore scopedVectorStore) {
-            return scopedVectorStore.similaritySearch(query, limit, ownerUserId, readableWorkspaceIds);
-        }
-        int candidateLimit = ownerUserId == null || ownerUserId.isBlank() ? limit : Math.max(limit, limit * 4);
-        return vectorStore.similaritySearch(query, candidateLimit);
     }
 
     private List<String> retrievalQueries(String question) {
-        return retrievalQueries(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return retrievalPipeline.queries(question, retrievalPipeline.defaultOptions());
     }
 
     private List<String> retrievalQueries(String question, RagChatOptions options) {
-        List<String> queries = new ArrayList<>();
-        // 原问题始终保留；查询改写和多查询只能补充召回，不能替代用户原始表达。
-        queries.add(expandRetrievalQuery(question));
-        String rewritten = buildRetrievalQuery(question, options);
-        if (!rewritten.equalsIgnoreCase(queries.get(0))) {
-            queries.add(rewritten);
-        }
-
-        if (!options.multiQueryEnabled()) {
-            return queries;
-        }
-
-        // 多查询只服务于召回，不直接作为最终回答内容。
-        String prompt = """
-                请把用户问题拆成 2 到 4 个适合知识库检索的简短查询。
-                保留核心技术词。
-                不要回答问题。
-                每行只输出一个查询，不要编号。
-
-                用户问题：
-                %s
-                """.formatted(question);
-        String generated = chatClient.generate(prompt);
-        log.info("RAG multi-query generated enabled=true generatedLength={}", generated == null ? 0 : generated.length());
-
-        if (generated == null || generated.isBlank()) {
-            return queries;
-        }
-
-        generated.lines()
-                .map(this::cleanGeneratedQuery)
-                .filter(query -> !query.isBlank())
-                .filter(query -> queries.stream().noneMatch(existing -> existing.equalsIgnoreCase(query)))
-                .limit(Math.max(0, multiQueryMaxQueries - queries.size()))
-                .forEach(queries::add);
-        return queries;
+        return retrievalPipeline.queries(question, options);
     }
 
     private String rewriteQuery(String question) {
-        return rewriteQuery(question, new RagChatOptions(queryRewriteEnabled, multiQueryEnabled));
+        return retrievalPipeline.rewrite(question, retrievalPipeline.defaultOptions());
     }
 
     private String rewriteQuery(String question, RagChatOptions options) {
-        if (!options.queryRewriteEnabled()) {
-            return question;
-        }
-
-        // 查询改写失败时使用原问题，不能因辅助模型失败而阻断 RAG。
-        String prompt = """
-                请把用户问题改写成适合知识库检索的简短查询。
-                保留核心技术词。
-                不要回答问题。
-                只输出改写后的查询。
-
-                用户问题：
-                %s
-                """.formatted(question);
-        String rewritten = cleanGeneratedQuery(chatClient.generate(prompt));
-        log.info("RAG query rewrite completed enabled=true rewritten={} originalLength={}", !rewritten.isBlank(), question == null ? 0 : question.length());
-
-        if (rewritten.isBlank()) {
-            return question;
-        }
-
-        return rewritten;
+        return retrievalPipeline.rewrite(question, options);
     }
 
     private String cleanGeneratedQuery(String query) {
-        if (query == null) {
-            return "";
-        }
-
-        return query.trim()
-                .replaceFirst("^[\\-\\*\\d\\.、)]+\\s*", "")
-                .replace("\"", "")
-                .replace("'", "")
-                .trim();
+        return RetrievalPipeline.cleanQuery(query);
     }
 
     private ConversationContext resolveConversationContext(
@@ -1493,18 +1216,7 @@ public class RagService {
     }
 
     private String parseStandaloneQuestion(String generated, String originalQuestion) {
-        if (generated == null || generated.isBlank()) {
-            return null;
-        }
-        String normalized = generated.strip();
-        if (!normalized.regionMatches(true, 0, "RELATED:", 0, "RELATED:".length())) {
-            return null;
-        }
-        String standalone = cleanGeneratedQuery(normalized.substring("RELATED:".length()));
-        if (standalone.isBlank() || standalone.equalsIgnoreCase(originalQuestion)) {
-            return null;
-        }
-        return standalone;
+        return RetrievalPipeline.parseStandaloneQuestion(generated, originalQuestion);
     }
 
     private List<ChatMessage> sanitizeHistory(List<ChatMessage> history) {
@@ -1689,64 +1401,6 @@ public class RagService {
         return sources.stream().anyMatch(item -> stableSourceKey(item).equals(sourceKey));
     }
 
-    private String expandRetrievalQuery(String question) {
-        StringBuilder query = new StringBuilder(question);
-
-        if (question.contains("Embedding") || question.contains("embedding")) {
-            query.append("\nEmbedding 向量表示 语义表示");
-        }
-
-        if (question.contains("Chunk") || question.contains("chunk")) {
-            query.append("\nRAG Chunk 文档片段 切分后的文档片段 合理的 chunk 大小 检索质量 上下文");
-        }
-
-        if (question.contains("检索增强生成") || question.contains("RAG 的核心流程")) {
-            query.append("\nRAG 核心流程 文档导入 切片 embedding 向量检索 上下文注入 模型生成");
-        }
-
-        if (question.contains("RAG") && question.contains("Chroma")) {
-            query.append("\nRAG Vector Store Chroma Spring AI 集成 Document similaritySearch 向量检索");
-        }
-
-        if (question.contains("ChatClient") && question.contains("流式")) {
-            query.append("\nChatClient Streaming stream content Flux token chatClient.prompt user stream content");
-        }
-
-        if (question.contains("MCP 是什么")) {
-            query.append("\nMCP Model Context Protocol 基本概念 标准协议 外部工具 数据源 资源服务");
-        }
-
-        if (question.contains("MCP") && question.contains("主要解决什么问题")) {
-            query.append("\nMCP 核心目标 统一协议 外部上下文 定制集成 AI 应用 工具 数据源");
-        }
-
-        if (question.contains("RAG Eval Case") || question.contains("RAG Eval case")) {
-            query.append("\nAI 应用评估与测试 Eval Case 设计 id question expectedKeywords expectedSource shouldHaveAnswer shouldRefuse");
-        }
-
-        if (question.contains("Agent") && question.contains("普通 Chat")) {
-            query.append("\nAI Agent 与工作流设计 Agent 与普通 Chat 的区别 步骤 工具 执行 动作 文本生成");
-        }
-
-        if (question.contains("前端") && question.contains("RAG 聊天请求")) {
-            query.append("\nVue 聊天交互 RAG 请求 message conversationId answer sources chunkIndex snippet score headingPath");
-        }
-
-        if (question.contains("Rule-Based Evaluator") && question.contains("LLM Judge")) {
-            query.append("\nAI 应用评估与测试 Rule-Based Evaluator LLM Judge 关键词 禁用词 稳定 可复现 忠实度 语义正确性");
-        }
-
-        if (question.contains("文本") && question.contains("预处理") && question.contains("Embedding")) {
-            query.append("\nVector Store 与 Embedding 文本预处理 清洗 空白 标记 噪音 Embedding 检索质量");
-        }
-
-        if (question.contains("Vue") && question.contains("后端") && question.contains("来源")) {
-            query.append("\nVue 聊天交互 来源展示 后端 RAG 接口返回来源 /api/rag/chat answer sources chunkIndex headingPath");
-        }
-
-        return query.toString();
-    }
-
     private List<SourceDocument> rerankSources(String question, List<SourceDocument> sources) {
         // 融合分只用于排序，原始 Dense 距离仍用于阈值和诊断。
         return RetrievalRanker.rerank(question, sources, this::traceOf, scoreDirection);
@@ -1833,98 +1487,23 @@ public class RagService {
     }
 
     private String truncateHistoryMessage(String content) {
-        if (content == null || content.length() <= 600) {
-            return content == null ? "" : content;
-        }
-        return content.substring(0, 600) + "...";
+        return ContextAssembler.truncateHistoryMessage(content);
     }
 
     String buildContext(List<SourceDocument> sources) {
-        int usedTokens = 0;
-        List<String> blocks = new ArrayList<>();
-        for (SourceDocument source : sources) {
-            String block = formatContext(source);
-            int tokens = estimatedTokens(block);
-            if (!blocks.isEmpty() && usedTokens + tokens > contextMaxTokens) {
-                continue;
-            }
-            if (blocks.isEmpty() && tokens > contextMaxTokens) {
-                block = truncateToTokenBudget(block, contextMaxTokens);
-                tokens = estimatedTokens(block);
-            }
-            blocks.add(block);
-            usedTokens += tokens;
-        }
-        return String.join("\n\n", blocks);
-    }
-
-    private int estimatedTokens(String text) {
-        if (text == null || text.isBlank()) {
-            return 0;
-        }
-        int han = 0;
-        for (int offset = 0; offset < text.length();) {
-            int codePoint = text.codePointAt(offset);
-            if (Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN) {
-                han++;
-            }
-            offset += Character.charCount(codePoint);
-        }
-        return (int) Math.ceil(han / 1.5 + (text.length() - han) / 4.0);
-    }
-
-    private String truncateToTokenBudget(String text, int tokenBudget) {
-        int maxChars = Math.min(text.length(), tokenBudget * 2);
-        String truncated = text.substring(0, maxChars)
-                .replace("<<<END_UNTRUSTED_KNOWLEDGE_CHUNK>>>", "");
-        return truncated + "\n[上下文已按 Token 预算截断]\n<<<END_UNTRUSTED_KNOWLEDGE_CHUNK>>>";
+        return ContextAssembler.build(sources, contextMaxTokens);
     }
 
     private String formatContext(SourceDocument document) {
-        return """
-                <<<BEGIN_UNTRUSTED_KNOWLEDGE_CHUNK>>>
-                source: %s
-                path: %s
-                documentId: %s
-                chunkIndex: %d
-                pageNumber: %s
-                title: %s
-                headingPath: %s
-                chunkType: %s
-                content:
-                %s
-                <<<END_UNTRUSTED_KNOWLEDGE_CHUNK>>>
-                """.formatted(
-                escapeBoundaryMarkers(document.source()),
-                escapeBoundaryMarkers(document.path()),
-                escapeBoundaryMarkers(document.documentId()),
-                document.chunkIndex(),
-                document.pageNumber() > 0 ? document.pageNumber() : "-",
-                escapeBoundaryMarkers(document.title()),
-                escapeBoundaryMarkers(document.headingPath()),
-                escapeBoundaryMarkers(document.chunkType()),
-                escapeBoundaryMarkers(document.content())
-        );
+        return ContextAssembler.formatChunk(document);
     }
 
     String formatWebContext(WebSearchResult result) {
-        return """
-                <<<BEGIN_UNTRUSTED_WEB_RESULT>>>
-                title: %s
-                url: %s
-                snippet:
-                %s
-                <<<END_UNTRUSTED_WEB_RESULT>>>
-                """.formatted(
-                escapeBoundaryMarkers(result.title()),
-                escapeBoundaryMarkers(result.url()),
-                escapeBoundaryMarkers(result.snippet())).strip();
+        return ContextAssembler.formatWeb(result);
     }
 
     private String escapeBoundaryMarkers(String value) {
-        return value == null ? "" : value
-                .replace("<<<BEGIN_UNTRUSTED_", "[ESCAPED_BEGIN_UNTRUSTED_")
-                .replace("<<<END_UNTRUSTED_", "[ESCAPED_END_UNTRUSTED_");
+        return ContextAssembler.escapeMarkers(value);
     }
 
     /**
@@ -1933,15 +1512,7 @@ public class RagService {
      * 严格长度限制避免误判包含谦词（如"抱歉..."）的正常长答案。
      */
     private boolean isModelPoliteRefusal(String answer) {
-        if (answer == null || answer.isBlank()) {
-            return false;
-        }
-        String stripped = answer.strip();
-        if (stripped.length() > MODEL_REFUSAL_MAX_LENGTH) {
-            return false;
-        }
-        String head = stripped.substring(0, Math.min(stripped.length(), MODEL_REFUSAL_HEAD_LENGTH));
-        return MODEL_REFUSAL_MARKERS.stream().anyMatch(head::contains);
+        return StreamRefusalGuard.isPoliteRefusal(answer);
     }
 
     private boolean hasEnoughKnowledge(String question, List<SourceDocument> sources) {
@@ -2165,105 +1736,11 @@ public class RagService {
     }
 
     List<SourceDocument> expandAdjacent(List<SourceDocument> sources) {
-        if (!adjacentEnabled || sparseRetriever == null || sources.isEmpty()) {
-            return sources;
-        }
-        List<SourceDocument> expanded = new ArrayList<>(sources);
-        for (SourceDocument source : sources) {
-            // 相邻分块属于同一文档，直接复用源分块的归属（ownerUserId / workspaceId），
-            // 既避免依赖已清理的检索作用域，也保证层级空间下能正确取到祖先/组织文档的相邻块。
-            for (SourceDocument adjacent : sparseRetriever.adjacent(
-                    source.documentId(), source.chunkIndex(), source.ownerUserId(), source.workspaceId())) {
-                boolean sameHeading = source.headingPath() == null || source.headingPath().isBlank()
-                        || source.headingPath().equals(adjacent.headingPath());
-                boolean contiguousPage = source.pageNumber() <= 0 || adjacent.pageNumber() <= 0
-                        || Math.abs(source.pageNumber() - adjacent.pageNumber()) <= 1;
-                if (sameHeading && contiguousPage) {
-                    expanded.add(adjacent);
-                }
-            }
-        }
-        return expanded;
+        return retrievalPipeline.expandAdjacent(sources);
     }
 
     private List<SourceDocument> applyContextPolicy(List<SourceDocument> sources) {
-        LinkedHashMap<String, SourceDocument> byContent = new LinkedHashMap<>();
-        Map<String, Integer> documentCounts = new LinkedHashMap<>();
-        int usedTokens = 0;
-        for (SourceDocument source : sources) {
-            String normalized = source.content() == null ? "" : source.content().replaceAll("\\s+", " ").strip().toLowerCase(Locale.ROOT);
-            if (normalized.isBlank() || byContent.containsKey(normalized)) {
-                continue;
-            }
-            String documentId = source.documentId() == null ? source.source() : source.documentId();
-            if (documentCounts.getOrDefault(documentId, 0) >= maxChunksPerDocument) {
-                continue;
-            }
-            int tokens = estimatedTokens(formatContext(source));
-            if (!byContent.isEmpty() && usedTokens + tokens > contextMaxTokens) {
-                continue;
-            }
-            byContent.put(normalized, source);
-            documentCounts.merge(documentId, 1, Integer::sum);
-            usedTokens += tokens;
-        }
-        return List.copyOf(byContent.values());
-    }
-
-    private final class CandidateAccumulator {
-        private SourceDocument source;
-        private Double denseScore;
-        private Double sparseScore;
-        private Integer denseRank;
-        private Integer sparseRank;
-        private double fusionScore;
-        private final LinkedHashMap<String, Boolean> matchedQueries = new LinkedHashMap<>();
-
-        private CandidateAccumulator(SourceDocument source) {
-            this.source = source;
-        }
-
-        private void addDense(SourceDocument candidate, String query, int rank, double contribution) {
-            if (denseScore == null || ("similarity".equals(scoreDirection)
-                    ? candidate.score() > denseScore : candidate.score() < denseScore)) {
-                source = candidate;
-                denseScore = candidate.score();
-            }
-            denseRank = denseRank == null ? rank : Math.min(denseRank, rank);
-            fusionScore += contribution;
-            matchedQueries.put(query, true);
-        }
-
-        private void addSparse(SourceDocument candidate, String query, int rank, double contribution) {
-            if (sparseScore == null || candidate.score() > sparseScore) {
-                sparseScore = candidate.score();
-            }
-            sparseRank = sparseRank == null ? rank : Math.min(sparseRank, rank);
-            fusionScore += contribution;
-            matchedQueries.put(query, true);
-            if (denseScore == null) {
-                source = candidate;
-            }
-        }
-
-        private SourceDocument source() {
-            return source;
-        }
-
-        private double fusionScore() {
-            return fusionScore;
-        }
-
-        private SourceDocument resultSource() {
-            return source.withScore(denseScore == null ? sparseScore : denseScore);
-        }
-
-        private CandidateTrace trace(int finalRank) {
-            String channel = denseScore != null && sparseScore != null ? "HYBRID"
-                    : denseScore != null ? "DENSE" : "SPARSE";
-            return new CandidateTrace(channel, denseScore, sparseScore, fusionScore, denseRank, sparseRank,
-                    finalRank, List.copyOf(matchedQueries.keySet()));
-        }
+        return ContextAssembler.applyPolicy(sources, contextMaxTokens, maxChunksPerDocument);
     }
 
     private record RetrievalScope(String ownerUserId, String workspaceId) {
@@ -2272,10 +1749,6 @@ public class RagService {
     private record ConversationContext(ContextRelation relation, List<ChatMessage> history, String standaloneQuestion) {
     }
 
-    private record QueryRetrievalResult(
-            String query, List<SourceDocument> denseResults, List<SourceDocument> sparseResults
-    ) {
-    }
 
     private String snippet(String content) {
         if (content == null || content.length() <= 180) {
