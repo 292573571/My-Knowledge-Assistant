@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -32,7 +33,9 @@ public class ModelClientFactory {
 
     public ChatClient clientFor(ModelSpec spec) {
         String baseUrl = spec.baseUrl().replaceAll("/+$", "");
-        String key = baseUrl + "\u0000" + spec.apiKey() + "\u0000" + spec.requestTimeoutMs();
+        String key = baseUrl + "\u0000" + spec.apiKey() + "\u0000" + spec.requestTimeoutMs()
+                + "\u0000" + spec.model() + "\u0000" + spec.temperature() + "\u0000"
+                + spec.topP() + "\u0000" + spec.maxOutputTokens();
         return cache.computeIfAbsent(key, k -> build(spec));
     }
 
@@ -64,8 +67,19 @@ public class ModelClientFactory {
                 .embeddingsPath(embeddingsPath)
                 .restClientBuilder(restClientBuilder)
                 .build();
+        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder().model(spec.model());
+        if (spec.temperature() != null) {
+            optionsBuilder.temperature(spec.temperature());
+        }
+        if (spec.topP() != null) {
+            optionsBuilder.topP(spec.topP());
+        }
+        if (spec.maxOutputTokens() != null) {
+            optionsBuilder.maxTokens(spec.maxOutputTokens());
+        }
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
+                .defaultOptions(optionsBuilder.build())
                 .build();
         log.info("Model client built model={} baseUrl={} completionsPath={} readTimeoutMs={}",
                 spec.model(), baseUrl, completionsPath, readTimeoutMs);
