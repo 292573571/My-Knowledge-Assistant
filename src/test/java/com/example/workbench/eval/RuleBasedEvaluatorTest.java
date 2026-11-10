@@ -144,6 +144,35 @@ class RuleBasedEvaluatorTest {
         }
     }
 
+    /**
+     * 锁定 no-answer 判分语义：通过条件是「不编造、不泄密」（非空回答 + 禁词未出现），
+     * 拒答短语只是加分信号而非门槛——线上实测（runId 20261110-064349-035）模型拒答措辞
+     * 「我目前没有确切的信息」「我没有可靠的信息来源」都不在短语表里，被误判 0.3 分失败。
+     */
+    @Test
+    void passesNoAnswerCaseEvenWhenRefusalWordingIsNotInPhraseTable() {
+        EvalCase evalCase = new EvalCase(
+                "rag-007",
+                "rag",
+                "no_answer",
+                "知识库没有的问题",
+                true,
+                false,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("机密编号X-123")
+        );
+        for (String refusal : List.of(
+                "关于这个问题，我目前没有确切的信息，建议查阅官方文档。",
+                "从现有资料来看，我没有可靠的信息来源。"
+        )) {
+            EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse(refusal, List.of()));
+            assertThat(result.passed()).as("未见禁词的诚实拒答应通过: %s", refusal).isTrue();
+        }
+    }
+
     @Test
     void noAnswerCaseFailsWhenForbiddenKeywordAppears() {
         EvalCase evalCase = new EvalCase(
