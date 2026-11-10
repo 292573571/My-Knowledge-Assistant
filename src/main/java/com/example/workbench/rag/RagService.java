@@ -35,9 +35,7 @@ public class RagService {
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final String NO_CONTEXT_ANSWER = "我在当前知识库中没有找到足够信息和依据来回答这个问题。你可以导入相关文档后再问，或者切换到普通聊天模式让我基于通用知识回答。";
     private static final String MODEL_FALLBACK_SAFETY_ANSWER = "当前知识库没有相关资料，且模型回退调用未能成功。请检查模型配置是否正确（API 地址、API Key、模型标识），或稍后重试。";
-    private static final Pattern EXPLICIT_TECHNICAL_ACRONYM = Pattern.compile("(?<![A-Za-z0-9])[A-Z][A-Z0-9.+#-]{1,}(?![A-Za-z0-9])");
     private static final Pattern WIKI_PATH_PATTERN = Pattern.compile("docs/wiki/([^/]+)/([^/]+)\\.md");
-    private static final Set<String> GENERIC_TECHNICAL_TERMS = Set.of("AI");
     private static final String MODEL_KNOWLEDGE_DISCLAIMER = "以上回答基于通用大模型知识，不是当前知识库内容。";
     private static final Pattern MODEL_KNOWLEDGE_DISCLAIMER_LINE = Pattern.compile("(?m)^.*(?:基于通用大模型知识|当前知识库内容).*$\\R?");
     private static final Pattern FALLBACK_PROMPT_LEAK_LINE = Pattern.compile(
@@ -61,8 +59,6 @@ public class RagService {
      * 设小一点能在用户还没读完拒绝话术时及时切断 + 切到 web search；设太大则错过最佳挽救时机。
      */
     private static final int MODEL_REFUSAL_PROBE_LENGTH = 30;
-    private static final double WEAK_DENSE_DISTANCE = 0.72;
-    private static final double STRONG_SPARSE_SCORE = 2.0;
     private static final int RECENT_CONVERSATION_ROUNDS = 4;
     // 在线流式链路的 LLM 相关度筛选阈值：候选片段不超过该数量时跳过，超过时才启用语义把关。
     private static final int LLM_GATE_MIN_CANDIDATES = 3;
@@ -125,11 +121,6 @@ public class RagService {
      * 中文切词窗口的停用词：这些碎片在任意文档里都可能出现，命中它们不代表内容相关，
      * 否则「什么是缓存」会因为在原文里找到「什么」就被判定为知识充足。
      */
-    private static final Set<String> WEAK_TERMS = Set.of(
-            "什么", "怎么", "怎样", "如何", "哪些", "哪个", "是否", "能否", "可以",
-            "为什", "么是", "是什", "么样", "么办", "多少", "几个", "有无", "哪有"
-    );
-
     private final ThreadLocal<Map<String, CandidateTrace>> retrievalTrace = ThreadLocal.withInitial(LinkedHashMap::new);
     private final ThreadLocal<RetrievalScope> retrievalScope = new ThreadLocal<>();
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
@@ -1574,60 +1565,19 @@ public class RagService {
     }
 
     private boolean hasStrongRetrievalSignal(String question, SourceDocument source) {
-        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
-        if (trace == null) {
-            return true;
-        }
-        if (trace.sparseScore() != null && trace.sparseScore() >= STRONG_SPARSE_SCORE
-                || lexicalMatchScore(question, source.content()) > 0
-                || structuredMatchScore(question, source) > 0) {
-            return true;
-        }
-        return trace.denseScore() != null && ("similarity".equals(scoreDirection)
-                || trace.denseScore() <= WEAK_DENSE_DISTANCE);
+        return RetrievalRanker.hasStrongRetrievalSignal(question, source, traceOf(source), scoreDirection);
     }
 
     private boolean hasSubstantiveContent(SourceDocument source) {
-        if (source.content() == null || source.content().isBlank()) {
-            return false;
-        }
-
-        // 仅包含 Markdown 标题的旧分块没有回答价值，不能作为本地知识依据。
-        return source.content().lines()
-                .map(String::strip)
-                .filter(line -> !line.isBlank())
-                .anyMatch(line -> !line.matches("^#{1,6}\\s+.+$"));
+        return RetrievalRanker.hasSubstantiveContent(source);
     }
 
     private boolean isLearningRecord(SourceDocument source) {
-        return DocumentCategory.isLearningRecord(source.category(), source.path());
+        return RetrievalRanker.isLearningRecord(source);
     }
 
     private boolean matchesExplicitTechnicalTerm(String question, SourceDocument source) {
-        if (question == null) {
-            return true;
-        }
-
-        String searchableContent = String.join("\n",
-                source.content() == null ? "" : source.content(),
-                source.title() == null ? "" : source.title(),
-                source.headingPath() == null ? "" : source.headingPath(),
-                source.fileName() == null ? "" : source.fileName()
-        ).toLowerCase();
-        if (question.toLowerCase(Locale.ROOT).contains("embedding") && !searchableContent.contains("embedding")) {
-            return false;
-        }
-
-        // 用户明确写出的技术缩写是强检索信号；候选完全不含该缩写时不能作为本地知识来源。
-        var matcher = EXPLICIT_TECHNICAL_ACRONYM.matcher(question);
-        while (matcher.find()) {
-            String term = matcher.group().toUpperCase(Locale.ROOT);
-            if (!GENERIC_TECHNICAL_TERMS.contains(term)
-                    && !searchableContent.contains(term.toLowerCase(Locale.ROOT))) {
-                return false;
-            }
-        }
-        return true;
+        return RetrievalRanker.matchesExplicitTechnicalTerm(question, source);
     }
 
     private boolean containsModelKnowledgeDisclaimer(SourceDocument source) {
@@ -1683,29 +1633,19 @@ public class RagService {
     }
 
     private boolean passesThreshold(SourceDocument source) {
-        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
-        if (trace != null && trace.sparseScore() != null) {
-            return true;
-        }
-        // 不同向量库的 score 语义不同：similarity 越大越好，distance 越小越好。
-        if ("similarity".equals(scoreDirection)) {
-            return source.score() >= similarityThreshold;
-        }
-
-        return source.score() <= similarityThreshold;
+        return RetrievalRanker.passesThreshold(source, traceOf(source), scoreDirection, similarityThreshold);
     }
 
     private double rankingScore(SourceDocument source) {
-        if ("similarity".equals(scoreDirection)) {
-            return source.score();
-        }
-
-        return -source.score();
+        return RetrievalRanker.rankingScore(source, scoreDirection);
     }
 
     private String stableSourceKey(SourceDocument source) {
-        String documentId = source.documentId() == null || source.documentId().isBlank() ? source.source() : source.documentId();
-        return documentId + "#" + source.chunkIndex();
+        return RetrievalRanker.stableSourceKey(source);
+    }
+
+    private CandidateTrace traceOf(SourceDocument source) {
+        return retrievalTrace.get().get(stableSourceKey(source));
     }
 
     private void logRetrievalDebug(String question, List<SourceDocument> retrievedSources, List<SourceDocument> contextSources) {
@@ -1809,207 +1749,35 @@ public class RagService {
 
     private List<SourceDocument> rerankSources(String question, List<SourceDocument> sources) {
         // 融合分只用于排序，原始 Dense 距离仍用于阈值和诊断。
-        return sources.stream()
-                .sorted(Comparator.comparingDouble((SourceDocument source) -> rerankScore(question, source)).reversed())
-                .toList();
+        return RetrievalRanker.rerank(question, sources, this::traceOf, scoreDirection);
     }
 
     private double rerankScore(String question, SourceDocument source) {
-        CandidateTrace trace = retrievalTrace.get().get(stableSourceKey(source));
-        double vectorScore = trace != null && trace.denseScore() == null ? 0.0
-                : "similarity".equals(scoreDirection) ? source.score() : Math.max(0.0, 1.0 - source.score());
-        double fusionScore = trace == null ? 0.0 : trace.fusionScore() * 100.0;
-        return vectorScore * 10 + fusionScore
-                + lexicalMatchScore(question, source.content())
-                + structuredMatchScore(question, source)
-                + contentQualityScore(source)
-                + documentPriority(source)
-                + sourceBoost(question, source);
+        return RetrievalRanker.rerankScore(question, source, traceOf(source), scoreDirection);
     }
 
     private int structuredMatchScore(String question, SourceDocument source) {
-        if (question == null || question.isBlank()) {
-            return 0;
-        }
-        String normalizedQuestion = question.toLowerCase(Locale.ROOT);
-        int score = 0;
-        if (source.fileName() != null && normalizedQuestion.contains(source.fileName().toLowerCase(Locale.ROOT))) {
-            score += 8;
-        }
-        if (source.headingPath() != null && !source.headingPath().isBlank()
-                && normalizedQuestion.contains(source.headingPath().toLowerCase(Locale.ROOT))) {
-            score += 6;
-        }
-        if (source.chunkType() != null && source.chunkType().contains("table")) {
-            score += 2;
-        }
-        return score;
+        return RetrievalRanker.structuredMatchScore(question, source);
     }
 
     private int lexicalMatchScore(String question, String content) {
-        if (question == null || content == null) {
-            return 0;
-        }
-
-        String normalizedContent = content.toLowerCase(Locale.ROOT);
-        int score = 0;
-        var matcher = Pattern.compile("[\\p{IsHan}]{2,}|[a-z][a-z0-9_-]{1,}", Pattern.CASE_INSENSITIVE)
-                .matcher(question.toLowerCase(Locale.ROOT));
-        while (matcher.find()) {
-            int matchedLength = longestMatchedLength(matcher.group().toLowerCase(Locale.ROOT), normalizedContent);
-            if (matchedLength > 0) {
-                score += matchedLength >= 3 ? 3 : 2;
-            }
-        }
-        return score;
+        return LexicalScorer.matchScore(question, content);
     }
 
     private int contentQualityScore(SourceDocument source) {
-        String content = source.content() == null ? "" : source.content().strip();
-        if (content.isBlank() || isHeadingOnly(source)) {
-            return -12;
-        }
-
-        int score = Math.min(8, content.length() / 160);
-        if (content.length() > 80) {
-            score += 3;
-        }
-        if (content.contains("是") || content.contains("用于") || content.contains("主要")) {
-            score += 3;
-        }
-        return score;
+        return RetrievalRanker.contentQualityScore(source);
     }
 
     private boolean isHeadingOnly(SourceDocument source) {
-        String content = source.content() == null ? "" : source.content().strip();
-        if (content.contains("\n") || content.length() > 80) {
-            return false;
-        }
-
-        String headingPath = source.headingPath() == null ? "" : source.headingPath().strip();
-        if (headingPath.isBlank()) {
-            return false;
-        }
-        return headingPath.equals(content) || headingPath.endsWith(" > " + content);
+        return RetrievalRanker.isHeadingOnly(source);
     }
 
     private int documentPriority(SourceDocument source) {
-        if ("SOURCE".equals(source.category())) {
-            return 4;
-        }
-        if ("FORMAL_NOTE".equals(source.category())) {
-            return 2;
-        }
-        if (isLearningRecord(source)) {
-            return -4;
-        }
-        return 0;
+        return RetrievalRanker.documentPriority(source);
     }
 
     private int sourceBoost(String question, SourceDocument source) {
-        String headingPath = source.headingPath() == null ? "" : source.headingPath();
-        String content = source.content() == null ? "" : source.content();
-        int boost = 0;
-
-        if ((question.contains("检索增强生成") || question.contains("核心流程"))
-                && headingPath.contains("RAG > 核心流程")) {
-            boost += 6;
-        }
-
-        if (question.contains("Chunk") || question.contains("chunk")) {
-            if (headingPath.contains("RAG > Chunk")) {
-                boost += 8;
-            }
-            if (headingPath.contains("RAG > Embedding")) {
-                boost += 6;
-            }
-            if (content.contains("检索质量") || content.contains("文档片段")) {
-                boost += 3;
-            }
-        }
-
-        if (question.contains("Embedding") || question.contains("embedding")) {
-            if (headingPath.contains("RAG > Embedding")) {
-                boost += 8;
-            }
-            if (content.contains("语义") || content.contains("相似度")) {
-                boost += 3;
-            }
-        }
-
-        if (question.contains("RAG") && question.contains("Chroma")) {
-            if (headingPath.contains("RAG > Vector Store")) {
-                boost += 8;
-            }
-            if (headingPath.contains("Chroma VectorStore > Spring AI 集成")) {
-                boost += 8;
-            }
-            if (content.contains("Document") || content.contains("similaritySearch")) {
-                boost += 4;
-            }
-        }
-
-        if (question.contains("ChatClient") && question.contains("流式")) {
-            if (headingPath.contains("ChatClient > Streaming")) {
-                boost += 12;
-            }
-            if (content.contains("chatClient.prompt") || content.contains("stream().content")) {
-                boost += 6;
-            }
-        }
-
-        if (question.contains("MCP 是什么") && headingPath.contains("MCP > 基本概念")) {
-            boost += 12;
-        }
-
-        if (question.contains("MCP") && question.contains("主要解决什么问题")
-                && headingPath.contains("MCP > 核心目标")) {
-            boost += 12;
-        }
-
-        if ((question.contains("RAG Eval Case") || question.contains("RAG Eval case"))
-                && headingPath.contains("AI 应用评估与测试 > Eval Case 设计")) {
-            boost += 12;
-        }
-
-        if (question.contains("Agent") && question.contains("普通 Chat")
-                && headingPath.contains("AI Agent 与工作流设计 > Agent 与普通 Chat 的区别")) {
-            boost += 12;
-        }
-
-        if (question.contains("前端") && question.contains("RAG 聊天请求")
-                && headingPath.contains("Vue > 聊天交互")) {
-            boost += 12;
-        }
-
-        if (question.contains("Rule-Based Evaluator") && question.contains("LLM Judge")) {
-            if (headingPath.contains("AI 应用评估与测试 > Rule-Based Evaluator")
-                    || headingPath.contains("AI 应用评估与测试 > LLM Judge")) {
-                boost += 12;
-            }
-        }
-
-        if (question.contains("文本") && question.contains("预处理") && question.contains("Embedding")
-                && headingPath.contains("Vector Store 与 Embedding > 文本预处理")) {
-            boost += 12;
-        }
-
-        if (question.contains("Vue") && question.contains("后端") && question.contains("来源")) {
-            if (headingPath.contains("Vue > 聊天交互")) {
-                boost += 10;
-            }
-            if (headingPath.contains("Vue > 来源展示")) {
-                boost += 10;
-            }
-            if (headingPath.contains("Project Notes > RAG 接口返回来源")) {
-                boost += 12;
-            }
-            if (content.contains("/api/rag/chat") || content.contains("sources")) {
-                boost += 4;
-            }
-        }
-
-        return boost;
+        return RetrievalRanker.sourceBoost(question, source);
     }
 
     private boolean shouldAnswerNoKnowledge(String question) {
@@ -2203,53 +1971,7 @@ public class RagService {
     }
 
     private boolean sharesSignificantTerm(String question, String content) {
-        if (question == null || content == null) return false;
-        var matcher = Pattern.compile("[\\p{IsHan}]{2,}|[a-z][a-z0-9_-]{2,}", Pattern.CASE_INSENSITIVE).matcher(question);
-        while (matcher.find()) {
-            String term = matcher.group().toLowerCase(Locale.ROOT);
-            if (longestMatchedLength(term, content) >= 2) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 返回 term 在 content 中实际命中的最长子串长度，0 表示未命中。
-     *
-     * <p>中文没有空格分词，正则 {@code [\p{IsHan}]{2,}} 是贪婪的，会把「什么是缓存」
-     * 整句当成一个 term 去 content 里 contains，自然永远命中不了——短问题的词法判定
-     * 因此长期失效，检索到内容也被判成「知识不足」而转模型兜底。
-     * 这里对含汉字的 term 按「最长优先」切成 2..N 字窗口逐个尝试，切到「缓存」这类真词即可命中。
-     * 英文与数字保持整词匹配，避免 "is"、"at" 这类碎片造成误命中。</p>
-     */
-    private int longestMatchedLength(String term, String content) {
-        if (content.contains(term)) {
-            return term.length();
-        }
-        if (term.length() <= 2 || !containsHan(term)) {
-            return 0;
-        }
-        for (int size = term.length() - 1; size >= 2; size--) {
-            for (int start = 0; start + size <= term.length(); start++) {
-                String window = term.substring(start, start + size);
-                if (!WEAK_TERMS.contains(window) && content.contains(window)) {
-                    return size;
-                }
-            }
-        }
-        return 0;
-    }
-
-    private boolean containsHan(String value) {
-        for (int offset = 0; offset < value.length(); ) {
-            int codePoint = value.codePointAt(offset);
-            if (Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN) {
-                return true;
-            }
-            offset += Character.charCount(codePoint);
-        }
-        return false;
+        return LexicalScorer.sharesSignificantTerm(question, content);
     }
 
     private List<RagSource> toRagSources(List<SourceDocument> sources) {
@@ -2439,20 +2161,7 @@ public class RagService {
     }
 
     private List<SourceDocument> diversify(List<SourceDocument> rankedSources) {
-        List<SourceDocument> selected = new ArrayList<>();
-        Map<String, Integer> documentCounts = new LinkedHashMap<>();
-        for (SourceDocument source : rankedSources) {
-            String documentId = source.documentId() == null ? source.source() : source.documentId();
-            if (documentCounts.getOrDefault(documentId, 0) >= maxChunksPerDocument) {
-                continue;
-            }
-            selected.add(source);
-            documentCounts.merge(documentId, 1, Integer::sum);
-            if (selected.size() >= topK) {
-                break;
-            }
-        }
-        return selected;
+        return RetrievalRanker.diversify(rankedSources, topK, maxChunksPerDocument);
     }
 
     List<SourceDocument> expandAdjacent(List<SourceDocument> sources) {
@@ -2555,12 +2264,6 @@ public class RagService {
             return new CandidateTrace(channel, denseScore, sparseScore, fusionScore, denseRank, sparseRank,
                     finalRank, List.copyOf(matchedQueries.keySet()));
         }
-    }
-
-    private record CandidateTrace(
-            String channel, Double denseScore, Double sparseScore, double fusionScore,
-            Integer denseRank, Integer sparseRank, int finalRank, List<String> matchedQueries
-    ) {
     }
 
     private record RetrievalScope(String ownerUserId, String workspaceId) {
