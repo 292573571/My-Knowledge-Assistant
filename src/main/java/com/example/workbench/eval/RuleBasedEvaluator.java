@@ -306,6 +306,10 @@ public class RuleBasedEvaluator {
                 "不能确认",
                 "不知道",
                 "未找到",
+                "无法确定",
+                "无法回答",
+                "无法给出",
+                "没有相关数据",
                 "not found",
                 "no relevant information",
                 "cannot confirm"

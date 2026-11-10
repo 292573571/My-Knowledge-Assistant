@@ -114,6 +114,61 @@ class RuleBasedEvaluatorTest {
         assertThat(result.reason()).contains("no-answer expression");
     }
 
+    /**
+     * 锁定真实拒答措辞：模型兜底拒答常说「无法确定」「没有相关数据」「无法给出」，
+     * 旧短语表只认「无法确认」，会把诚实的拒答误判成 0.3 分失败。
+     */
+    @Test
+    void recognizesModelFallbackRefusalPhrasings() {
+        EvalCase evalCase = new EvalCase(
+                "rag-005",
+                "rag",
+                "no_answer",
+                "知识库没有的问题",
+                true,
+                false,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+        for (String refusal : List.of(
+                "根据我目前掌握的信息，无法确定这个问题的答案。",
+                "我目前的知识库中没有相关数据，无法回答。",
+                "关于这个问题，我无法给出准确答案。"
+        )) {
+            EvalResult result = evaluator.evaluate(evalCase, new RagChatResponse(refusal, List.of()));
+            assertThat(result.passed()).as("拒答措辞应被识别: %s", refusal).isTrue();
+        }
+    }
+
+    @Test
+    void noAnswerCaseFailsWhenForbiddenKeywordAppears() {
+        EvalCase evalCase = new EvalCase(
+                "rag-006",
+                "rag",
+                "no_answer",
+                "知识库没有的问题",
+                true,
+                false,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("机密编号X-123")
+        );
+        RagChatResponse response = new RagChatResponse(
+                "虽然不确定，但资料里提到机密编号X-123对应内部项目。",
+                List.of()
+        );
+
+        EvalResult result = evaluator.evaluate(evalCase, response);
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.reason()).contains("forbidden keywords");
+    }
+
     @Test
     void failsWhenRequiredLocalEvidenceIsMissing() {
         EvalCase evalCase = new EvalCase(
