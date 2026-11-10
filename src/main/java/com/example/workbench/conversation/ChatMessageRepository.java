@@ -24,7 +24,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
             insert into chat_messages (conversation_id, role, content, sources_json, tool_calls_json,
                                        client_request_id, created_at)
             values (:conversationId, :role, :content, :sourcesJson, :toolCallsJson, :clientRequestId, CURRENT_TIMESTAMP)
-            on conflict (conversation_id, client_request_id, role) do nothing
+            on conflict (conversation_id, client_request_id, role)
+                where client_request_id is not null do nothing
             """, nativeQuery = true)
     int insertIfAbsent(@Param("conversationId") String conversationId, @Param("role") String role,
                        @Param("content") String content, @Param("sourcesJson") String sourcesJson,
