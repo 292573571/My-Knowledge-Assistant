@@ -47,26 +47,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: |
-          set -o pipefail
-          if ! yarn install --frozen-lockfile 2>&1 | tee /tmp/yarn-install.log; then
-            {
-              echo "### yarn install 失败输出"
-              echo '```'
-              tail -120 /tmp/yarn-install.log
-              echo '```'
-            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-            tail -40 /tmp/yarn-install.log | while IFS= read -r line; do
-              echo "::error::${line:0:250}"
-            done
-            exit 1
-          fi
+        run: yarn install --frozen-lockfile
 
       - name: Lint frontend
         working-directory: frontend
