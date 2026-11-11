@@ -1,0 +1,3 @@
+service,recovery_target,owner
+order service,FIFTEEN MINUTES,交易平台组
+payment service,THIRTY MINUTES,支付平台组

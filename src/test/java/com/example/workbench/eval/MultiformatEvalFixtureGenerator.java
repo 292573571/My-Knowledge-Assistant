@@ -3,9 +3,11 @@ package com.example.workbench.eval;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.imageio.ImageIO;
@@ -16,12 +18,17 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextBox;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 
 /**
- * 生成多格式检索评测所需的固定 PDF、DOCX 和 OCR 图片样本。
+ * 生成多格式检索评测所需的固定 PDF、DOCX、XLSX、PPTX、CSV、JSON、XML 和 OCR 图片样本。
  */
 public final class MultiformatEvalFixtureGenerator {
 
@@ -41,6 +48,11 @@ public final class MultiformatEvalFixtureGenerator {
         writePdf();
         writeDocx();
         writeOcrImage();
+        writeXlsx();
+        writePptx();
+        writeCsv();
+        writeJson();
+        writeXml();
     }
 
     private static void writePdf() throws IOException {
@@ -112,5 +124,87 @@ public final class MultiformatEvalFixtureGenerator {
             graphics.dispose();
         }
         ImageIO.write(image, "png", OUTPUT_DIRECTORY.resolve("quality-ocr.png").toFile());
+    }
+
+    /** Excel：表头 + 两行数据，用于验证「表头: 值」的列标注是否保留。 */
+    private static void writeXlsx() throws IOException {
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            var sheet = workbook.createSheet("服务等级表");
+            String[][] rows = {
+                    {"服务名称", "恢复目标", "责任组"},
+                    {"订单服务", "十五分钟", "交易平台组"},
+                    {"支付服务", "三十分钟", "支付平台组"}
+            };
+            for (int rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+                Row row = sheet.createRow(rowIndex);
+                for (int columnIndex = 0; columnIndex < rows[rowIndex].length; columnIndex++) {
+                    row.createCell(columnIndex).setCellValue(rows[rowIndex][columnIndex]);
+                }
+            }
+            try (var output = Files.newOutputStream(OUTPUT_DIRECTORY.resolve("quality-sheet.xlsx"))) {
+                workbook.write(output);
+            }
+        }
+    }
+
+    /** PowerPoint：两页幻灯片，第二页承载需要被命中的事实。 */
+    private static void writePptx() throws IOException {
+        try (XMLSlideShow show = new XMLSlideShow()) {
+            addSlide(show, "STARSHIP RELEASE MANUAL", "Page one: deployment prerequisites and rollback preparation.");
+            addSlide(show, "ORDER SERVICE RECOVERY", "ORDER SERVICE RECOVERY TARGET: FIFTEEN MINUTES");
+            try (var output = Files.newOutputStream(OUTPUT_DIRECTORY.resolve("quality-slides.pptx"))) {
+                show.write(output);
+            }
+        }
+    }
+
+    private static void addSlide(XMLSlideShow show, String heading, String body) {
+        XSLFSlide slide = show.createSlide();
+        XSLFTextBox title = slide.createTextBox();
+        title.setAnchor(new Rectangle(40, 30, 640, 80));
+        title.addNewTextParagraph().addNewTextRun().setText(heading);
+        XSLFTextBox content = slide.createTextBox();
+        content.setAnchor(new Rectangle(40, 140, 640, 240));
+        content.addNewTextParagraph().addNewTextRun().setText(body);
+    }
+
+    /** CSV：UTF-8 带表头，用于验证引号字段与列名映射。 */
+    private static void writeCsv() throws IOException {
+        String csv = """
+                service,recovery_target,owner
+                order service,FIFTEEN MINUTES,交易平台组
+                payment service,THIRTY MINUTES,支付平台组
+                """;
+        Files.writeString(OUTPUT_DIRECTORY.resolve("quality-data.csv"), csv, StandardCharsets.UTF_8);
+    }
+
+    /** JSON：嵌套对象，用于验证结构化字段被摊平成可检索文本。 */
+    private static void writeJson() throws IOException {
+        String json = """
+                {
+                  "service": "order service",
+                  "recoveryTarget": "FIFTEEN MINUTES",
+                  "owner": "交易平台组",
+                  "detail": {
+                    "tier": "critical",
+                    "reviewCycle": "EVERY FOURTEEN DAYS"
+                  }
+                }
+                """;
+        Files.writeString(OUTPUT_DIRECTORY.resolve("quality-config.json"), json, StandardCharsets.UTF_8);
+    }
+
+    /** XML：嵌套元素 + 属性，用于验证标签与属性值都能进入索引文本。 */
+    private static void writeXml() throws IOException {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <serviceLevel>
+                  <service name="order service">
+                    <recoveryTarget>FIFTEEN MINUTES</recoveryTarget>
+                    <owner>交易平台组</owner>
+                  </service>
+                </serviceLevel>
+                """;
+        Files.writeString(OUTPUT_DIRECTORY.resolve("quality-feed.xml"), xml, StandardCharsets.UTF_8);
     }
 }

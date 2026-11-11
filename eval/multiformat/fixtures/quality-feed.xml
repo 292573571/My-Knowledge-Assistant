@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<serviceLevel>
+  <service name="order service">
+    <recoveryTarget>FIFTEEN MINUTES</recoveryTarget>
+    <owner>交易平台组</owner>
+  </service>
+</serviceLevel>

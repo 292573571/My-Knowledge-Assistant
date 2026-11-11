@@ -1,0 +1,9 @@
+{
+  "service": "order service",
+  "recoveryTarget": "FIFTEEN MINUTES",
+  "owner": "交易平台组",
+  "detail": {
+    "tier": "critical",
+    "reviewCycle": "EVERY FOURTEEN DAYS"
+  }
+}
