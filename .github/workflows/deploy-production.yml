@@ -53,7 +53,17 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: yarn install --frozen-lockfile
+        run: |
+          set -o pipefail
+          if ! yarn install --frozen-lockfile 2>&1 | tee /tmp/yarn-install.log; then
+            {
+              echo "### yarn install 失败输出"
+              echo '```'
+              tail -120 /tmp/yarn-install.log
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
+          fi
 
       - name: Lint frontend
         working-directory: frontend
