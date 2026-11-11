@@ -73,6 +73,24 @@ remote_deploy() {
     rm -f "${SHIHAI_DEPLOY_ARCHIVE:-}"
   }
 
+  # 发版成功后按时间保留最近 N 个 release（默认 5，SHIHAI_KEEP_RELEASES 可调）。
+  # 与 cleanup <rev> 的语义不同：那个是「只留 rev 其它全删」，这里是「保留最近 N 个，且永不删当前版本」。
+  prune_old_releases() {
+    local keep_count=${SHIHAI_KEEP_RELEASES:-5}
+    [[ "$keep_count" =~ ^[0-9]+$ ]] || keep_count=5
+    local index=0
+    local dir
+    while IFS= read -r dir; do
+      [[ -n "$dir" ]] || continue
+      index=$((index + 1))
+      [[ "$index" -le "$keep_count" ]] && continue
+      [[ "$(basename "$dir")" == "$revision" ]] && continue
+      rm -rf -- "$dir"
+    done < <(find "$releases_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr | cut -d' ' -f2-)
+    echo "release 保留策略：最近 ${keep_count} 个，已清理更早版本"
+  }
+
   print_diagnostics() {
     echo "--- systemd status ---" >&2
     systemctl status shihai --no-pager >&2 || true
@@ -195,6 +213,7 @@ remote_deploy() {
       activated=false
       SHIHAI_DEPLOY_ACTIVATED=false
       cleanup_archive
+      prune_old_releases
       echo "服务器本地健康检查成功: ${revision}，等待公网健康检查后清理旧版本"
       exit 0
     fi
