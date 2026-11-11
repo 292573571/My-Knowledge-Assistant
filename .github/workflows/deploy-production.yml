@@ -31,7 +31,7 @@ jobs:
           cache: maven
 
       - name: Test and package backend
-        run: mvn --batch-mode --no-transfer-progress clean package
+        run: mvn --batch-mode --no-transfer-progress clean verify
 
       - name: Run deterministic four-layer smoke eval
         run: bash eval/run-deterministic-evals.sh
