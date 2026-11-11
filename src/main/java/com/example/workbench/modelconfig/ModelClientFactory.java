@@ -8,11 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 /** 按模型规格动态构建并缓存 ChatClient；不同 base_url/api_key 对应独立客户端。 */
 @Component
@@ -47,27 +44,19 @@ public class ModelClientFactory {
 
     private ChatClient build(ModelSpec spec) {
         String baseUrl = spec.baseUrl().replaceAll("/+$", "");
-        String completionsPath = "/v1/chat/completions";
-        String embeddingsPath = "/v1/embeddings";
-        if (baseUrl.endsWith("/v1")) {
-            completionsPath = "/chat/completions";
-            embeddingsPath = "/embeddings";
+        // Spring AI 2.0 移除 completionsPath 自定义，官方 SDK 在 baseUrl 后拼 /chat/completions；
+        // 历史配置 baseUrl 不带 /v1（如 https://api.siliconflow.cn）会打到 /chat/completions → 404。
+        if (!baseUrl.endsWith("/v1")) {
+            baseUrl = baseUrl + "/v1";
         }
         long readTimeoutMs = spec.requestTimeoutMs() != null && spec.requestTimeoutMs() > 0
                 ? Math.min(Math.max(spec.requestTimeoutMs(), 5_000L), 300_000L)
                 : defaultReadTimeoutMs;
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
-        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
-        RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
-        OpenAiApi openAiApi = OpenAiApi.builder()
+        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
+                .model(spec.model())
                 .baseUrl(baseUrl)
                 .apiKey(spec.apiKey())
-                .completionsPath(completionsPath)
-                .embeddingsPath(embeddingsPath)
-                .restClientBuilder(restClientBuilder)
-                .build();
-        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder().model(spec.model());
+                .timeout(Duration.ofMillis(readTimeoutMs));
         if (spec.temperature() != null) {
             optionsBuilder.temperature(spec.temperature());
         }
@@ -81,11 +70,10 @@ public class ModelClientFactory {
         // 教学 Agent 的用量才可计量（否则流式讲解只能记 0）。
         optionsBuilder.streamUsage(true);
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
-                .openAiApi(openAiApi)
-                .defaultOptions(optionsBuilder.build())
+                .options(optionsBuilder.build())
                 .build();
-        log.info("Model client built model={} baseUrl={} completionsPath={} readTimeoutMs={}",
-                spec.model(), baseUrl, completionsPath, readTimeoutMs);
+        log.info("Model client built model={} baseUrl={} readTimeoutMs={} connectTimeoutMs={}",
+                spec.model(), baseUrl, readTimeoutMs, connectTimeoutMs);
         return ChatClient.builder(chatModel).build();
     }
 }

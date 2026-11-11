@@ -1,6 +1,6 @@
 package com.example.workbench.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +9,7 @@ import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaApiProperti
 import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaConnectionDetails;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
-import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
@@ -40,19 +40,22 @@ public class ChromaHttpClientConfig {
     @Bean
     ChromaApi chromaApi(ChromaApiProperties properties,
                         ChromaConnectionDetails connectionDetails,
-                        ObjectMapper objectMapper,
+                        JsonMapper jsonMapper,
                         @Value("${app.chroma.client.connect-timeout-ms:2000}") long connectTimeoutMs,
                         @Value("${app.chroma.client.read-timeout-ms:20000}") long readTimeoutMs) {
-        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.defaults()
+        HttpClientSettings settings = HttpClientSettings.defaults()
                 .withConnectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .withReadTimeout(Duration.ofMillis(readTimeoutMs));
+        // 显式选 JDK 工厂而非 detect()：classpath 上有 reactor-netty 时 detect() 会选中
+        // Reactor 工厂，其首次调用有 1~2s 的事件循环初始化延迟，与「卡死必须在读超时
+        // 处断链」的精准语义冲突（Boot 4 实测 detect 首调 1.38s vs jdk 0.32s）。
         RestClient.Builder builder = RestClient.builder()
-                .requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings));
+                .requestFactory(ClientHttpRequestFactoryBuilder.jdk().build(settings));
 
         ChromaApi api = ChromaApi.builder()
                 .baseUrl(String.format("%s:%s", connectionDetails.getHost(), connectionDetails.getPort()))
                 .restClientBuilder(builder)
-                .objectMapper(objectMapper)
+                .jsonMapper(jsonMapper)
                 .build();
         if (StringUtils.hasText(connectionDetails.getKeyToken())) {
             api.withKeyToken(connectionDetails.getKeyToken());

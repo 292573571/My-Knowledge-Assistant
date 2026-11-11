@@ -28,7 +28,7 @@ class GlobalExceptionHandlerNotFoundTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         ResponseEntity<?> result = handler.handleNoResourceFoundException(
-                new NoResourceFoundException(HttpMethod.GET, "favicon.ico"), request, response);
+                new NoResourceFoundException(HttpMethod.GET, "favicon.ico", "favicon.ico"), request, response);
 
         assertEquals(HttpStatus.NOT_FOUND, result.getStatusCode());
         ApiErrorResponse body = (ApiErrorResponse) result.getBody();
@@ -43,7 +43,7 @@ class GlobalExceptionHandlerNotFoundTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         handler.handleNoResourceFoundException(
-                new NoResourceFoundException(HttpMethod.GET, "robots.txt"), request, response);
+                new NoResourceFoundException(HttpMethod.GET, "robots.txt", "robots.txt"), request, response);
 
         assertEquals(HttpStatus.NOT_FOUND.value(), response.getStatus());
         String body = response.getContentAsString();

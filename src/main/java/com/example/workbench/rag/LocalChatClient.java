@@ -523,12 +523,12 @@ public class LocalChatClient {
         }
     }
 
-    private OpenAiChatOptions chatOptions(String model, double resolvedTemperature, int resolvedMaxTokens) {
+    /** Spring AI 2.0 的 {@code .options()} 只接受 Builder，返回未构建的 Builder。 */
+    private OpenAiChatOptions.Builder chatOptions(String model, double resolvedTemperature, int resolvedMaxTokens) {
         return OpenAiChatOptions.builder()
                 .model(model)
                 .temperature(resolvedTemperature)
-                .maxTokens(resolvedMaxTokens)
-                .build();
+                .maxTokens(resolvedMaxTokens);
     }
 
     List<Message> toSpringAiMessages(List<ChatMessage> history) {

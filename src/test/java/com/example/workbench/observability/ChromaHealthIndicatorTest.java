@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chroma.vectorstore.ChromaApi;
 import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaVectorStoreProperties;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
-import org.springframework.boot.actuate.health.Status;
+import org.springframework.boot.health.contributor.Status;
 
 class ChromaHealthIndicatorTest {
 

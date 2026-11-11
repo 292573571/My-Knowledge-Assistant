@@ -5,8 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sun.net.httpserver.HttpServer;
+import tools.jackson.databind.json.JsonMapper;import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -59,6 +58,6 @@ class ChromaHttpClientConfigTest {
         when(details.getHost()).thenReturn("http://127.0.0.1");
         when(details.getPort()).thenReturn(port);
         return new ChromaHttpClientConfig()
-                .chromaApi(new ChromaApiProperties(), details, new ObjectMapper(), connectTimeoutMs, readTimeoutMs);
+                .chromaApi(new ChromaApiProperties(), details, JsonMapper.builder().build(), connectTimeoutMs, readTimeoutMs);
     }
 }

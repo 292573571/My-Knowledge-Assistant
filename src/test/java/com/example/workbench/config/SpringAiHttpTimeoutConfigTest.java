@@ -9,7 +9,7 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.web.client.RestClientCustomizer;
+import org.springframework.boot.restclient.RestClientCustomizer;
 import org.springframework.web.client.RestClient;
 
 class SpringAiHttpTimeoutConfigTest {

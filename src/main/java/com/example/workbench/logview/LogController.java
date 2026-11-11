@@ -76,7 +76,8 @@ public class LogController {
 
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "timestamp").and(Sort.by(Sort.Direction.DESC, "id")));
-        Specification<SystemLog> specification = Specification.where(null);
+        // Spring Data JPA 4（Boot 4）：Specification.where(null) 与新重载 where(PredicateSpecification) 歧义，改用 unrestricted()
+        Specification<SystemLog> specification = Specification.unrestricted();
         if (levels != null) specification = specification.and((root, query, builder) -> root.get("level").in(levels));
         if (kw != null) specification = specification.and((root, query, builder) ->
                 builder.like(builder.lower(root.get("message")), "%" + kw.toLowerCase() + "%"));

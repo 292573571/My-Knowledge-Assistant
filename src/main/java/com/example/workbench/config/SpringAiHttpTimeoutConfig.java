@@ -3,8 +3,8 @@ package com.example.workbench.config;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
-import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
-import org.springframework.boot.web.client.RestClientCustomizer;
+import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.boot.restclient.RestClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -29,7 +29,7 @@ public class SpringAiHttpTimeoutConfig {
             @Value("${app.ai.connect-timeout-ms:10000}") long connectTimeoutMs,
             @Value("${app.ai.default-chat-read-timeout-ms:120000}") long readTimeoutMs) {
         return builder -> builder.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(
-                ClientHttpRequestFactorySettings.defaults()
+                HttpClientSettings.defaults()
                         .withConnectTimeout(Duration.ofMillis(connectTimeoutMs))
                         .withReadTimeout(Duration.ofMillis(readTimeoutMs))));
     }

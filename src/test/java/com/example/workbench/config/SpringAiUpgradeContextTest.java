@@ -7,7 +7,6 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chroma.vectorstore.ChromaApi;
@@ -22,18 +21,14 @@ import org.springframework.ai.vectorstore.chroma.autoconfigure.ChromaVectorStore
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.http.HttpStatus;
+import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.http.HttpStatus;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResponseErrorHandler;
-import org.springframework.retry.support.RetryTemplate;
 
 /**
- * 升级 Spring AI 1.0.0 → 1.1.8 时配置层的回归门禁。
+ * 升级 Spring AI 1.0.0 → 1.1.8 → 2.0.2 的配置层回归门禁。
  *
  * <p>项目原本 0 个 {@code @SpringBootTest}，所有单测都是手工 new 或 mock 跑
  * 业务方法。这意味着 Spring AI 升级只要能编译、纯单测全绿，<b>线上启动能否
@@ -44,15 +39,17 @@ import org.springframework.retry.support.RetryTemplate;
  * Spring 容器跑通这条配置链：
  * {@link ChatClientAutoConfiguration} → {@link OpenAiChatAutoConfiguration} →
  * {@link SpringAiConfig#chatClient(ChatClient.Builder)} →
- * {@link SpringAiConfig#vectorStore} →
- * {@link ChromaCollectionInitializer}。</p>
+ * {@link SpringAiConfig#vectorStore}（含 2.0 的 {@code afterPropertiesSet}
+ * 集合初始化：getCollection 404 → 自动创建 tenant/database/collection）。</p>
  *
- * <p>升级到 1.1.8 后这个测试仍为绿 = Spring AI 配置层在新版本下能完成
- * bean 装配，不必等线上才能发现装配错误。同时也是「升级前先在本地能跑出
- * 上下文」的最低成本工具。</p>
+ * <p>2.0 起集合初始化由框架 {@code ChromaVectorStore.afterPropertiesSet} 完成
+ * （{@code getCollection} 对 404 返回 null → {@code initializeSchema=true} 时
+ * 自动建 tenant/database/collection），项目自写的 {@code ChromaCollectionInitializer}
+ * 已删除。升级到 2.0.2 后这个测试仍为绿 = Spring AI 配置层在新版本下能完成
+ * bean 装配，不必等线上才能发现装配错误。</p>
  */
 @SpringBootTest(
-    classes = SpringAiConfig.class,
+    classes = {SpringAiConfig.class, SpringAiUpgradeContextTest.StubConfig.class},
     webEnvironment = SpringBootTest.WebEnvironment.NONE
 )
 @ImportAutoConfiguration({
@@ -62,20 +59,19 @@ import org.springframework.retry.support.RetryTemplate;
     // ChromaVectorStoreAutoConfiguration 提供 ChromaVectorStoreProperties bean
     // （项目 SpringAiConfig.vectorStore 注入的第 3 个参数）。它自身也会试图
     // 创建 ChromaVectorStore，但被项目手工的 @Bean vectorStore 覆盖；ChromaApi
-    // 已被 @MockitoBean 替换，所以探活不会触发真实 HTTP 调用。
+    // 已由 StubConfig 提供预 stub mock，探活不会触发真实 HTTP 调用。
     ChromaVectorStoreAutoConfiguration.class,
     // Spring AI 1.1.8 起 ChatModel 构造时注入 ToolCallingManager；ToolCalling
     // 自动装配项目实际启用（WebSearchService 上有 @Tool），不能少。
     ToolCallingAutoConfiguration.class
 })
-@Import(ChromaCollectionInitializer.class)
 @TestPropertySource(properties = {
     "spring.ai.openai.base-url=https://api.siliconflow.cn",
     "spring.ai.openai.api-key=test-key-dummy",
     "spring.ai.openai.chat.options.model=test-chat-model",
     "spring.ai.openai.embedding.base-url=https://api.siliconflow.cn",
     "spring.ai.openai.embedding.api-key=test-key-dummy",
-    "spring.ai.openai.embedding.options.model=test-embed-model",
+    "spring.ai.openai.embedding.model=test-embed-model",
     "spring.ai.vectorstore.chroma.client.host=http://127.0.0.1:18000",
     "spring.ai.vectorstore.chroma.client.port=18000",
     "spring.ai.vectorstore.chroma.tenant-name=default_tenant",
@@ -85,32 +81,47 @@ import org.springframework.retry.support.RetryTemplate;
 })
 class SpringAiUpgradeContextTest {
 
-    @MockitoBean
-    private ChromaApi chromaApi;
-
-    @MockitoBean
-    private EmbeddingModel embeddingModel;
-
     /**
-     * Spring AI 1.1.8 起 {@code OpenAiApi.Builder} 新增
-     * {@code responseErrorHandler(ResponseErrorHandler)}，{@code OpenAiChatAutoConfiguration}
-     * 自动注入它构造 {@code openAiApi}。项目自身没有声明 {@code ResponseErrorHandler} bean，
-     * 升级到 1.1.8 后线上启动会因 {@code NoSuchBeanDefinitionException} 失败。
-     * 本测试用 mock 占位，让上下文能加载并暴露这条升级兼容性陷阱。
+     * 2.0 的 {@code ChromaVectorStore.afterPropertiesSet} 在 <b>context 加载期</b>调用
+     * {@code chromaApi.getCollection/createCollection} 完成集合初始化——早于任何
+     * {@code @BeforeEach}，因此 {@code @MockitoBean} 的 stub 来不及生效（mock 默认
+     * 返回 null → {@code Assert.state(collection != null)} 失败）。必须用静态
+     * {@code @TestConfiguration} 在 bean 创建前注册已 stub 的 mock。
      */
-    @MockitoBean
-    private ResponseErrorHandler responseErrorHandler;
+    @org.springframework.boot.test.context.TestConfiguration
+    static class StubConfig {
 
-    /**
-     * Spring AI 1.1.8 起 {@code OpenAiChatAutoConfiguration} 引入 {@code RetryTemplate}
-     * 用于 OpenAI API 失败重试（属性 {@code spring.ai.retry.max-attempts}）。
-     * 项目本身没声明该 bean 也没显式依赖 spring-retry，1.1.8 升级时会因
-     * {@code NoSuchBeanDefinitionException} 启动失败。本测试用 mock 占位，让上下文
-     * 在两个版本下都能加载，并暴露这条兼容性陷阱（项目升级时需要补 spring-retry
-     * 依赖 + 显式声明 {@code RetryTemplate} bean）。
-     */
-    @MockitoBean
-    private RetryTemplate retryTemplate;
+        @Bean
+        ChromaApi chromaApi() {
+            ChromaApi api = org.mockito.Mockito.mock(ChromaApi.class);
+            // 按框架真实语义 stub：getCollection 对 404 返回 null（不 stub 即默认 null），
+            // initializeSchema=true 时依次建 tenant/database/collection。
+            lenient().when(api.getTenant(anyString())).thenReturn(null);
+            lenient().when(api.getDatabase(anyString(), anyString())).thenReturn(null);
+            lenient().doNothing().when(api).createTenant(anyString());
+            lenient().doNothing().when(api).createDatabase(anyString(), anyString());
+            lenient().when(api.createCollection(anyString(), anyString(), any()))
+                    .thenReturn(new ChromaApi.Collection("test-collection-id", "knowledge_assistant", java.util.Map.of()));
+            return api;
+        }
+
+        @Bean
+        EmbeddingModel embeddingModel() {
+            return org.mockito.Mockito.mock(EmbeddingModel.class);
+        }
+
+        /**
+         * Spring AI 1.1.8 起 {@code OpenAiApi.Builder} 新增
+         * {@code responseErrorHandler(ResponseErrorHandler)}，{@code OpenAiChatAutoConfiguration}
+         * 自动注入它构造 {@code openAiApi}。项目自身没有声明 {@code ResponseErrorHandler} bean，
+         * 升级后线上启动会因 {@code NoSuchBeanDefinitionException} 失败。
+         * 本测试用 mock 占位，让上下文能加载并暴露这条升级兼容性陷阱。
+         */
+        @Bean
+        ResponseErrorHandler responseErrorHandler() {
+            return org.mockito.Mockito.mock(ResponseErrorHandler.class);
+        }
+    }
 
     @Autowired
     private ChatClient chatClient;
@@ -120,29 +131,6 @@ class SpringAiUpgradeContextTest {
 
     @Autowired
     private ChromaVectorStoreProperties chromaProperties;
-
-    @BeforeEach
-    void stubChromaApiForCollectionInitializer() {
-        // ChromaCollectionInitializer 是 BeanPostProcessor，会在 vectorStore
-        // 初始化前调 getTenant / getDatabase / getCollection 探活。Mock 行为
-        // 覆盖 null（视为不存在）与 404（视为不存在但不重抛）两条路径：
-        // - getTenant == null → 自动 createTenant
-        // - getDatabase == null → 自动 createDatabase
-        // - getCollection 抛 404 → 自动 createCollection + awaitCollection
-        // 升级 1.1.8 后 ChromaApi 方法签名应保持兼容；这里同时验证方法签名
-        // 未被破坏（编译期 + 运行期）。
-        lenient().when(chromaApi.getTenant(anyString())).thenReturn(null);
-        lenient().when(chromaApi.getDatabase(anyString(), anyString())).thenReturn(null);
-        // createTenant / createDatabase / deleteCollection 是 void，doNothing 即可。
-        // ChromaCollectionInitializer 不读这些返回。
-        lenient().doNothing().when(chromaApi).createTenant(anyString());
-        lenient().doNothing().when(chromaApi).createDatabase(anyString(), anyString());
-        lenient().when(chromaApi.createCollection(anyString(), anyString(), any())).thenReturn(null);
-        HttpClientErrorException notFound = HttpClientErrorException.create(
-                HttpStatus.NOT_FOUND, "Not Found", org.springframework.http.HttpHeaders.EMPTY, new byte[0], null);
-        lenient().when(chromaApi.getCollection(anyString(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("not found", notFound));
-    }
 
     @Test
     void springAiUpgradeContextWiresChatClientAndVectorStore() {
