@@ -77,6 +77,9 @@ public class ModelClientFactory {
         if (spec.maxOutputTokens() != null) {
             optionsBuilder.maxTokens(spec.maxOutputTokens());
         }
+        // 流式调用默认不返回 usage；打开后 provider 会在最后一个 chunk 附带 token 统计，
+        // 教学 Agent 的用量才可计量（否则流式讲解只能记 0）。
+        optionsBuilder.streamUsage(true);
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(optionsBuilder.build())

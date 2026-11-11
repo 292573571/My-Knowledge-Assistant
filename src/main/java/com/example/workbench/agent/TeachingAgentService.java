@@ -7,6 +7,8 @@ import com.example.workbench.workspace.WorkspaceAccessContext;
 import com.example.workbench.modelconfig.ModelClientFactory;
 import com.example.workbench.modelconfig.ModelConfigContext;
 import com.example.workbench.modelconfig.ModelConfigService;
+import com.example.workbench.modelconfig.ModelSpec;
+import com.example.workbench.observability.ModelUsageRecorder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +25,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -31,6 +34,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -86,6 +91,7 @@ public class TeachingAgentService {
     private final ModelConfigService modelConfigService;
     private final ModelClientFactory modelClientFactory;
     private final TeachingQualityGate qualityGate = new TeachingQualityGate();
+    private ModelUsageRecorder usageRecorder;
     private Executor aiExecutor = java.util.concurrent.ForkJoinPool.commonPool();
 
     public TeachingAgentService(ChatClient chatClient, TeachingReadOnlyService readOnlyService,
@@ -112,11 +118,71 @@ public class TeachingAgentService {
         this.aiExecutor = aiExecutor;
     }
 
-    private ChatClient resolveClient() {
+    /** 用量采集器允许缺席（单测切片），缺失时静默跳过，不影响讲解主链路。 */
+    @Autowired(required = false)
+    public void setUsageRecorder(ModelUsageRecorder usageRecorder) {
+        this.usageRecorder = usageRecorder;
+    }
+
+    /**
+     * 解析本次请求要用的客户端与模型规格。
+     *
+     * <p>以前只返回 ChatClient，模型名在发请求后即丢失，导致教学链路的用量无法归因；
+     * 这里把规格一起带出来，调用结束时用同一个规格记录 model 与 token。
+     */
+    private ResolvedClient resolveClientWithSpec() {
         if (modelConfigContext == null || modelConfigService == null || modelClientFactory == null) {
-            return chatClient;
+            return new ResolvedClient(null, chatClient);
         }
-        return modelClientFactory.clientFor(modelConfigService.resolve(modelConfigContext.get()));
+        ModelSpec spec = modelConfigService.resolve(modelConfigContext.get());
+        return new ResolvedClient(spec, modelClientFactory.clientFor(spec));
+    }
+
+    private ChatClient resolveClient() {
+        return resolveClientWithSpec().client();
+    }
+
+    private record ResolvedClient(ModelSpec spec, ChatClient client) {
+        String model() {
+            return spec == null ? null : spec.model();
+        }
+    }
+
+    /**
+     * 记录一次模型调用的用量。
+     *
+     * <p>注意口径：带工具的请求会由框架内部发起多轮模型调用，而 ChatResponse 只暴露最后一轮，
+     * 因此这里的 token 是「最后一次 completion」而非整条 Agent 链路总和——比记 0 可观测，
+     * 但不能直接当作账单口径使用。
+     */
+    private void recordUsage(AppUser user, String conversationId, String model, String mode,
+                             ChatResponse response, long startedAtNanos, boolean success) {
+        if (usageRecorder == null) {
+            return;
+        }
+        Usage usage = response == null || response.getMetadata() == null
+                ? null : response.getMetadata().getUsage();
+        Integer promptTokens = usage == null ? null : usage.getPromptTokens();
+        Integer completionTokens = usage == null ? null : usage.getCompletionTokens();
+        Integer totalTokens = usage == null ? null : usage.getTotalTokens();
+        long durationMs = (System.nanoTime() - startedAtNanos) / 1_000_000;
+        usageRecorder.record(user == null ? null : user.getId(), conversationId, model, mode,
+                promptTokens, completionTokens, totalTokens, durationMs, success);
+    }
+
+    private static String responseText(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return null;
+        }
+        return response.getResult().getOutput().getText();
+    }
+
+    private static boolean hasUsage(ChatResponse response) {
+        Usage usage = response == null || response.getMetadata() == null
+                ? null : response.getMetadata().getUsage();
+        return usage != null && (usage.getTotalTokens() != null && usage.getTotalTokens() > 0
+                || usage.getPromptTokens() != null && usage.getPromptTokens() > 0
+                || usage.getCompletionTokens() != null && usage.getCompletionTokens() > 0);
     }
 
     /**
@@ -184,21 +250,25 @@ public class TeachingAgentService {
                  """.formatted(context.topic(), context.userLevel(), request.message().strip());
         String rawAnswer;
         String failureMessage = null;
+        ResolvedClient resolved = resolveClientWithSpec();
         try {
             requireRunning(cancelled);
-            rawAnswer = resolveClient().prompt()
+            ChatResponse response = resolved.client().prompt()
                     .system(SYSTEM_PROMPT)
                     .messages(teachingHistory(user, access.workspaceId(), context.sessionId(), request.message()))
                     .user(userPrompt)
                     .tools(tools)
                     .call()
-                    .content();
+                    .chatResponse();
+            rawAnswer = responseText(response);
+            recordUsage(user, context.sessionId(), resolved.model(), "teaching-sync", response, startedAt, true);
             requireRunning(cancelled);
         } catch (CancellationException | ResponseStatusException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             rawAnswer = "本次讲解未能完成。请检查知识库或模型服务后重试。";
             failureMessage = rawAnswer;
+            recordUsage(user, context.sessionId(), resolved.model(), "teaching-sync", null, startedAt, false);
             log.error("Teaching Agent 调用失败 sessionId={} topic={} errorType={} message={}",
                     context.sessionId(), context.topic(), exception.getClass().getSimpleName(), exception.getMessage(), exception);
         }
@@ -251,19 +321,25 @@ public class TeachingAgentService {
 
         StringBuilder explanation = new StringBuilder();
         AtomicBoolean receivedToken = new AtomicBoolean(false);
+        AtomicReference<ChatResponse> lastUsageResponse = new AtomicReference<>();
         String failureMessage = null;
+        ResolvedClient resolved = resolveClientWithSpec();
         try {
             requireRunning(cancelled);
-            resolveClient().prompt()
+            resolved.client().prompt()
                     .system(EXPLAIN_SYSTEM_PROMPT)
                     .messages(teachingHistory(user, access.workspaceId(), context.sessionId(), request.message()))
                     .user(userPrompt)
                     .tools(tools)
                     .stream()
-                    .content()
+                    .chatResponse()
                     .timeout(Duration.ofSeconds(90))
-                    .doOnNext(token -> {
+                    .doOnNext(response -> {
                         requireRunning(cancelled);
+                        if (hasUsage(response)) {
+                            lastUsageResponse.set(response);
+                        }
+                        String token = responseText(response);
                         if (token != null && !token.isBlank()) {
                             receivedToken.set(true);
                             explanation.append(token);
@@ -272,10 +348,14 @@ public class TeachingAgentService {
                     })
                     .blockLast();
             requireRunning(cancelled);
+            recordUsage(user, context.sessionId(), resolved.model(), "teaching-stream",
+                    lastUsageResponse.get(), startedAt, true);
         } catch (CancellationException | ResponseStatusException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             failureMessage = "本次讲解未能完成。请检查知识库或模型服务后重试。";
+            recordUsage(user, context.sessionId(), resolved.model(), "teaching-stream",
+                    lastUsageResponse.get(), startedAt, false);
             log.error("Teaching Agent 流式调用失败 sessionId={} topic={} errorType={} message={}",
                     context.sessionId(), context.topic(), exception.getClass().getSimpleName(), exception.getMessage(), exception);
         }
@@ -310,19 +390,28 @@ public class TeachingAgentService {
 
     private CheckDraft generateCheckDraft(TeachingAgentContext context, String question, String explanation,
                                           BooleanSupplier cancelled) {
+        ResolvedClient resolved = null;
+        long callStartedAt = System.nanoTime();
+        boolean modelSucceeded = false;
         try {
             requireRunning(cancelled);
             String prompt = """
                     用户问题：%s
                     讲解摘要：%s
                     """.formatted(question, truncate(explanation, 900));
-            ChatClient client = resolveClient();
-            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> client.prompt()
+            resolved = resolveClientWithSpec();
+            callStartedAt = System.nanoTime();
+            ResolvedClient client = resolved;
+            CompletableFuture<ChatResponse> future = CompletableFuture.supplyAsync(() -> client.client().prompt()
                     .system(CHECK_SYSTEM_PROMPT)
                     .user(prompt)
                     .call()
-                    .content(), aiExecutor);
-            String raw = future.get(15, TimeUnit.SECONDS);
+                    .chatResponse(), aiExecutor);
+            ChatResponse response = future.get(15, TimeUnit.SECONDS);
+            modelSucceeded = true;
+            recordUsage(context.user(), context.sessionId(), resolved.model(), "teaching-check",
+                    response, callStartedAt, true);
+            String raw = responseText(response);
             requireRunning(cancelled);
             JsonNode root = objectMapper.readTree(stripCodeFence(raw));
             return new CheckDraft(text(root, "topic"), text(root, "checkQuestion"));
@@ -330,6 +419,10 @@ public class TeachingAgentService {
             throw exception;
         } catch (TimeoutException | InterruptedException | ExecutionException | JsonProcessingException | RuntimeException exception) {
             if (exception instanceof InterruptedException interrupted) Thread.currentThread().interrupt();
+            if (!modelSucceeded && resolved != null) {
+                recordUsage(context.user(), context.sessionId(), resolved.model(), "teaching-check",
+                        null, callStartedAt, false);
+            }
             log.warn("Teaching Agent 检查题生成失败 sessionId={} errorType={}",
                     context.sessionId(), exception.getClass().getSimpleName());
             return new CheckDraft(null, null);
