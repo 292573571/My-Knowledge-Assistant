@@ -51,11 +51,9 @@ jobs:
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
 
-      # TODO: 本地补跑一次 yarn install 生成 vue-eslint-parser 的 lock 条目后，
-      # 改回 --frozen-lockfile。当前 lock 与 package.json 尚未同步。
       - name: Install frontend dependencies
         working-directory: frontend
-        run: yarn install
+        run: yarn install --frozen-lockfile
 
       - name: Lint frontend
         working-directory: frontend
