@@ -152,7 +152,7 @@ export function streamLearningMessage(sessionId, payload, onEvent, options = {})
     if (!sawContent) return // 纯注释或空块, 不派发
     if (id != null && /^\d+$/.test(id)) lastEventId = Number(id)
     const raw = dataLines.join('\n')
-    let parsed = {}
+    let parsed
     try {
       parsed = raw ? JSON.parse(raw) : {}
     } catch {
