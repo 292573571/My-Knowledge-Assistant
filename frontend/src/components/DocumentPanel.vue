@@ -321,7 +321,7 @@ async function runIngest(action, successText) {
   notice.value = ''
   lastFailedAction.value = null
   try {
-    const result = await action()
+    await action()
     await loadDocuments()
     showNotice(successText)
   } catch (exception) {

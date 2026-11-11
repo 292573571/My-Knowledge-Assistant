@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import AgentChatPanel from './AgentChatPanel.vue'
 
-const props = defineProps({
+defineProps({
   title: { type: String, required: true },
   suggestions: { type: Array, default: () => [] },
   welcome: { type: String, default: '' },

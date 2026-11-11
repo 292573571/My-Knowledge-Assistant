@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref } from 'vue'
 
 const toasts = ref([])
 let id = 0

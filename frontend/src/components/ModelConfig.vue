@@ -6,7 +6,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import ToastContainer from './ToastContainer.vue'
 
 const emit = defineEmits(['close', 'saved'])
-const props = defineProps({ currentUser: { type: Object, required: true } })
+defineProps({ currentUser: { type: Object, required: true } })
 
 const toast = ref(null)
 const saving = ref(false)
@@ -36,7 +36,7 @@ async function loadUsage() {
     const map = {}
     for (const item of summary?.models ?? []) map[item.model] = item
     usageByModel.value = map
-  } catch (error) {
+  } catch {
     // 用量是辅助信息，加载失败不打扰模型管理主流程
     usageByModel.value = {}
   }

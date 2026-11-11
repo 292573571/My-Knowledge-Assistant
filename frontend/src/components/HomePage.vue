@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import OnboardingTour from './OnboardingTour.vue'
 
-const props = defineProps({
+defineProps({
   user: { type: Object, required: true }
 })
 const emit = defineEmits(['navigate'])

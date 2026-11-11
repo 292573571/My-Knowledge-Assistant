@@ -52,7 +52,6 @@ function questionFor(message) {
   }
   return ''
 }
-const activeSession = computed(() => sessions.value.find(item => item.sessionId === activeSessionId.value))
 const isLearningMode = computed(() => ['GUIDED', 'REVIEW', 'PRACTICE'].includes(mode.value))
 const hoveredSource = ref(null)
 const sourceTooltipPosition = ref({ top: 0, left: 0 })
@@ -132,7 +131,7 @@ async function loadModelOptions() {
     const config = await fetchMyConfig()
     modelOptions.value = (config.poolModels || []).filter(model => model.enabled && model.modelType === 'CHAT')
     currentModel.value = config.resolved || null
-  } catch (exception) {
+  } catch {
     modelOptions.value = []
     currentModel.value = null
   }

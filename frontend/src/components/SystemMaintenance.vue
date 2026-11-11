@@ -146,7 +146,7 @@ function logContextTitle(entry) {
 
 async function clearAllLogs() {
   try {
-    const result = await clearLogs()
+    await clearLogs()
     logEntries.value = []
     logTotal.value = 0
     logTotalPages.value = 0
@@ -236,10 +236,7 @@ const workspaceName = computed(() => {
   return props.workspace?.name || '当前空间'
 })
 const workspaceTypeLabel = computed(() => ({ PERSONAL: '个人', TEAM: '团队', PUBLIC: '公共' })[props.workspace?.type] || '空间')
-const latestRebuildTask = computed(() => documentTasks.value.find((task) => task.type === 'REBUILD') || null)
 const latestMaintenanceTask = computed(() => documentTasks.value.find((task) => ['REBUILD', 'SYNC'].includes(task.type)) || null)
-const rebuildRunning = computed(() => latestRebuildTask.value
-  && ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(latestRebuildTask.value.status))
 const maintenanceTask = computed(() => documentTasks.value.find((task) => task.taskId === trackedTaskId.value) || null)
 const maintenanceTaskRunning = computed(() => maintenanceTask.value
   && ['QUEUED', 'RUNNING', 'RETRY_WAIT'].includes(maintenanceTask.value.status))
@@ -385,7 +382,7 @@ async function loadPoolUsage() {
     const map = {}
     for (const item of stats) map[item.model] = item
     poolUsageByModel.value = map
-  } catch (e) {
+  } catch {
     // 用量是辅助信息，加载失败不打扰模型池主流程
     poolUsageByModel.value = {}
   }
