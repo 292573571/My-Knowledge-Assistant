@@ -1,6 +1,20 @@
 # 普通问答数据流
 
-本文描述前端通过普通 `POST /api/workbench/chat` 发起一次问答时，消息、知识库检索、聊天历史和学习记录的完整流转。
+> **现状更正（2026-11-11）**
+>
+> 本文描述的是 **legacy 路径** `/api/workbench/chat*`，由 `WorkbenchStreamController`
+> 与 `WorkbenchChatService` 承载。该路径**前端已不再调用**（`frontend/src` 内对
+> `workbench` 的接口引用为 0），仅作为旧客户端兼容入口保留，不会再演进。
+>
+> 当前前端实际使用的问答入口是：
+> - 学习助手（含流式）：`POST /api/learning-assistant/sessions/{id}/messages/stream`
+> - 三个 Agent 面板：`POST /api/agent/{teaching|support|system}/chat`
+>
+> 阅读时请把 `WorkbenchStreamController` / `WorkbenchChatService` 视为历史实现，
+> 新功能不要往这条链路上加。下文关于对话落库、检索、学习记录投影的流程仍然成立，
+> 只是入口不同。
+
+本文描述前端通过 legacy 入口 `POST /api/workbench/chat` 发起一次问答时，消息、知识库检索、聊天历史和学习记录的完整流转。
 
 ```mermaid
 sequenceDiagram

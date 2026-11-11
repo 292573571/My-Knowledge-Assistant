@@ -287,6 +287,8 @@ POST /api/learning-assistant/sessions/{sessionId}/stop
 
 旧入口仍保持兼容：`/api/workbench/chat*` 和 `/api/agent/teaching/*` 不在本次改造中删除。
 
+> **注意**：`/api/workbench/chat*` 已无前端调用方（`frontend/src` 内引用为 0），仅作为旧客户端兼容入口保留，不再演进。当前前端实际走 `/api/learning-assistant/sessions/{id}/messages/stream` 与 `/api/agent/*`。见 `docs/architecture/normal-chat-data-flow.md` 顶部的现状更正。
+
 本轮审计还将文档上传幂等约束收紧为 `(actor_user_id, workspace_id, client_request_id)`，避免不同用户或知识空间因为复用请求 ID 互相冲突。对应数据库迁移为 V10；已有部署升级前应先备份数据库并检查旧的单列唯一约束。
 
 ## 流式回答韧性(断点续传 + 模型熔断)
@@ -472,7 +474,7 @@ curl -b cookies.txt -X POST http://localhost:8080/api/rag/chat \
   -d '{"conversationId":"demo","workspaceId":"personal-1","message":"总结当前知识库的主要内容"}'
 ```
 
-工作台流式问答：
+工作台流式问答（legacy，前端已不调用，仅旧客户端兼容）：
 
 ```bash
 curl -N -b cookies.txt -X POST http://localhost:8080/api/workbench/chat/stream \
@@ -603,7 +605,7 @@ POST   /api/learning-records/{date}/promote?workspaceId=<workspaceId>
 | 文档任务 | `/api/document-tasks/*` | 查询、批次、重试、源文件 |
 | 会话 | `/api/conversations/*` | 会话列表、消息、停止、删除 |
 | 模型配置 | `/api/model-config/*` | 全局模型池管理（管理员）、用户自管 CHAT 模型池、用户模型模式配置 |
-| 问答 | `/api/rag/chat`、`/api/workbench/chat*` | 普通和 SSE 流式问答 |
+| 问答 | `/api/rag/chat`、`/api/workbench/chat*`（legacy，无前端调用） | 普通和 SSE 流式问答 |
 | MCP | `/mcp`、`/api/mcp/keys` | Streamable HTTP 只读知识库工具和 API Key 签发、列表、吊销 |
 | 检索诊断 | `/api/rag/debug` | 输入问题查看命中分块、检索得分与可见性 |
 | 评测 | `/api/eval/*` | 题库、运行、结果和导入文件 |

@@ -2,6 +2,20 @@
 
 Vue + Vite 实现的统一学习工作台，支持普通 RAG 问答、主题教学、CHECK/PRACTICE、SSE 断点续传、回答路由、来源引用、Markdown 渲染和服务端会话历史。
 
+## 本地校验
+
+```bash
+yarn lint        # ESLint（flat config，只开 essential，先拦真错误）
+yarn test        # Vitest（纯函数 + 组件契约，25 例）
+yarn build
+```
+
+CI 会依次跑 `lint → test → build`，任一失败即中断。
+
+> 说明：`vitest.config.mjs` 里固定了 `pool: 'vmThreads'`。本机沙箱环境下
+> forks/threads 池的 worker 起不来（tinypool 握手超时），vmThreads 可直接运行。
+> 若在普通环境里觉得慢，可以临时改回默认池。
+
 ## 截图
 
 当前仓库未提交截图文件。建议后续将页面截图放到：
@@ -153,6 +167,10 @@ POST /api/rag/chat
 ```
 
 ### SSE 流式聊天
+
+> **注意**：`/api/workbench/chat*` 是 legacy 入口，本前端仓库**已不再调用**；
+> 实际使用 `POST /api/learning-assistant/sessions/{id}/messages/stream`。
+> 下面保留该接口说明仅供对接旧客户端时参考。
 
 流式接口调用：
 
