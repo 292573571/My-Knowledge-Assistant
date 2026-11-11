@@ -59,6 +59,20 @@ public interface ModelUsageEventRepository extends JpaRepository<ModelUsageEvent
             """)
     UsageTotals totals(@Param("userId") Long userId, @Param("since") Instant since);
 
+    /**
+     * 全站口径（不限用户）的调用统计，供运维巡检使用。
+     */
+    @Query("""
+            select count(m) as calls,
+                   coalesce(sum(case when m.success = true then 1 else 0 end), 0) as successCalls,
+                   coalesce(sum(m.promptTokens), 0) as promptTokens,
+                   coalesce(sum(m.completionTokens), 0) as completionTokens,
+                   coalesce(sum(m.durationMs), 0) as totalDurationMs
+            from ModelUsageEvent m
+            where m.createdAt >= :since
+            """)
+    UsageTotals totalsAll(@Param("since") Instant since);
+
     @Query(value = """
             select (created_at at time zone 'Asia/Shanghai')::date as day,
                    count(*) as calls,
