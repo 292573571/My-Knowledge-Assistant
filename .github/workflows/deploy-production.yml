@@ -62,6 +62,9 @@ jobs:
               tail -120 /tmp/yarn-install.log
               echo '```'
             } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            tail -40 /tmp/yarn-install.log | while IFS= read -r line; do
+              echo "::error::${line:0:250}"
+            done
             exit 1
           fi
 
