@@ -311,6 +311,28 @@ setenv_keys() {
   echo "共更新 $keys 个变量 → $env_file"
 }
 
+# 诊断日志：tail 应用日志与 systemd 日志（deploy 用户无权直读，走本子命令）。
+# 用法: deploy-shihai logs [应用日志行数，默认 100] [--systemd]
+logs_tail() {
+  local app_log=/opt/shihai/logs/my-knowledge-assistant.log
+  local lines=100
+  local want_systemd=false
+  local argument
+  for argument in "$@"; do
+    case "$argument" in
+      --systemd) want_systemd=true ;;
+      --help|-h) echo "用法: deploy-shihai logs [行数] [--systemd]"; return 0 ;;
+      ''|*[!0-9]*) echo "行数必须是数字: $argument" >&2; exit 2 ;;
+      *) lines=$argument ;;
+    esac
+  done
+  if [[ -f "$app_log" && "$want_systemd" == false ]]; then
+    tail -n "$lines" "$app_log"
+  else
+    journalctl -u shihai -n "$lines" --no-pager
+  fi
+}
+
 # 重启服务并等待本地健康检查通过。
 restart_service() {
   local attempt
@@ -846,6 +868,9 @@ elif [[ "${1:-}" == "setenv" ]]; then
 elif [[ "${1:-}" == "restart" ]]; then
   shift
   restart_service "$@"
+elif [[ "${1:-}" == "logs" ]]; then
+  shift
+  logs_tail "$@"
 else
   release_local "$@"
 fi
