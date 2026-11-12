@@ -124,10 +124,15 @@ describe('HomePage 工作台', () => {
     expect(wrapper.find('.home-guide-body').attributes('style') || '').not.toContain('display: none')
   })
 
-  it('老用户默认收起新手指南', async () => {
+  it('新手指南默认展开，点击标题可收起', async () => {
     const wrapper = mountHome()
     await flushPromises()
 
+    const body = wrapper.find('.home-guide-body')
+    // v-show 在未挂载到 document 的元素上 isVisible() 恒为 true，直接断言内联样式
+    expect(body.attributes('style') || '').not.toContain('display: none')
+
+    await wrapper.find('.home-guide-toggle').trigger('click')
     expect(wrapper.find('.home-guide-body').attributes('style')).toContain('display: none')
   })
 

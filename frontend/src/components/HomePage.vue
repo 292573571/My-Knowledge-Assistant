@@ -105,8 +105,6 @@ async function loadDashboard() {
 
   // 四项核心数据全挂才算失败，避免 embedding/模型单点异常拖垮整屏
   dashboardFailed.value = [statusResult, usageResult, documentResult].every(result => result.status === 'rejected')
-  // 什么都没用过 = 新用户：默认展开指南；老用户默认收起
-  if (docCount.value === 0 && !askedEver.value) guideOpen.value = true
   dashboardLoading.value = false
 }
 
@@ -114,8 +112,8 @@ function goTask(task) {
   emit('navigate', task.section, task.tab)
 }
 
-// ---- 新手指南（老用户默认收起） ----
-const guideOpen = ref(false)
+// ---- 新手指南（默认展开，可手动收起） ----
+const guideOpen = ref(true)
 
 const concepts = [
   { badge: '间', title: '知识空间', body: '个人空间仅你可见；团队空间成员共享；公共空间所有用户可读。切换空间后，学习与检索都基于该空间内的文档。' },
@@ -140,7 +138,7 @@ function toggleFaq(index) {
 // ---- 交互式新手引导 Tour ----
 const showTour = ref(false)
 function startTour() {
-  // 指南默认收起时先展开，否则 Tour 找不到 system-intro / concepts / faq 的锚点
+  // 用户可能手动收起了指南，先展开，否则 Tour 找不到 system-intro / concepts / faq 的锚点
   guideOpen.value = true
   nextTick(() => { showTour.value = true })
 }
@@ -258,7 +256,7 @@ watch(() => props.workspaceId, () => loadDashboard())
       </div>
     </section>
 
-    <!-- 新手指南：老用户默认收起 -->
+    <!-- 新手指南：默认展开，可手动收起 -->
     <section class="home-guide">
       <button type="button" class="home-guide-toggle" :aria-expanded="guideOpen" @click="guideOpen = !guideOpen">
         <span class="home-guide-title">新手指南<small>系统简介 · 四步上手 · 核心概念 · 常见问题</small></span>
@@ -505,11 +503,11 @@ button.home-metric:hover {
   font-weight: 650;
 }
 
-/* ---- 新手指南折叠 ---- */
+/* ---- 新手指南（默认展开，可收起） ---- */
 .home-guide {
   margin-top: 32px;
   border-top: 1px solid #e7eae3;
-  padding-top: 18px;
+  padding-top: 26px;
 }
 .home-guide-toggle {
   display: flex;
@@ -518,7 +516,7 @@ button.home-metric:hover {
   justify-content: space-between;
   gap: 16px;
   border: 0;
-  padding: 8px 2px;
+  padding: 0 2px 4px;
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -527,15 +525,18 @@ button.home-metric:hover {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 6px 14px;
   color: var(--site-ink, #17221b);
-  font-size: 15px;
+  font-size: 22px;
   font-weight: 700;
+  letter-spacing: -.03em;
+  transition: color .15s ease;
 }
 .home-guide-title small {
   color: var(--site-muted, #718074);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
+  letter-spacing: 0;
 }
 .home-guide-caret {
   flex: 0 0 auto;
