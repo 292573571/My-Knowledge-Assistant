@@ -333,6 +333,24 @@ logs_tail() {
   fi
 }
 
+# 只读 DB 诊断：在 PG 容器内执行 SQL（默认 search_path=my_knowledge_assistant，
+# default_transaction_read_only=on 强制只读，任何写操作都会被拒绝）。
+db_query() {
+  local pg_container=my-pgvector
+  if [[ $# -eq 0 ]]; then
+    echo "用法: deploy-shihai db <SQL>" >&2
+    echo "示例: deploy-shihai db 'SELECT id, role, length(content) FROM chat_messages LIMIT 5'" >&2
+    exit 2
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -qx "$pg_container"; then
+    echo "容器未运行: $pg_container" >&2
+    exit 1
+  fi
+  exec docker exec \
+    -e PGOPTIONS='-c default_transaction_read_only=on -c search_path=my_knowledge_assistant' \
+    "$pg_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "$1"
+}
+
 # 重启服务并等待本地健康检查通过。
 restart_service() {
   local attempt
@@ -871,6 +889,9 @@ elif [[ "${1:-}" == "restart" ]]; then
 elif [[ "${1:-}" == "logs" ]]; then
   shift
   logs_tail "$@"
+elif [[ "${1:-}" == "db" ]]; then
+  shift
+  db_query "$@"
 else
   release_local "$@"
 fi
