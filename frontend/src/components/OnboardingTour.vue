@@ -8,12 +8,12 @@ const emit = defineEmits(['close'])
 
 const STORAGE_KEY = 'shihai_tour_done_v1'
 const steps = [
-  { selector: '.home-hero-actions', title: '欢迎使用识海', body: '这里是你的主入口：「开始学习」进入 AI 学习助手，「先导入资料」去知识库。', placement: 'bottom' },
-  { selector: '.home-system-intro', title: '认识你的知识库', body: '资料会经过解析、OCR、切分和索引，之后 AI 只基于你有权限访问的知识回答并展示来源。', placement: 'top' },
-  { selector: '.home-entry-grid', title: '三个核心能力', body: 'AI 学习助手、知识库、学习记录——覆盖从导入到掌握的全过程。', placement: 'top' },
+  { selector: '.home-hero-actions', title: '欢迎使用识海', body: '这里是你的主入口：「开始学习」进入 AI 学习助手，「先导入资料」去知识库（文档 + 笔记）。', placement: 'bottom' },
+  { selector: '.home-system-intro', title: '认识你的知识库', body: '资料会经过解析、OCR、切分和索引，之后 AI 只基于你有权限访问的知识回答并展示来源；你的理解也可以写成知识笔记沉淀下来。', placement: 'top' },
+  { selector: '.home-entry-grid', title: '三个核心能力', body: 'AI 学习助手、知识库（文档库 + 知识笔记）、学习记录——覆盖从导入到掌握的全过程。', placement: 'top' },
   { selector: '.home-checklist', title: '上手进度', body: '导入文档、配置对话模型、提出问题——做过就会自动点亮，不用手动勾选。', placement: 'top' },
-  { selector: '.home-concepts', title: '先搞懂三个概念', body: '知识空间、两类模型、检索诊断——理解它们后面就不会迷路。', placement: 'top' },
-  { selector: '.home-faq', title: '遇到问题看这里', body: '新手最常问的几件事都在这儿，随时回来翻。', placement: 'top' }
+  { selector: '.home-concepts', title: '先搞懂这几个概念', body: '知识空间、两类模型、笔记与文档的区别、检索诊断——理解它们后面就不会迷路。', placement: 'top' },
+  { selector: '.home-faq', title: '遇到问题看这里', body: '新手最常问的几件事都在这儿（包括「笔记和文档有什么区别」），随时回来翻。', placement: 'top' }
 ]
 
 const stepIndex = ref(0)

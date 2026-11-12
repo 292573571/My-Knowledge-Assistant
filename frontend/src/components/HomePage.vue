@@ -16,14 +16,15 @@ const emit = defineEmits(['navigate'])
 
 const entries = [
   { section: 'assistant', title: 'AI 学习助手', desc: '提问、拆解、练习，把知识变成真正会用的能力', icon: 'M12 3a7 7 0 0 0-7 7v2.5a3.5 3.5 0 0 0 3.5 3.5H10v2H8.5a1.5 1.5 0 0 0 0 3H12a3 3 0 0 0 3-3v-2h.5a3.5 3.5 0 0 0 3.5-3.5V10a7 7 0 0 0-7-7Z' },
-  { section: 'knowledge', title: '知识库', desc: '导入文档，构建属于你的专属知识空间', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
+  { section: 'knowledge', title: '知识库', desc: '导入文档供 AI 检索回答，撰写知识笔记沉淀你的理解', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
   { section: 'records', title: '学习记录', desc: '自动沉淀每日学习，随时回顾与复习', icon: 'M5.5 4.5A2.5 2.5 0 0 1 8 2h9.5a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L15 17l-2.7 1.9a.5.5 0 0 1-.6 0L9 17l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z' }
 ]
 
 const steps = [
-  { title: '导入知识库', desc: '上传 PDF、Markdown 等文档，建立你的知识空间' },
+  { title: '导入知识库', desc: '上传 PDF、Markdown 等文档，建立 AI 可检索的知识空间' },
   { title: '提问与学习', desc: '围绕资料提问，主题教学帮你真正理解一个概念' },
-  { title: '沉淀学习记录', desc: '学习自动沉淀为每日记录，随时回顾薄弱点' }
+  { title: '撰写知识笔记', desc: '用 Markdown 记下你的理解，目录树组织、图谱看关联' },
+  { title: '回顾学习记录', desc: '学习自动沉淀为每日记录，随时回顾薄弱点' }
 ]
 
 // ---- 工作台真实数据：全部来自接口，不再用本地假进度 ----
@@ -118,11 +119,13 @@ const guideOpen = ref(false)
 const concepts = [
   { badge: '间', title: '知识空间', body: '个人空间仅你可见；团队空间成员共享；公共空间所有用户可读。切换空间后，学习与检索都基于该空间内的文档。' },
   { badge: '模', title: '两类模型', body: '对话模型决定 AI 怎么回答（每人可配自己的）；知识库 embedding 模型决定文档怎么被检索（由系统统一配置，普通用户无需关心）。' },
+  { badge: '笔', title: '笔记与文档', body: '文档库放上传的语料，自动切片建索引供 AI 检索回答；知识笔记是你手写的 Markdown 页面，支持层级目录、关系图谱与打包导入导出。两者都在「知识库」的两个标签页里。' },
   { badge: '诊', title: '检索诊断', body: '进阶开发者工具：输入问题可回显 RAG 实际检索到的候选切片与相似度分数，方便调优 topK 与阈值。' }
 ]
 
 const faqs = [
   { q: '支持导入哪些格式的文档？', a: 'PDF、Markdown、Word(.docx/.doc)、Excel(.xlsx/.xls)、PowerPoint(.pptx/.ppt)、纯文本(.txt)、CSV、JSON、XML、RTF、ODT，以及带文字的图片（OCR 识别）。导入后系统会自动切片并建立向量索引。' },
+  { q: '知识笔记和导入的文档有什么区别？', a: '两者都在「知识库」分区，但用途不同：文档库是给 AI 用的语料——上传后自动切片建索引，回答会引用它们；知识笔记是给你自己用的——Markdown 撰写、树形目录组织、图谱查看页面关联，还支持把已有 Markdown 文件或压缩包批量导入、一键导出备份。' },
   { q: '为什么检索不到我导入的内容？', a: '先看首页「检索链路」是否显示正常；若显示不可达，说明向量库已降级到内存回退，此时只能用近期内存中的数据。其余情况依次确认：① 文档已成功导入且索引进度到 100%；② 顶部知识空间是否选对；③ 用「AI 学习助手」的检索诊断查看实际命中的切片与分数。' },
   { q: '怎么更换对话模型？', a: '进入「AI 学习助手」，在对话框附近点「管理模型」，即可在模型池中选择或自定义你自己的对话模型；设置后仅对你本人生效。' },
   { q: '个人 / 团队 / 公共 空间有什么区别？', a: '个人空间只有你自己能读能写；团队空间由管理员创建、成员共享；公共空间所有用户可读。文档与索引都按空间隔离。' },
@@ -257,7 +260,7 @@ watch(() => props.workspaceId, () => loadDashboard())
     <!-- 新手指南：老用户默认收起 -->
     <section class="home-guide">
       <button type="button" class="home-guide-toggle" :aria-expanded="guideOpen" @click="guideOpen = !guideOpen">
-        <span class="home-guide-title">新手指南<small>系统简介 · 三步上手 · 核心概念 · 常见问题</small></span>
+        <span class="home-guide-title">新手指南<small>系统简介 · 四步上手 · 核心概念 · 常见问题</small></span>
         <svg viewBox="0 0 24 24" class="home-guide-caret" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
       <div v-show="guideOpen" class="home-guide-body">
@@ -272,18 +275,19 @@ watch(() => props.workspaceId, () => loadDashboard())
             <b aria-hidden="true">→</b>
             <div><span>02</span><strong>自动建立索引</strong><small>解析、OCR、切分、向量化</small></div>
             <b aria-hidden="true">→</b>
-            <div><span>03</span><strong>提问与沉淀</strong><small>基于授权知识回答并形成学习记录</small></div>
+            <div><span>03</span><strong>提问与沉淀</strong><small>基于授权知识回答，并整理成知识笔记与学习记录</small></div>
           </div>
           <div class="home-system-tags" aria-label="知识库能力">
             <span>个人 / 团队 / 组织 / 公共空间</span>
             <span>语义 + 关键词混合检索</span>
             <span>来源与页码追踪</span>
+            <span>知识笔记 · 关系图谱</span>
             <span>异步任务与失败重试</span>
           </div>
         </section>
 
         <section class="home-steps">
-          <header><h2>三步上手</h2><p>第一次使用，跟着走一遍就懂了。</p></header>
+          <header><h2>四步上手</h2><p>第一次使用，跟着走一遍就懂了。</p></header>
           <div class="home-step-grid">
             <div v-for="(step, index) in steps" :key="step.title" class="home-step">
               <span class="home-step-index">{{ index + 1 }}</span>
@@ -294,7 +298,7 @@ watch(() => props.workspaceId, () => loadDashboard())
         </section>
 
         <section class="home-concepts">
-          <header><h2>先搞懂三个概念</h2><p>理解它们，后面就不会迷路。</p></header>
+          <header><h2>先搞懂这几个概念</h2><p>理解它们，后面就不会迷路。</p></header>
           <div class="home-concept-grid">
             <article v-for="concept in concepts" :key="concept.title" class="home-concept">
               <span class="home-concept-badge" aria-hidden="true">{{ concept.badge }}</span>
@@ -767,7 +771,7 @@ button.home-metric:hover {
 /* ---- 核心概念 ---- */
 .home-concept-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 16px;
 }
 .home-concept {

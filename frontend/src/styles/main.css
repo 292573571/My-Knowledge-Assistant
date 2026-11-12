@@ -4630,7 +4630,7 @@ button[aria-busy="true"]::after { display: inline-block; width: 11px; height: 11
 
 .home-step-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 14px;
 }
 
