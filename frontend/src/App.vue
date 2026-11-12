@@ -96,6 +96,9 @@ function syncUrlState({ replace = false } = {}) {
 function applyUrlState() {
   const state = readUrlState()
   activeSection.value = canAccessSection(state.section, currentUser.value) ? state.section : 'assistant'
+  // URL 直接恢复到 assistant 时（强刷 / 前进后退）也必须挂载页面组件，
+  // 否则只有导航高亮、内容区空白（assistantMounted 仅在 navigateTo 里设置的漏网场景）
+  if (activeSection.value === 'assistant') assistantMounted.value = true
   if (state.section === 'knowledge') {
     knowledgeTab.value = state.tab || 'docs'
     wikiView.value = state.view || 'pages'
