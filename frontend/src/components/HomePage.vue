@@ -188,7 +188,10 @@ watch(() => props.workspaceId, () => loadDashboard())
           </span>
         </button>
         <div class="home-metric" :class="`tone-${retrievalState.tone}`">
-          <span class="home-metric-label">检索链路</span>
+          <span class="home-metric-label">
+            检索链路
+            <i class="home-dot" :class="`dot-${retrievalState.tone}`" aria-hidden="true"></i>
+          </span>
           <strong class="home-metric-value is-text">{{ retrievalState.label }}</strong>
           <span class="home-metric-sub">{{ retrievalState.detail }}</span>
         </div>
@@ -199,34 +202,21 @@ watch(() => props.workspaceId, () => loadDashboard())
         </button>
         <button type="button" class="home-metric" @click="emit('navigate', 'assistant')">
           <span class="home-metric-label">对话模型</span>
-          <strong class="home-metric-value is-text" :title="status?.model || ''">{{ modelName }}</strong>
+          <strong class="home-metric-value is-text is-ellipsis" :title="status?.model || ''">{{ modelName }}</strong>
           <span class="home-metric-sub">{{ modelProvider }}</span>
         </button>
       </div>
-    </section>
-
-    <!-- 继续最近学习 -->
-    <section v-if="recentRecord" class="home-resume">
-      <div class="home-resume-copy">
-        <span class="home-eyebrow">继续学习 · {{ recentRecord.date }}</span>
-        <strong>{{ recentRecord.title || '最近一次学习记录' }}</strong>
-      </div>
-      <button type="button" class="home-secondary home-resume-action" @click="emit('navigate', 'records')">查看记录 →</button>
-    </section>
-
-    <section class="home-entries" data-reveal>
-      <header><h2>从这里开始</h2><p>三个核心能力，覆盖从知识导入到掌握的全过程。</p></header>
-      <div class="home-entry-grid">
-        <button v-for="entry in entries" :key="entry.section" type="button" @click="emit('navigate', entry.section)">
-          <span class="home-entry-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="entry.icon" /></svg></span>
-          <strong>{{ entry.title }}</strong>
-          <p>{{ entry.desc }}</p>
-          <b aria-hidden="true">↗</b>
-        </button>
+      <!-- 继续学习并入概览面板，不再独立成条 -->
+      <div v-if="recentRecord" class="home-resume">
+        <div class="home-resume-copy">
+          <span class="home-eyebrow">继续学习 · {{ recentRecord.date }}</span>
+          <strong>{{ recentRecord.title || '最近一次学习记录' }}</strong>
+        </div>
+        <button type="button" class="home-secondary home-resume-action" @click="emit('navigate', 'records')">查看记录 →</button>
       </div>
     </section>
 
-    <!-- 上手进度：由真实行为决定，全部完成时只留一行 -->
+    <!-- 上手进度：由真实行为决定，全部完成时只留一行。新用户在概览后立即看到 -->
     <section v-if="!allDone" class="home-checklist" data-reveal>
       <header>
         <h2>上手进度</h2>
@@ -251,6 +241,18 @@ watch(() => props.workspaceId, () => loadDashboard())
       </ul>
     </section>
     <p v-else class="home-checklist-done">✓ 上手任务已全部完成</p>
+
+    <section class="home-entries" data-reveal>
+      <header><h2>常用入口</h2><p>三个核心能力，覆盖从知识导入到掌握的全过程。</p></header>
+      <div class="home-entry-grid">
+        <button v-for="entry in entries" :key="entry.section" type="button" @click="emit('navigate', entry.section)">
+          <span class="home-entry-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="entry.icon" /></svg></span>
+          <strong>{{ entry.title }}</strong>
+          <p>{{ entry.desc }}</p>
+          <b aria-hidden="true">↗</b>
+        </button>
+      </div>
+    </section>
 
     <!-- 新手指南：老用户默认收起 -->
     <section class="home-guide">
@@ -328,10 +330,10 @@ watch(() => props.workspaceId, () => loadDashboard())
 <style scoped>
 /* ---- 工作台概览 ---- */
 .home-metrics {
-  margin-top: 44px;
+  margin-top: 30px;
   border: 1px solid #e2e7dc;
   border-radius: 18px;
-  padding: 20px 22px 22px;
+  padding: 18px 20px 18px;
   background: linear-gradient(180deg, #fffef9, #fafbf6);
   box-shadow: 0 12px 30px rgba(56, 64, 49, .05);
 }
@@ -371,7 +373,7 @@ watch(() => props.workspaceId, () => loadDashboard())
   display: grid;
   gap: 6px;
   align-content: start;
-  min-height: 96px;
+  min-height: 104px;
   border: 1px solid #e7eae3;
   border-radius: 13px;
   padding: 14px 15px;
@@ -387,6 +389,9 @@ button.home-metric:hover {
   transform: translateY(-2px);
 }
 .home-metric-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--site-muted, #718074);
   font-size: 11px;
   font-weight: 700;
@@ -406,9 +411,16 @@ button.home-metric:hover {
   font-weight: 600;
 }
 .home-metric-value.is-text {
-  font-size: 15px;
+  align-self: center;
+  font-size: 16px;
   line-height: 1.4;
   word-break: break-word;
+}
+.home-metric-value.is-ellipsis {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .home-metric-sub {
   color: var(--site-muted, #718074);
@@ -416,6 +428,18 @@ button.home-metric:hover {
   line-height: 1.5;
 }
 .home-metric-sub em { font-style: normal; color: #a8701a; }
+
+/* 状态点：与卡片色调一致，一眼可读 */
+.home-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.home-dot.dot-ok { background: #2f7a52; box-shadow: 0 0 0 3px rgba(47, 122, 82, .15); }
+.home-dot.dot-warn { background: #c99a2e; box-shadow: 0 0 0 3px rgba(201, 154, 46, .15); }
+.home-dot.dot-bad { background: #b4402f; box-shadow: 0 0 0 3px rgba(180, 64, 47, .15); }
+.home-dot.dot-muted { background: #b9c2b4; }
 
 /* 检索状态：正常绿 / 未配置琥珀 / 不可达红 */
 .home-metric.tone-ok { border-color: #c3dcc4; background: #f6faf3; }
@@ -426,21 +450,19 @@ button.home-metric:hover {
 .home-metric.tone-bad .home-metric-value { color: #b4402f; }
 .home-metric.tone-muted .home-metric-value { color: var(--site-muted, #718074); font-size: 15px; }
 
-/* ---- 继续学习 ---- */
+/* ---- 继续学习（并入概览面板底部的 footer 行） ---- */
 .home-resume {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-top: 16px;
-  border: 1px solid #d8e2d6;
-  border-radius: 14px;
-  padding: 14px 18px;
-  background: linear-gradient(135deg, #f5f8ef, #fffef9);
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #dde5d9;
 }
 .home-resume-copy { display: grid; gap: 4px; min-width: 0; }
-.home-resume-copy .home-eyebrow { margin: 0; font-size: 10px; }
+.home-resume-copy .home-eyebrow { margin: 0; font-size: 10px; letter-spacing: .12em; }
 .home-resume-copy strong {
   color: var(--site-ink, #17221b);
   font-size: 14px;
@@ -452,10 +474,10 @@ button.home-metric:hover {
 
 /* ---- 上手进度 ---- */
 .home-checklist-done {
-  margin: 26px 0 0;
+  margin: 20px 0 0;
   border: 1px dashed #c8d8c6;
   border-radius: 12px;
-  padding: 12px 16px;
+  padding: 11px 16px;
   color: #2f7a52;
   background: #f6faf3;
   font-size: 12px;
@@ -469,7 +491,7 @@ button.home-metric:hover {
 
 /* ---- 新手指南折叠 ---- */
 .home-guide {
-  margin-top: 36px;
+  margin-top: 32px;
   border-top: 1px solid #e7eae3;
   padding-top: 18px;
 }
@@ -593,9 +615,12 @@ button.home-metric:hover {
   font-size: 11px;
 }
 
+/* 区块统一节距：概览 → 清单 → 入口 → 指南，节奏一致 */
+.home-entries,
+.home-checklist { margin-top: 32px; }
 .home-checklist,
 .home-concepts,
-.home-faq { margin-top: 36px; }
+.home-faq { margin-top: 32px; }
 .home-checklist > header,
 .home-concepts > header,
 .home-faq > header { margin-bottom: 22px; }
@@ -614,7 +639,7 @@ button.home-metric:hover {
   color: var(--site-muted, #718074);
   font-size: 13px;
 }
-.home-steps { margin-top: 36px; }
+.home-steps { margin-top: 28px; }
 .home-steps > header { margin-bottom: 22px; }
 .home-steps h2 { margin: 0; color: var(--site-ink, #17221b); font-size: 22px; letter-spacing: -.03em; }
 .home-steps header p { margin: 6px 0 0; color: var(--site-muted, #718074); font-size: 13px; }
