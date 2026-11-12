@@ -385,8 +385,7 @@ public class LocalChatClient {
                         usageRef.set(usage);
                     }
                 })
-                .map(this::content)
-                .filter(java.util.Objects::nonNull)
+                .transform(LocalChatClient::textFromResponses)
                 .timeout(timeout)
                 .doOnComplete(() -> {
                     log.info("AI model stream completed model={} conversationId={}", model, conversationId);
@@ -621,7 +620,24 @@ public class LocalChatClient {
         return retryable;
     }
 
-    private String content(ChatResponse response) {
+    /**
+     * 把 ChatResponse 流抽取为文本流。
+     *
+     * <p>不能用 {@code .map(this::content)}：Reactor 的 map 在 mapper 返回 null 时直接抛
+     * NullPointerException（后面的 filter 救不了）。Spring AI 2.0 流式的最后一帧是
+     * usage-only chunk，content 为 null —— 2026-11-12 线上三次提问失败中的两次即此。
+     * 这里用 handle 显式丢弃空帧。</p>
+     */
+    static Flux<String> textFromResponses(Flux<ChatResponse> responses) {
+        return responses.handle((response, sink) -> {
+            String text = content(response);
+            if (text != null && !text.isEmpty()) {
+                sink.next(text);
+            }
+        });
+    }
+
+    private static String content(ChatResponse response) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
             return null;
         }

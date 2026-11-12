@@ -268,7 +268,10 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
                     .map(this::toSourceDocument)
                     .toList();
         } catch (RuntimeException exception) {
-            log.warn("Failed to search Chroma, using in-memory vector store fallback errorType={}", exception.getClass().getSimpleName());
+            // 不带堆栈的简写曾把 embedding 404 误诊为 Chroma 故障（2026-11-12）：
+            // doSimilaritySearch 内部先调 embeddingModel.embed()，失败同样落在这里。
+            log.warn("Failed to search Chroma, using in-memory vector store fallback errorType={} exceptionClass={}",
+                    exception.getClass().getSimpleName(), exception.getClass().getName(), exception);
             return fallbackSearch(query, topK, ownerUserId, readableWorkspaceIds, scoped);
         }
     }
