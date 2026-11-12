@@ -421,7 +421,13 @@ async function submitPasswordChange() {
         </div>
       </header>
       <div v-if="mobileNavOpen" class="portal-nav-backdrop" role="presentation" @click="mobileNavOpen = false"></div>
-       <HomePage v-if="activeSection === 'home'" :user="currentUser" @navigate="navigateTo" />
+       <HomePage
+        v-if="activeSection === 'home'"
+        :user="currentUser"
+        :workspace-id="activeWorkspaceId"
+        :workspace="workspaces.find(item => item.id === activeWorkspaceId) || null"
+        @navigate="navigateTo"
+      />
          <LearningAssistantPage v-if="assistantMounted" v-show="activeSection === 'assistant'" :key="`learning-${activeWorkspaceId}`" :workspace-id="activeWorkspaceId" :current-user="currentUser" :model-config-version="modelConfigVersion" @manage-models="modelConfigOpen = true" />
        <LearningRecords v-if="activeSection === 'records'" :key="`records-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" />
       <UserManagement v-else-if="activeSection === 'users'" :current-user="currentUser" />
