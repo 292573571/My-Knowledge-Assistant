@@ -47,9 +47,19 @@ const answeredWithSources = computed(() => {
 })
 const askedEver = computed(() => (usageLong.value?.totals?.calls || 0) > 0)
 const modelName = computed(() => {
-  const model = status.value?.model || ''
+  // health 的 model 依赖 app.ai.model 配置；未配置时退回最近实际用过的模型，避免卡片显示「—」
+  const candidates = [
+    status.value?.model,
+    usageLong.value?.models?.[0]?.model,
+    usageRecent.value?.models?.[0]?.model
+  ]
+  const model = candidates.find(value => typeof value === 'string' && value.trim())
   if (!model) return '—'
   return model.includes('/') ? model.split('/').pop() : model
+})
+const modelProvider = computed(() => {
+  if (status.value?.provider) return status.value.provider
+  return modelName.value === '—' ? '未配置' : '近 90 天使用'
 })
 // 检索链路状态：区分「在线」「已配置但不可达」「未配置回退」，不要只说 "Chroma"
 const retrievalState = computed(() => {
@@ -190,7 +200,7 @@ watch(() => props.workspaceId, () => loadDashboard())
         <button type="button" class="home-metric" @click="emit('navigate', 'assistant')">
           <span class="home-metric-label">对话模型</span>
           <strong class="home-metric-value is-text" :title="status?.model || ''">{{ modelName }}</strong>
-          <span class="home-metric-sub">{{ status?.provider || '未配置' }}</span>
+          <span class="home-metric-sub">{{ modelProvider }}</span>
         </button>
       </div>
     </section>

@@ -75,6 +75,18 @@ describe('HomePage 工作台', () => {
     expect(cards[3].text()).toContain('DeepSeek-V4-Flash')
   })
 
+  it('health 未返回模型时用最近实际使用的模型兜底', async () => {
+    mocks.status.mockResolvedValue({ ...READY_STATUS, model: null, provider: null })
+    mocks.usage.mockResolvedValue({ ...usage(4, 8, 6), models: [{ model: 'deepseek-ai/DeepSeek-V4-Flash', calls: 4 }] })
+
+    const wrapper = mountHome()
+    await flushPromises()
+
+    const modelCard = wrapper.findAll('.home-metric')[3]
+    expect(modelCard.text()).toContain('DeepSeek-V4-Flash')
+    expect(modelCard.text()).toContain('近 90 天使用')
+  })
+
   it('Chroma 配置了但不可达时标红，不再笼统显示「Chroma」', async () => {
     mocks.status.mockResolvedValue({ ...READY_STATUS, chromaReachable: false })
     const wrapper = mountHome()
