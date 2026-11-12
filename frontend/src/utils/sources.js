@@ -5,6 +5,9 @@ function fileName(source) {
 export function deduplicateDisplayedSources(sources = []) {
   const seen = new Set()
 
+  // 防御非数组输入（异常响应字段不应让整个消息组件渲染崩溃）
+  if (!Array.isArray(sources)) sources = []
+
   return sources.filter((source) => {
     if (!source) return false
 
@@ -39,7 +42,10 @@ function sourceFileKey(source, index) {
 export function groupSourcesByFile(sources = []) {
   const groups = new Map()
 
-  ;(sources || []).forEach((source, index) => {
+  // 防御非数组输入：后端异常字段不应让整个消息组件渲染崩溃（Vue 会把抛错组件渲染为空）
+  if (!Array.isArray(sources)) sources = []
+
+  ;(sources).forEach((source, index) => {
     if (!source) return
     const key = sourceFileKey(source, index)
     const page = source.pageNumber ?? source.page

@@ -228,8 +228,18 @@ public class ConversationService {
 
     private MessageResponse messageResponse(ChatMessageEntity message, DisplayNameBatch names) {
         return new MessageResponse(message.getId(), message.getRole(), message.getContent(),
-                normalizeSources(readJson(message.getSourcesJson()), names), readJson(message.getToolCallsJson()),
+                toPlainStructure(normalizeSources(readJson(message.getSourcesJson()), names)),
+                toPlainStructure(readJson(message.getToolCallsJson())),
                 message.getCreatedAt());
+    }
+
+    /**
+     * Jackson 2 JsonNode → plain List/Map。响应序列化走 Jackson 3（Boot 4 MVC），
+     * 不识别 Jackson 2 的 JsonNode 类型，必须先转成普通集合结构（见 MessageResponse 注释）。
+     */
+    private Object toPlainStructure(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) return List.of();
+        return objectMapper.convertValue(node, Object.class);
     }
 
     /**

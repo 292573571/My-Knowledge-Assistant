@@ -60,6 +60,33 @@ class ConversationServiceMessageLookupTest {
         verify(tasks, times(1)).findByWorkspaceIdAndTypeOrderByCreatedAtDesc("ws-1", DocumentTaskType.UPLOAD);
     }
 
+    /**
+     * 回归：Boot 4 后 MVC 用 Jackson 3 序列化响应，它不认识 Jackson 2 的 JsonNode，
+     * 曾把 sources 序列化成 {"array":true,...} 内部状态对象，前端 AI 历史消息整体渲染失败。
+     * sources/toolCalls 必须以 plain 结构（List/Map）输出，Jackson 3 下为数组/对象字面量。
+     */
+    @Test
+    void messageSourcesSerializeAsPlainArrayUnderJackson3() {
+        ChatConversationRepository conversations = mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper(), null, null);
+
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation conversation = new ChatConversation("id-1", user, "标题", "rag", "ws-1");
+        when(conversations.findVisibleByIdAndUserAndWorkspace("conv-1", user.getId(), "ws-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        when(messages.findByConversationIdOrderByCreatedAtAsc("id-1")).thenReturn(List.of(
+                message(conversation, "回答")));
+
+        MessageResponse response = service.messages(user, "ws-1", "conv-1").get(0);
+
+        String json = tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(response);
+        assertThat(json).contains("\"sources\":[{\"file\":\"a.pdf\"");
+        assertThat(json).contains("\"toolCalls\":[]");
+        assertThat(json).doesNotContain("\"array\"");
+    }
+
     private ChatMessageEntity message(ChatConversation conversation, String content) {
         return new ChatMessageEntity(conversation, "assistant", content,
                 "[{\"file\":\"a.pdf\",\"path\":\"docs/a.pdf\"},{\"file\":\"b.pdf\",\"path\":\"docs/b.pdf\"}]",
