@@ -296,10 +296,14 @@ function onWikiViewChange(next) {
   syncUrlState()
 }
 
-function navigateTo(section) {
+function navigateTo(section, tab) {
   if (!navigableSections.has(section) || !canAccessSection(section, currentUser.value)) return
   const update = () => {
     if (section === 'assistant') assistantMounted.value = true
+    // 首页入口卡可直达知识库的指定标签页（docs=文档库 / wiki=知识笔记）
+    if (section === 'knowledge' && tab) {
+      knowledgeTab.value = tab === 'wiki' ? 'wiki' : 'docs'
+    }
     activeSection.value = section
     mobileNavOpen.value = false
     syncUrlState()

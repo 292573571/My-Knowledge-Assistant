@@ -16,7 +16,8 @@ const emit = defineEmits(['navigate'])
 
 const entries = [
   { section: 'assistant', title: 'AI 学习助手', desc: '提问、拆解、练习，把知识变成真正会用的能力', icon: 'M12 3a7 7 0 0 0-7 7v2.5a3.5 3.5 0 0 0 3.5 3.5H10v2H8.5a1.5 1.5 0 0 0 0 3H12a3 3 0 0 0 3-3v-2h.5a3.5 3.5 0 0 0 3.5-3.5V10a7 7 0 0 0-7-7Z' },
-  { section: 'knowledge', title: '知识库', desc: '导入文档供 AI 检索回答，撰写知识笔记沉淀你的理解', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
+  { section: 'knowledge', title: '文档库', desc: '上传 PDF、Word、表格等资料，建立 AI 可检索的知识空间', icon: 'M4 6.5 12 3l8 3.5-8 3.5-8-3.5ZM6 9.5l6 2.7 6-2.7M6 13l6 2.7 6-2.7M6 16.5l6 2.7 6-2.7' },
+  { section: 'knowledge', tab: 'wiki', title: '知识笔记', desc: '用 Markdown 撰写并组织你的理解，支持目录树与关系图谱', icon: 'M5 4.5A1.5 1.5 0 0 1 6.5 3h9l3.5 3.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-13ZM8 8h8M8 11.5h8M8 15h5' },
   { section: 'records', title: '学习记录', desc: '自动沉淀每日学习，随时回顾与复习', icon: 'M5.5 4.5A2.5 2.5 0 0 1 8 2h9.5a1 1 0 0 1 1 1v15.5a.5.5 0 0 1-.8.4L15 17l-2.7 1.9a.5.5 0 0 1-.6 0L9 17l-2.7 1.9a.5.5 0 0 1-.8-.4V4.5Z' }
 ]
 
@@ -74,7 +75,7 @@ const workspaceLabel = computed(() => props.workspace?.name || '当前空间')
 
 // ---- 新手任务：真实检测，不再手动打勾 ----
 const tasks = computed(() => [
-  { id: 'import', title: '导入第一篇文档', desc: '在「知识库 → 文档库」上传资料，系统会自动解析、切片并建立索引。', action: '去导入', section: 'knowledge', done: docCount.value > 0 },
+  { id: 'import', title: '导入第一篇文档', desc: '在「知识库 → 文档库」上传资料，系统会自动解析、切片并建立索引。', action: '去导入', section: 'knowledge', tab: 'docs', done: docCount.value > 0 },
   { id: 'model', title: '配置个人对话模型', desc: '在「AI 学习助手 → 管理模型」选择或新增属于你自己的对话模型。', action: '去配置', section: 'assistant', done: personalModelCount.value > 0 },
   { id: 'ask', title: '提出第一个问题', desc: '围绕资料提问，回答会带出处；提问后自动沉淀学习记录。', action: '去提问', section: 'assistant', done: askedEver.value }
 ])
@@ -110,7 +111,7 @@ async function loadDashboard() {
 }
 
 function goTask(task) {
-  emit('navigate', task.section)
+  emit('navigate', task.section, task.tab)
 }
 
 // ---- 新手指南（老用户默认收起） ----
@@ -246,9 +247,9 @@ watch(() => props.workspaceId, () => loadDashboard())
     <p v-else class="home-checklist-done">✓ 上手任务已全部完成</p>
 
     <section class="home-entries" data-reveal>
-      <header><h2>常用入口</h2><p>三个核心能力，覆盖从知识导入到掌握的全过程。</p></header>
+      <header><h2>常用入口</h2><p>四个核心能力，覆盖从知识导入、笔记沉淀到掌握的全过程。</p></header>
       <div class="home-entry-grid">
-        <button v-for="entry in entries" :key="entry.section" type="button" @click="emit('navigate', entry.section)">
+        <button v-for="entry in entries" :key="entry.title" type="button" @click="emit('navigate', entry.section, entry.tab)">
           <span class="home-entry-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="entry.icon" /></svg></span>
           <strong>{{ entry.title }}</strong>
           <p>{{ entry.desc }}</p>
@@ -284,6 +285,17 @@ watch(() => props.workspaceId, () => loadDashboard())
             <span>知识笔记 · 关系图谱</span>
             <span>异步任务与失败重试</span>
           </div>
+          <!-- Wiki 专属入口卡：直达知识笔记 -->
+          <button type="button" class="home-wiki-cta" @click="emit('navigate', 'knowledge', 'wiki')">
+            <span class="home-wiki-cta-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3h9l3.5 3.5v11A1.5 1.5 0 0 1 17.5 19h-11A1.5 1.5 0 0 1 5 17.5v-13ZM8 8h8M8 11.5h8M8 15h5" /></svg>
+            </span>
+            <span class="home-wiki-cta-copy">
+              <strong>知识笔记 · Wiki</strong>
+              <p>用 Markdown 记下你的理解：树形目录组织、图谱查看页面关联，支持批量导入与一键导出备份。</p>
+            </span>
+            <span class="home-wiki-cta-action" aria-hidden="true">去写笔记 →</span>
+          </button>
         </section>
 
         <section class="home-steps">
@@ -617,6 +629,69 @@ button.home-metric:hover {
   color: #55705a;
   background: rgba(224, 235, 220, .72);
   font-size: 11px;
+}
+
+/* ---- 知识笔记（Wiki）专属入口卡 ---- */
+.home-wiki-cta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid #c9dcc4;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, .78);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.home-wiki-cta:hover {
+  border-color: #7ba287;
+  box-shadow: 0 12px 26px rgba(56, 64, 49, .1);
+  transform: translateY(-2px);
+}
+.home-wiki-cta-icon {
+  flex: 0 0 auto;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--site-green, #1d5939);
+  background: var(--site-green-soft, #e5eee1);
+}
+.home-wiki-cta-icon svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.home-wiki-cta-copy { flex: 1; min-width: 0; }
+.home-wiki-cta-copy strong {
+  display: block;
+  color: var(--site-ink, #17221b);
+  font-size: 15px;
+}
+.home-wiki-cta-copy p {
+  margin: 4px 0 0;
+  color: var(--site-muted, #718074);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.home-wiki-cta-action {
+  flex: 0 0 auto;
+  color: var(--site-green, #1d5939);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .home-wiki-cta { flex-wrap: wrap; }
+  .home-wiki-cta-action { margin-left: 62px; }
 }
 
 /* 区块统一节距：概览 → 清单 → 入口 → 指南，节奏一致 */
