@@ -272,6 +272,63 @@ install_self() {
   echo "已更新 /usr/local/sbin/deploy-shihai"
 }
 
+# 环境变量配置：从 stdin 读 KEY=VALUE 行，合并写入 /etc/shihai/shihai.env。
+# 只在服务器上以 root 执行；密钥值走 stdin，不进 argv / ps / history。
+# 同名 key 覆盖旧值，其余行保持原样；文件权限固定 root:600。
+setenv_keys() {
+  local env_file=/etc/shihai/shihai.env
+  local tmp keys=0 line key value
+
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+  chmod 600 "$env_file"
+
+  tmp=$(mktemp)
+  cp "$env_file" "$tmp"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" != *=* ]]; then
+      echo "跳过无效行（缺少 =）: $line" >&2
+      continue
+    fi
+    key=${line%%=*}
+    value=${line#*=}
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      echo "跳过非法变量名: $key" >&2
+      continue
+    fi
+    if grep -q "^${key}=" "$tmp"; then
+      grep -v "^${key}=" "$tmp" > "$tmp.next" || true
+      mv "$tmp.next" "$tmp"
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    keys=$((keys + 1))
+    echo "已写入: $key"
+  done
+  mv "$tmp" "$env_file"
+  chmod 600 "$env_file"
+  chown root:root "$env_file" 2>/dev/null || true
+  echo "共更新 $keys 个变量 → $env_file"
+}
+
+# 重启服务并等待本地健康检查通过。
+restart_service() {
+  local attempt
+  systemctl restart shihai
+  echo "已执行 systemctl restart shihai，等待健康检查..."
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 5 http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
+      echo "健康检查通过（第 ${attempt} 次探测）"
+      systemctl show shihai -p ActiveEnterTimestamp
+      return 0
+    fi
+    sleep 2
+  done
+  echo "健康检查超时（120s），请用 journalctl -u shihai -n 100 排查" >&2
+  return 1
+}
+
+
 # 数据备份：PostgreSQL（关键）+ 上传文件与配置 + 可选 Chroma 向量库。
 # 只在服务器上以 root 执行；默认保留 14 天。
 backup_data() {
@@ -783,6 +840,12 @@ elif [[ "${1:-}" == "backup-list" ]]; then
 elif [[ "${1:-}" == "self-test-rollback" ]]; then
   shift
   self_test_rollback "$@"
+elif [[ "${1:-}" == "setenv" ]]; then
+  shift
+  setenv_keys "$@"
+elif [[ "${1:-}" == "restart" ]]; then
+  shift
+  restart_service "$@"
 else
   release_local "$@"
 fi
