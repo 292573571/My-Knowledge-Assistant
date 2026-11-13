@@ -149,34 +149,42 @@ public class ConversationService {
         }
     }
 
+    /**
+     * 落库助手消息并返回数据库自增 id（反馈功能按它关联）。
+     * 返回 null 表示会话已被删除/停止，调用方据此丢弃迟到结果。
+     */
     @Transactional
-    public boolean recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String mode, String content, Object sources, Object toolCalls) {
+    public Long recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String mode, String content, Object sources, Object toolCalls) {
         return recordAssistantMessage(user, workspaceId, conversationId, null, mode, content, sources, toolCalls);
     }
 
     @Transactional
-    public boolean recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String clientRequestId,
+    public Long recordAssistantMessage(AppUser user, String workspaceId, String conversationId, String clientRequestId,
                                           String mode, String content, Object sources, Object toolCalls) {
         ChatConversation conversation = findConversation(user, workspaceId, conversationId)
                 .orElse(null);
         if (conversation == null) {
             // 会话被删除后不自动重建，调用方据此丢弃模型的迟到结果。
-            return false;
-        }
-        if (clientRequestId != null) {
-            conversation.touch(null, mode);
-            conversationRepository.save(conversation);
-            messageRepository.insertIfAbsent(conversation.getId(), "assistant", content, json(sources), json(toolCalls), clientRequestId);
-            return true;
+            return null;
         }
         conversation.touch(null, mode);
         conversationRepository.save(conversation);
+        if (clientRequestId != null) {
+            messageRepository.insertIfAbsent(conversation.getId(), "assistant", content, json(sources), json(toolCalls), clientRequestId);
+            // 原生 insert 拿不到自增 id，按幂等唯一键回查；重放时返回同一行的 id。
+            return messageRepository.findByConversationIdAndClientRequestIdAndRole(
+                            conversation.getId(), clientRequestId, "assistant")
+                    .map(ChatMessageEntity::getId)
+                    .orElse(null);
+        }
         try {
-            messageRepository.save(new ChatMessageEntity(conversation, "assistant", content, json(sources), json(toolCalls), clientRequestId));
+            return messageRepository
+                    .save(new ChatMessageEntity(conversation, "assistant", content, json(sources), json(toolCalls), clientRequestId))
+                    .getId();
         } catch (DataIntegrityViolationException exception) {
             if (clientRequestId == null) throw exception;
+            return null;
         }
-        return true;
     }
 
     private ChatConversation getOrCreate(AppUser user, String workspaceId, String id, String title, String mode) {
@@ -200,6 +208,12 @@ public class ConversationService {
         // 对未归属当前用户的会话统一返回 404，避免泄露会话是否存在。
         return findConversation(user, workspaceId, conversationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在"));
+    }
+
+    /** 反馈等相邻功能校验会话归属时复用同一套可见性规则。 */
+    @Transactional(readOnly = true)
+    public ChatConversation requireOwnedConversation(AppUser user, String workspaceId, String conversationId) {
+        return ownedConversation(user, workspaceId, conversationId);
     }
 
     private void cancel(AppUser user, String workspaceId, String conversationId) {

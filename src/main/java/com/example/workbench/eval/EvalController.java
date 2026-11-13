@@ -36,12 +36,14 @@ public class EvalController {
     private final EvalDraftService evalDraftService;
     private final EvalGateService evalGateService;
     private final com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService;
+    private final com.example.workbench.conversation.ChatFeedbackService feedbackService;
 
     public EvalController(EvalRunner evalRunner, EvalCaseService evalCaseService, EvalRunStorage evalRunStorage,
                           EvalCaseImportService evalCaseImportService, EvalImportStorage evalImportStorage,
                           EvalExecutionGuard executionGuard, EvalDraftService evalDraftService,
                           EvalGateService evalGateService,
-                          com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService) {
+                          com.example.workbench.auth.AdminAuthorizationService adminAuthorizationService,
+                          com.example.workbench.conversation.ChatFeedbackService feedbackService) {
         this.evalGateService = evalGateService;
         this.evalRunner = evalRunner;
         this.evalCaseService = evalCaseService;
@@ -51,6 +53,7 @@ public class EvalController {
         this.executionGuard = executionGuard;
         this.evalDraftService = evalDraftService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.feedbackService = feedbackService;
     }
 
     /**
@@ -91,6 +94,21 @@ public class EvalController {
         AppUser user = user(request);
         adminAuthorizationService.requireAdmin(user);
         return evalDraftService.generate(user, count);
+    }
+
+    /** 由用户反馈沉淀评测草稿：question=原提问，expectedSources=回答引用的文件名，sourceMessageId 关联反馈。 */
+    @PostMapping("/cases/from-feedback")
+    @ResponseStatus(HttpStatus.CREATED)
+    public EvalCaseResponse createFromFeedback(@org.springframework.web.bind.annotation.RequestBody Long feedbackId,
+                                               HttpServletRequest request) {
+        AppUser user = user(request);
+        adminAuthorizationService.requireAdmin(user);
+        var data = feedbackService.draftData(feedbackId);
+        if (data.question() == null || data.question().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "找不到原提问，无法沉淀为评测题");
+        }
+        return evalCaseService.createDraftFromFeedback(user, data.question(), data.sourceFiles(),
+                List.of(), data.messageId());
     }
 
     @PostMapping("/cases/move-suite")

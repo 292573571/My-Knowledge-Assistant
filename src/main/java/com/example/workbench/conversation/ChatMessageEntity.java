@@ -70,6 +70,7 @@ public class ChatMessageEntity {
     }
 
     public Long getId() { return id; }
+    public ChatConversation getConversation() { return conversation; }
     public String getRole() { return role; }
     public String getContent() { return content; }
     public String getSourcesJson() { return sourcesJson; }

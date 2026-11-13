@@ -8,10 +8,15 @@ public record WorkbenchChatResponse(
         String answer,
         List<?> sources,
         List<?> toolCalls,
-        RagAnswerRoute route
+        RagAnswerRoute route,
+        Long dbMessageId
 ) {
     public WorkbenchChatResponse(String messageId, String answer, List<?> sources, List<?> toolCalls) {
         this(messageId, answer, sources, toolCalls, sources == null || sources.isEmpty()
-                ? RagAnswerRoute.NO_KNOWLEDGE : RagAnswerRoute.LOCAL_KNOWLEDGE);
+                ? RagAnswerRoute.NO_KNOWLEDGE : RagAnswerRoute.LOCAL_KNOWLEDGE, null);
+    }
+
+    public WorkbenchChatResponse(String messageId, String answer, List<?> sources, List<?> toolCalls, RagAnswerRoute route) {
+        this(messageId, answer, sources, toolCalls, route, null);
     }
 }

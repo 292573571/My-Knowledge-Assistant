@@ -89,6 +89,33 @@ public class EvalCaseService {
         return response(repository.save(entity(user, request)));
     }
 
+    /**
+     * 由用户反馈沉淀评测草稿：question 来自原提问，来源取该回答引用的文件名，
+     * 并记录 source_message_id 以便反馈列表标记「已沉淀」。
+     */
+    @Transactional
+    public EvalCaseResponse createDraftFromFeedback(AppUser user, String question, List<String> expectedSources,
+                                                    List<String> expectedKeywords, Long sourceMessageId) {
+        EvalCaseRequest request = new EvalCaseRequest(nextFeedbackCaseId(user), "rag", "fact", question,
+                false, true, false, expectedSources, List.of(), expectedKeywords, List.of(),
+                List.of(), List.of(), List.of(), "DRAFT", "RETRIEVAL", List.of(), null, null, List.of());
+        EvalCaseEntity entity = entity(user, request);
+        entity.setSourceMessageId(sourceMessageId);
+        return response(repository.save(entity));
+    }
+
+    private String nextFeedbackCaseId(AppUser user) {
+        int next = repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream()
+                .map(EvalCaseEntity::getCaseId)
+                .filter(caseId -> caseId != null && caseId.startsWith("fb-"))
+                .map(caseId -> caseId.substring("fb-".length()))
+                .filter(suffix -> suffix.chars().allMatch(Character::isDigit))
+                .mapToInt(Integer::parseInt)
+                .max()
+                .orElse(0) + 1;
+        return "fb-%03d".formatted(next);
+    }
+
     private String nextDraftCaseId(AppUser user) {
         int next = repository.findAllByOwnerIdOrderByIdAsc(user.getId()).stream()
                 .map(EvalCaseEntity::getCaseId)
@@ -214,7 +241,7 @@ public class EvalCaseService {
                 integerList(entity.getExpectedPageNumbers()), list(entity.getExpectedRetrievalKeywords()),
                 list(entity.getForbiddenRetrievalKeywords()), entity.getSuite(), entity.getLayer(),
                 messages(entity.getHistory()), entity.getExpectedRelation(), entity.getExpectedStandaloneQuestion(),
-                list(entity.getExpectedRetrievalQueries()));
+                list(entity.getExpectedRetrievalQueries()), entity.getSourceMessageId());
     }
 
     private EvalCase evalCase(EvalCaseEntity entity) {

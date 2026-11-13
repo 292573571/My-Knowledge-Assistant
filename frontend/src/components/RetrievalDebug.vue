@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { createEvalCase, deleteEvalCase, downloadEvalImport, fetchEvalCases, fetchEvalImports, fetchEvalRun, fetchEvalRuns, generateEvalDrafts, importEvalCases, moveEvalCaseSuite, runEvals, updateEvalCase } from '../api/ragApi'
+import { createEvalCaseFromFeedback, fetchAdminFeedback } from '../api/chatFeedbackApi'
+import { getActiveWorkspaceId } from '../api/workspaceApi'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import ConfirmDialog from './ConfirmDialog.vue'
 
@@ -11,6 +13,44 @@ const props = defineProps({
 })
 
 const canGenerateDrafts = computed(() => props.currentUser?.systemRole === 'SUPER_ADMIN')
+const canViewFeedback = computed(() => ['ADMIN', 'SUPER_ADMIN'].includes(props.currentUser?.systemRole))
+
+// ---- 反馈池：用户 👍/👎 差评沉淀为评测草稿 ----
+const feedbackOpen = ref(false)
+const feedbackLoading = ref(false)
+const feedbackItems = ref([])
+const feedbackBusyId = ref(null)
+const resolvedMessageIds = computed(() => new Set(evalCases.value.map(item => item.sourceMessageId).filter(Boolean)))
+
+async function openFeedbackPool() {
+  feedbackOpen.value = true
+  if (feedbackLoading.value) return
+  feedbackLoading.value = true
+  evalError.value = ''
+  try {
+    const items = await fetchAdminFeedback(getActiveWorkspaceId(), -1)
+    feedbackItems.value = Array.isArray(items) ? items : []
+  } catch (exception) {
+    evalError.value = formatApiError(exception, '加载反馈池失败。')
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+async function convertFeedback(item) {
+  if (feedbackBusyId.value) return
+  feedbackBusyId.value = item.id
+  evalError.value = ''
+  try {
+    await createEvalCaseFromFeedback(item.id)
+    await Promise.all([loadEvalCases(), openFeedbackPool()])
+    evalError.value = `已沉淀为评测草稿（DRAFT），可在题库中审核后转基线。`
+  } catch (exception) {
+    evalError.value = formatApiError(exception, '沉淀评测题失败。')
+  } finally {
+    feedbackBusyId.value = null
+  }
+}
 
 const evalSummary = ref(null)
 const evalLoading = ref(false)
@@ -371,9 +411,9 @@ onMounted(loadEvalCases)
       <span class="retrieval-debug-status">{{ evalCases.length }} 条评测题</span>
     </section>
 
-    <section v-if="!evalSummary && !historyOpen && !importsOpen" class="retrieval-eval-workbench" aria-labelledby="eval-workbench-title">
+    <section v-if="!evalSummary && !historyOpen && !importsOpen && !feedbackOpen" class="retrieval-eval-workbench" aria-labelledby="eval-workbench-title">
       <header class="retrieval-eval-workbench-header"><div><p class="retrieval-debug-kicker">EVALUATION WORKBENCH</p><h2 id="eval-workbench-title">评测题库</h2><p>选择题目后，运行基线或增强检索并比较质量指标。</p></div></header>
-      <div class="retrieval-eval-search"><label for="eval-case-query">筛选题目</label><input id="eval-case-query" v-model="caseQuery" type="search" placeholder="按 Case ID、问题、评测集或层级查询"><span>{{ filteredEvalCases.length }} 条结果</span><div class="retrieval-eval-search-actions"><button v-if="canGenerateDrafts" type="button" class="retrieval-eval-secondary" :disabled="draftGenerating" @click="generateDrafts">{{ draftGenerating ? (draftProgress || '生成中...') : '生成草稿题' }}</button><button v-if="canGenerateDrafts" type="button" class="retrieval-eval-secondary" :disabled="promoting || !draftCount" @click="promoteConfirmOpen = true">{{ promoting ? '转换中...' : `草稿转基线${draftCount ? ` (${draftCount})` : ''}` }}</button><button type="button" class="retrieval-eval-secondary" :disabled="importsLoading" @click="openImportRecords">导入记录</button><button type="button" class="retrieval-eval-secondary" @click="beginImportCases">导入</button><button type="button" class="retrieval-eval-primary" @click="beginCreateCase">新增</button><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading" @click="loadEvalCases">{{ casesLoading ? '加载中...' : '刷新' }}</button></div></div>
+      <div class="retrieval-eval-search"><label for="eval-case-query">筛选题目</label><input id="eval-case-query" v-model="caseQuery" type="search" placeholder="按 Case ID、问题、评测集或层级查询"><span>{{ filteredEvalCases.length }} 条结果</span><div class="retrieval-eval-search-actions"><button v-if="canGenerateDrafts" type="button" class="retrieval-eval-secondary" :disabled="draftGenerating" @click="generateDrafts">{{ draftGenerating ? (draftProgress || '生成中...') : '生成草稿题' }}</button><button v-if="canGenerateDrafts" type="button" class="retrieval-eval-secondary" :disabled="promoting || !draftCount" @click="promoteConfirmOpen = true">{{ promoting ? '转换中...' : `草稿转基线${draftCount ? ` (${draftCount})` : ''}` }}</button><button v-if="canViewFeedback" type="button" class="retrieval-eval-secondary" :disabled="feedbackLoading" @click="openFeedbackPool">反馈池</button><button type="button" class="retrieval-eval-secondary" :disabled="importsLoading" @click="openImportRecords">导入记录</button><button type="button" class="retrieval-eval-secondary" @click="beginImportCases">导入</button><button type="button" class="retrieval-eval-primary" @click="beginCreateCase">新增</button><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading" @click="loadEvalCases">{{ casesLoading ? '加载中...' : '刷新' }}</button></div></div>
       <div class="retrieval-eval-actions"><span><b>{{ selectedCaseIds.length }}</b> / {{ evalCases.length }} 已选</span><label class="retrieval-eval-run-filter">评测集<select v-model="runSuite"><option value="">全部</option><option v-for="suite in ['SMOKE', 'REGRESSION', 'FORMAT', 'SECURITY', 'FAILURE', 'NO_ANSWER', 'DRAFT']" :key="suite" :value="suite">{{ suite }}</option></select></label><label class="retrieval-eval-run-filter">层级<select v-model="runLayer"><option value="">全部</option><option v-for="layer in ['PARSER', 'RETRIEVAL', 'CONTEXT', 'GENERATION']" :key="layer" :value="layer">{{ layer }}</option></select></label><button type="button" class="retrieval-eval-secondary" :disabled="casesLoading || !evalCases.length" @click="selectAllCases">全选</button><button type="button" class="retrieval-eval-secondary" :disabled="!selectedCaseIds.length" @click="clearCaseSelection">清空</button><i></i><button type="button" class="retrieval-eval-primary" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(false)">{{ evalLoading ? '评测中...' : '运行标准检索' }}</button><button type="button" class="retrieval-eval-primary enhanced" :disabled="evalLoading || !selectedCaseIds.length" @click="runSelectedEvals(true)">{{ evalLoading ? '评测中...' : '运行增强检索' }}</button><button type="button" class="retrieval-eval-secondary retrieval-eval-records-button" :disabled="runsLoading" @click="openEvalHistory">{{ runsLoading ? '加载中...' : '检索记录' }}</button></div>
       <div v-if="casesLoading" class="retrieval-eval-empty">正在加载评测题...</div>
       <div v-else-if="!evalCases.length" class="retrieval-eval-empty">暂无评测题。请使用下方表单新增一条 Eval Case。</div>
@@ -451,6 +491,13 @@ onMounted(loadEvalCases)
     </Teleport>
 
     <p v-if="evalError" class="retrieval-debug-error" role="alert">{{ evalError }}</p>
+
+    <section v-if="feedbackOpen" class="retrieval-eval-summary retrieval-eval-results-view retrieval-eval-history-view" aria-live="polite">
+      <header><div><p>USER FEEDBACK</p><h2>反馈池</h2></div><div class="retrieval-eval-results-actions"><span>{{ feedbackItems.length }} 条差评</span><button type="button" class="retrieval-eval-secondary" :disabled="feedbackLoading" @click="openFeedbackPool">{{ feedbackLoading ? '加载中...' : '刷新' }}</button><button type="button" class="retrieval-eval-secondary" @click="feedbackOpen = false">返回题库</button></div></header>
+      <div v-if="feedbackLoading" class="retrieval-eval-empty">正在加载反馈...</div>
+      <div v-else-if="!feedbackItems.length" class="retrieval-eval-empty">暂无用户差评反馈。</div>
+      <div v-else class="retrieval-eval-import-records"><article v-for="item in feedbackItems" :key="item.id"><div><strong :title="item.question">{{ item.question || '（未找到原提问）' }}</strong><span>{{ formatRunTime(item.updatedAt) }}<template v-if="item.reason"> · 理由：{{ item.reason }}</template></span></div><p :title="item.answer">{{ item.answer ? item.answer.slice(0, 160) : '（无回答内容）' }}</p><button type="button" class="retrieval-eval-secondary" :disabled="feedbackBusyId === item.id || resolvedMessageIds.has(item.messageId)" @click="convertFeedback(item)">{{ resolvedMessageIds.has(item.messageId) ? '已沉淀' : feedbackBusyId === item.id ? '沉淀中...' : '转为评测草稿' }}</button></article></div>
+    </section>
 
     <section v-if="evalSummary" class="retrieval-eval-summary retrieval-eval-results-view" aria-live="polite">
       <header>

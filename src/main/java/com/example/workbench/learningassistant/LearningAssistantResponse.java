@@ -23,32 +23,48 @@ public record LearningAssistantResponse(
         List<RagSource> sources,
         List<?> traces,
         boolean readOnly,
-        RagAnswerRoute route
+        RagAnswerRoute route,
+        Long dbMessageId
 ) {
     public static LearningAssistantResponse chat(String sessionId, com.example.workbench.workbench.WorkbenchChatResponse response) {
         return new LearningAssistantResponse(sessionId, response.messageId(), response.answer(), LearningMode.CHAT,
                 LearningIntent.ANSWER, null, "CHAT", null, null, null, null,
                 response.sources().stream().map(source -> (RagSource) source).toList(), response.toolCalls(), false,
-                response.route());
+                response.route(), response.dbMessageId());
     }
 
     public static LearningAssistantResponse teaching(TeachingAgentResult result, LearningIntent intent) {
+        return teaching(result, intent, null);
+    }
+
+    public static LearningAssistantResponse teaching(TeachingAgentResult result, LearningIntent intent, Long dbMessageId) {
         return new LearningAssistantResponse(result.sessionId(), null, result.answer(), LearningMode.GUIDED, intent,
                 result.topic(), result.stage().name(), result.nextAction().name(), result.check(), null,
                 result.sessionSummary(), result.sources(), result.traces(), result.readOnly(),
                 result.sources() == null || result.sources().isEmpty()
-                        ? RagAnswerRoute.NO_KNOWLEDGE : RagAnswerRoute.LOCAL_KNOWLEDGE);
+                        ? RagAnswerRoute.NO_KNOWLEDGE : RagAnswerRoute.LOCAL_KNOWLEDGE,
+                dbMessageId);
     }
 
     public static LearningAssistantResponse check(String sessionId, TeachingCheckResponse result) {
+        return check(sessionId, result, null);
+    }
+
+    public static LearningAssistantResponse check(String sessionId, TeachingCheckResponse result, Long dbMessageId) {
         return new LearningAssistantResponse(sessionId, result.attemptId(), result.feedback(), LearningMode.REVIEW,
                 LearningIntent.SUBMIT_CHECK, result.topic(), result.stage().name(), result.nextAction().name(), result,
-                result.practice(), result.sessionSummary(), List.of(), List.of(), result.readOnly(), RagAnswerRoute.NO_KNOWLEDGE);
+                result.practice(), result.sessionSummary(), List.of(), List.of(), result.readOnly(), RagAnswerRoute.NO_KNOWLEDGE,
+                dbMessageId);
     }
 
     public static LearningAssistantResponse practice(String sessionId, TeachingPracticeResponse result) {
+        return practice(sessionId, result, null);
+    }
+
+    public static LearningAssistantResponse practice(String sessionId, TeachingPracticeResponse result, Long dbMessageId) {
         return new LearningAssistantResponse(sessionId, result.practiceId(), result.feedback(), LearningMode.PRACTICE,
                 LearningIntent.START_PRACTICE, result.topic(), result.stage().name(), result.nextAction().name(), null,
-                result, result.sessionSummary(), List.of(), List.of(), result.readOnly(), RagAnswerRoute.NO_KNOWLEDGE);
+                result, result.sessionSummary(), List.of(), List.of(), result.readOnly(), RagAnswerRoute.NO_KNOWLEDGE,
+                dbMessageId);
     }
 }

@@ -97,11 +97,13 @@ public class WorkbenchChatService {
                 return response;
             }
             workspaceService.access(user, workspace.workspaceId());
-            boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
+            Long recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
                     mode, ragResponse.answer(), response.sources(), response.toolCalls());
-            if (recorded) {
+            if (recorded != null) {
                 // 只有助手消息成功持久化后才沉淀学习记录，避免收录已删除会话的迟到回答。
                     learningRecordService.record(user, workspace.workspaceId(), request.message(), ragResponse.answer(), ragResponse.sources());
+                response = new WorkbenchChatResponse(response.messageId(), response.answer(), response.sources(),
+                        response.toolCalls(), response.route(), recorded);
             }
             return response;
         } finally {
@@ -184,10 +186,12 @@ public class WorkbenchChatService {
             String answerContent = ragService.sanitizePresentedAnswer(content.toString(), request.message());
             WorkbenchChatResponse response = new WorkbenchChatResponse(newMessageId(), answerContent, finalSources,
                     List.of(), ragResponse.route());
-            boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
+            Long recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), clientConversationId,
                     mode, answerContent, response.sources(), response.toolCalls());
-            if (recorded) {
+            if (recorded != null) {
                 learningRecordService.record(user, workspace.workspaceId(), request.message(), answerContent, finalSources);
+                response = new WorkbenchChatResponse(response.messageId(), response.answer(), response.sources(),
+                        response.toolCalls(), response.route(), recorded);
             }
             log.info(
                     "Workbench stream chat completed route=RAG_LOCAL_KNOWLEDGE conversationId={} sources={} durationMs={}",

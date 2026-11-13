@@ -24,7 +24,7 @@ class EvalGateControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new EvalController(null, null, null, null, null, null, null, evalGateService, null);
+        controller = new EvalController(null, null, null, null, null, null, null, evalGateService, null, null);
     }
 
     @Test

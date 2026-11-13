@@ -4,6 +4,7 @@ import LoadingDots from './LoadingDots.vue'
 import { renderMarkdown } from '../utils/markdown'
 import { deduplicateDisplayedSources, groupSourcesByFile } from '../utils/sources'
 import { createWikiPage } from '../api/wikiPageApi'
+import { submitMessageFeedback } from '../api/chatFeedbackApi'
 import { formatApiError } from '../api/apiError'
 
 const props = defineProps({
@@ -16,6 +17,10 @@ const props = defineProps({
     default: false
   },
   workspaceId: {
+    type: String,
+    default: ''
+  },
+  conversationId: {
     type: String,
     default: ''
   },
@@ -90,6 +95,48 @@ async function saveAsNote() {
 }
 const isModelSupplement = computed(() => isAssistant.value && !props.message.error && !props.message.sources?.length
   && props.message.content?.includes('以上回答基于通用大模型知识'))
+
+// ---- 反馈（👍/👎）：仅对已落库的助手消息开放 ----
+const feedbackRating = ref(0)
+const feedbackState = ref('idle') // idle | sending | done | error
+const feedbackError = ref('')
+const reasonOpen = ref(false)
+const reasonDraft = ref('')
+const feedbackTargetId = computed(() => props.message.id ?? props.message.learning?.dbMessageId ?? null)
+const feedbackEligible = computed(() => isAssistant.value && !props.streaming && !props.message.error
+  && !!props.message.content && !!props.workspaceId && !!props.conversationId && feedbackTargetId.value != null)
+
+async function sendFeedback(rating, reason = '') {
+  if (feedbackState.value === 'sending' || feedbackState.value === 'done') return
+  feedbackState.value = 'sending'
+  feedbackError.value = ''
+  try {
+    await submitMessageFeedback(feedbackTargetId.value, props.conversationId, rating, reason)
+    feedbackRating.value = rating
+    feedbackState.value = 'done'
+    reasonOpen.value = false
+  } catch (exception) {
+    feedbackState.value = 'idle'
+    feedbackError.value = formatApiError(exception, '反馈提交失败，请稍后重试。')
+  }
+}
+
+function onThumbUp() {
+  void sendFeedback(1)
+}
+
+function onThumbDown() {
+  if (feedbackRating.value === -1) return
+  reasonOpen.value = !reasonOpen.value
+  if (!reasonOpen.value) return
+  // 先记下用户点了踩，理由可等提交；避免展开输入框期间重复触发
+  feedbackRating.value = -1
+  feedbackState.value = 'idle'
+}
+
+async function submitReason() {
+  await sendFeedback(-1, reasonDraft.value)
+}
 function sourceLabel(group) {
   const file = group.fileName || group.file || group.title || group.name || '来源'
   const pages = group.pages?.length ? ` · 第 ${group.pages.join('、')} 页` : ''
@@ -171,11 +218,78 @@ async function copyCode(event) {
         </button>
         <span v-if="noteState === 'error'" class="message-action-error">{{ noteError }}</span>
       </div>
+      <div v-if="feedbackEligible" class="message-feedback">
+        <template v-if="feedbackState !== 'done'">
+          <button type="button" class="feedback-button" title="回答有帮助" :disabled="feedbackState === 'sending'" @click="onThumbUp">👍</button>
+          <button type="button" class="feedback-button" title="回答有问题" :class="{ active: reasonOpen }" :disabled="feedbackState === 'sending'" @click="onThumbDown">👎</button>
+          <span v-if="feedbackError" class="message-action-error">{{ feedbackError }}</span>
+        </template>
+        <span v-else class="feedback-done">已收到反馈，谢谢！{{ feedbackRating === 1 ? '👍' : '👎' }}</span>
+        <div v-if="reasonOpen && feedbackState !== 'done'" class="feedback-reason">
+          <textarea v-model="reasonDraft" rows="2" maxlength="500" placeholder="问题出在哪？（可选）" aria-label="反馈原因"></textarea>
+          <button type="button" class="message-action" :disabled="feedbackState === 'sending'" @click="submitReason">
+            {{ feedbackState === 'sending' ? '提交中…' : '提交反馈' }}
+          </button>
+        </div>
+      </div>
     </div>
   </article>
 </template>
 
 <style scoped>
+.message-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.feedback-button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 14px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.feedback-button:hover,
+.feedback-button.active {
+  opacity: 1;
+  border-color: var(--site-border, #d8ded4);
+}
+
+.feedback-button:disabled {
+  cursor: wait;
+  opacity: 0.4;
+}
+
+.feedback-done {
+  color: var(--site-muted, #718074);
+  font-size: 12px;
+}
+
+.feedback-reason {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.feedback-reason textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--site-border, #d8ded4);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
 .message-alert.error {
   display: grid;
   gap: 4px;

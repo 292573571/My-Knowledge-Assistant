@@ -115,12 +115,32 @@ class ConversationServiceTest {
         when(conversations.findVisibleByIdAndUserAndWorkspace("conversation-a", user.getId(), "team-1", "personal-null"))
                 .thenReturn(Optional.empty());
 
-        boolean recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "rag", "迟到的回答",
+        Long recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "rag", "迟到的回答",
                 java.util.List.of(), java.util.List.of());
 
-        assertThat(recorded).isFalse();
+        assertThat(recorded).isNull();
         verify(conversations, never()).save(Mockito.any(ChatConversation.class));
         verify(messages, never()).save(Mockito.any(ChatMessageEntity.class));
+    }
+
+    @Test
+    void recordAssistantMessageReturnsDatabaseIdForFeedbackCorrelation() {
+        ChatConversationRepository conversations = Mockito.mock(ChatConversationRepository.class);
+        ChatMessageRepository messages = Mockito.mock(ChatMessageRepository.class);
+        ConversationService service = new ConversationService(conversations, messages, new ConversationMemory(),
+                new ConversationExecutionRegistry(), new ObjectMapper());
+        AppUser user = new AppUser("alice", "Alice", "hash");
+        ChatConversation conversation = new ChatConversation("server-uuid", "default", user, "测试", "rag", "team-1");
+        ChatMessageEntity saved = Mockito.mock(ChatMessageEntity.class);
+        when(saved.getId()).thenReturn(457L);
+        when(conversations.findVisibleByIdAndUserAndWorkspace("default", user.getId(), "team-1", "personal-null"))
+                .thenReturn(Optional.of(conversation));
+        when(conversations.save(Mockito.any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(messages.save(Mockito.any(ChatMessageEntity.class))).thenReturn(saved);
+
+        Long dbMessageId = service.recordAssistantMessage(user, "team-1", "default", "rag", "回答", List.of(), List.of());
+
+        assertThat(dbMessageId).isEqualTo(457L);
     }
 
     @Test
@@ -140,10 +160,11 @@ class ConversationServiceTest {
                 .thenReturn(Optional.of(Mockito.mock(ChatMessageEntity.class)));
 
         service.recordUserMessage(user, "team-1", "conversation-a", "request-1", "测试", "rag", "问题");
-        boolean recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "request-1",
+        Long recorded = service.recordAssistantMessage(user, "team-1", "conversation-a", "request-1",
                 "rag", "答案", List.of(), List.of());
 
-        assertThat(recorded).isTrue();
+        assertThat(recorded).isNotNull();
+        verify(messages).findByConversationIdAndClientRequestIdAndRole("conversation-a", "request-1", "assistant");
         verify(messages, never()).save(Mockito.any(ChatMessageEntity.class));
     }
 

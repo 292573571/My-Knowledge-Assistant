@@ -107,6 +107,10 @@ public class EvalCaseEntity {
     @Comment("期望的上下文检索查询 JSON")
     private String expectedRetrievalQueries;
 
+    @Column(name = "source_message_id")
+    @Comment("由哪条聊天消息反馈沉淀而来（chat_messages.id，非反馈生成则为空）")
+    private Long sourceMessageId;
+
     protected EvalCaseEntity() {
     }
 
@@ -133,6 +137,8 @@ public class EvalCaseEntity {
     public String getExpectedRetrievalKeywords() { return expectedRetrievalKeywords; }
     public String getForbiddenRetrievalKeywords() { return forbiddenRetrievalKeywords; }
     public String getHistory() { return history; }
+    public Long getSourceMessageId() { return sourceMessageId; }
+    public void setSourceMessageId(Long sourceMessageId) { this.sourceMessageId = sourceMessageId; }
     public com.example.workbench.rag.ContextRelation getExpectedRelation() {
         if (expectedRelation == null || expectedRelation.isBlank()) {
             return null;

@@ -140,9 +140,9 @@ public class LearningAssistantService {
                 session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
                 session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
                 sessionRepository.save(session);
-                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
+                Long recorded = conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
                         result.answer(), result.sources(), result.traces());
-                return LearningAssistantResponse.teaching(result, intent);
+                return LearningAssistantResponse.teaching(result, intent, recorded);
             }
             WorkbenchChatResponse result = chatService.chat(user,
                     new WorkbenchChatRequest(sessionId, "rag", access.workspaceId(), modelInput));
@@ -187,9 +187,9 @@ public class LearningAssistantService {
                 session.touch(mode, result.topic(), result.stage().name(), "ACTIVE");
                 session.updatePreferences(request.message().strip(), request.normalizedUserLevel().name());
                 sessionRepository.save(session);
-                conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
+                Long recorded = conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(), "teaching",
                         result.answer(), result.sources(), result.traces());
-                LearningAssistantResponse response = LearningAssistantResponse.teaching(result, intent);
+                LearningAssistantResponse response = LearningAssistantResponse.teaching(result, intent, recorded);
                 if (onRoute != null) onRoute.accept(response.route());
                 if (onSources != null) onSources.accept(response.sources() == null ? List.of() : response.sources());
                 return response;
@@ -224,12 +224,12 @@ public class LearningAssistantService {
                     workspaceService.access(user, access.workspaceId());
                     conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "理解检查", "teaching", request.answer());
-                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
+                    Long recorded = conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "teaching", result.feedback(), List.of(), List.of());
                     session.touch(LearningMode.REVIEW, result.topic(), result.stage().name(),
                             result.nextAction().name().equals("COMPLETE") ? "COMPLETED" : "ACTIVE");
                     sessionRepository.save(session);
-                    return LearningAssistantResponse.check(sessionId, result);
+                    return LearningAssistantResponse.check(sessionId, result, recorded);
                 });
     }
 
@@ -244,12 +244,12 @@ public class LearningAssistantService {
                     workspaceService.access(user, access.workspaceId());
                     conversationService.recordUserMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "实践练习", "teaching", request.answer());
-                    conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
+                    Long recorded = conversationService.recordAssistantMessage(user, access.workspaceId(), sessionId, request.clientRequestId(),
                             "teaching", result.feedback(), List.of(), List.of());
                     session.touch(LearningMode.PRACTICE, result.topic(), result.stage().name(),
                             result.nextAction().name().equals("COMPLETE") ? "COMPLETED" : "ACTIVE");
                     sessionRepository.save(session);
-                    return LearningAssistantResponse.practice(sessionId, result);
+                    return LearningAssistantResponse.practice(sessionId, result, recorded);
                 });
     }
 

@@ -48,7 +48,7 @@ class EvalDraftServiceTest {
                 .thenReturn(new EvalCaseResponse(1L, "draft-001", "rag", "fact", "发布前要执行什么命令？",
                         false, true, false, List.of("deploy-guide.md"), List.of(), List.of("deploy-shihai"),
                         List.of(), List.of(), List.of(), List.of(), EvalSuite.DRAFT, EvalLayer.RETRIEVAL,
-                        List.of(), null, null, List.of()));
+                        List.of(), null, null, List.of(), null));
 
         EvalDraftService.DraftGenerationResponse response = service.generate(admin, 1);
 

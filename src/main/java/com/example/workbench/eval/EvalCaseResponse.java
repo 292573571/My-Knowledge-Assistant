@@ -12,6 +12,7 @@ public record EvalCaseResponse(
         List<Integer> expectedPageNumbers, List<String> expectedRetrievalKeywords,
         List<String> forbiddenRetrievalKeywords, EvalSuite suite, EvalLayer layer,
         List<ChatMessage> history, ContextRelation expectedRelation, String expectedStandaloneQuestion,
-        List<String> expectedRetrievalQueries
+        List<String> expectedRetrievalQueries,
+        Long sourceMessageId
 ) {
 }

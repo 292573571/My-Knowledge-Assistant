@@ -185,15 +185,17 @@ public class WorkbenchStreamController {
                 if (!execution.isCancelled()) {
                     workspaceService.access(user, workspace.workspaceId());
                     String answerContent = ragService.sanitizePresentedAnswer(content.toString(), message);
-                    boolean recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
+                    Long recorded = conversationService.recordAssistantMessage(user, workspace.workspaceId(), normalizedConversationId,
                             normalizedMode, answerContent, finalSources, List.of());
-                        if (recorded) {
+                        if (recorded != null) {
                         // 只收录真实保存成功的回答，避免已删除会话被学习记录重新引用。
                             learningRecordService.record(user, workspace.workspaceId(), message, answerContent, finalSources);
                             ragQualityAuditService.audit(scopedConversationId, message, answerContent, finalSources);
                     }
+                    send(emitter, "done", recorded == null ? Map.of() : Map.of("dbMessageId", recorded));
+                } else {
+                    send(emitter, "done", Map.of());
                 }
-                send(emitter, "done", Map.of());
                 emitter.complete();
             } catch (Exception error) {
                 try {

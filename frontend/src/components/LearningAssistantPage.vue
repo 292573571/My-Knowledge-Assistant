@@ -586,7 +586,7 @@ function closeSourceOnPointerMove(event) {
             <div v-if="error" class="learning-empty-error" role="alert"><strong>暂时无法打开学习空间</strong><span>{{ error }}</span><button type="button" @click="loadSessions">重试</button></div>
           </div>
           <template v-for="message in messages" :key="message.id">
-            <ChatMessage :message="message" :streaming="message.streaming" :workspace-id="workspaceId" :question="questionFor(message)" @retry="regenerate(message)" />
+            <ChatMessage :message="message" :streaming="message.streaming" :workspace-id="workspaceId" :conversation-id="activeSessionId" :question="questionFor(message)" @retry="regenerate(message)" />
             <div v-if="message.role === 'assistant' && message.interrupted && message.streaming" class="stream-recovery hint" role="status">
               回答中断,正在自动恢复…
             </div>
