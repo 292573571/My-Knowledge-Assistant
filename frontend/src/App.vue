@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { changePassword, clearLegacyAccessToken, fetchAvatarUrl, fetchCurrentUser, logout } from './api/authApi'
 import AuthPage from './components/AuthPage.vue'
 import LearningAssistantPage from './components/LearningAssistantPage.vue'
+import GlobalSearch from './components/GlobalSearch.vue'
 import HomePage from './components/HomePage.vue'
 import ModelConfig from './components/ModelConfig.vue'
 import { fetchWorkspaces, initializePersonalWorkspace, setActiveWorkspaceId } from './api/workspaceApi'
@@ -25,6 +26,20 @@ const authOpen = ref(false)
 const activeSection = ref('home')
 // 知识库内部子视图: 'docs'=文档库(上传文件), 'wiki'=知识笔记(写 markdown)
 const knowledgeTab = ref('docs')
+// 全局搜索直达：目标 wiki 页 / 文档（子组件打开后清空，保证同一目标可重复跳转）
+const wikiOpenPageId = ref(null)
+const docsOpenDocumentId = ref(null)
+
+function onSearchNavigate(hit) {
+  if (!hit) return
+  if (hit.type === 'WIKI' && hit.wikiPageId) {
+    navigateTo('knowledge', 'wiki')
+    wikiOpenPageId.value = hit.wikiPageId
+  } else if (hit.documentId) {
+    navigateTo('knowledge', 'docs')
+    docsOpenDocumentId.value = hit.documentId
+  }
+}
 // Wiki 子视图: 'pages'=页面列表/编辑器, 'graph'=知识图谱（与 Wiki 同页面，仅切换视图）
 const wikiView = ref('pages')
 const assistantMounted = ref(false)
@@ -388,6 +403,7 @@ async function submitPasswordChange() {
           </button>
           </nav>
         <div class="portal-user-tools">
+          <GlobalSearch @navigate="onSearchNavigate" />
           <label class="portal-workspace-select" title="当前知识空间">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 12 3l8 3.5-8 3.5-8-3.5Z"/><path d="m6 10 6 2.7 6-2.7M6 14l6 2.7 6-2.7"/></svg>
             <select :value="activeWorkspaceId" :disabled="switchingWorkspace" aria-label="切换知识空间" @change="switchWorkspace">
@@ -445,8 +461,8 @@ async function submitPasswordChange() {
             <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="selectKnowledgeTab('docs')">文档库</button>
             <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">知识笔记</button>
           </div>
-          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" @manage-workspace="workspaceManagerOpen = true" />
-          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" @view-change="onWikiViewChange" />
+          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" :initial-document-id="docsOpenDocumentId" @manage-workspace="workspaceManagerOpen = true" @document-opened="docsOpenDocumentId = null" />
+          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" :open-page-id="wikiOpenPageId" @wiki-page-opened="wikiOpenPageId = null" @view-change="onWikiViewChange" />
         </div>
       </template>
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />

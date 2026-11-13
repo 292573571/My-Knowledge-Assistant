@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { changeDocumentVisibility, deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -9,8 +9,12 @@ import { createUuid } from '../utils/uuid'
 
 const props = defineProps({
   workspace: { type: Object, default: null },
-  currentUser: { type: Object, default: null }
+  currentUser: { type: Object, default: null },
+  // 全局搜索跳转：落到文档库并直接打开该文档
+  initialDocumentId: { type: String, default: null }
 })
+
+const emit = defineEmits(['documentOpened'])
 
 const documents = ref([])
 const loading = ref(false)
@@ -475,6 +479,25 @@ async function openDocument(document) {
     contentLoading.value = false
   }
 }
+
+// 全局搜索直达：列表未加载时先补一次，再打开目标文档
+async function openInitialDocument() {
+  const id = props.initialDocumentId
+  if (!id) return
+  let target = documents.value.find(item => item.documentId === id)
+  if (!target) {
+    await loadDocuments()
+    target = documents.value.find(item => item.documentId === id)
+  }
+  if (target) {
+    await openDocument(target)
+    emit('documentOpened', id)
+  }
+}
+
+watch(() => props.initialDocumentId, (id) => {
+  if (id) void openInitialDocument()
+})
 
 async function handleDelete(documentId) {
   const document = documents.value.find((item) => item.documentId === documentId)

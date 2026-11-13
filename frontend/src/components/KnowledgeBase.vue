@@ -2,12 +2,14 @@
 import DocumentPanel from './DocumentPanel.vue'
 import KnowledgeHealth from './KnowledgeHealth.vue'
 
-defineProps({
+const props = defineProps({
   workspace: { type: Object, default: null },
-  currentUser: { type: Object, default: null }
+  currentUser: { type: Object, default: null },
+  // 全局搜索跳转：直达文档库并打开指定文档
+  initialDocumentId: { type: String, default: null }
 })
 
-defineEmits(['manage-workspace'])
+const emit = defineEmits(['manage-workspace', 'documentOpened'])
 </script>
 
 <template>
@@ -31,7 +33,7 @@ defineEmits(['manage-workspace'])
       </div>
     </section>
     <section class="knowledge-card" data-reveal>
-      <DocumentPanel :workspace="workspace" :current-user="currentUser" />
+      <DocumentPanel :workspace="workspace" :current-user="currentUser" :initial-document-id="initialDocumentId" @document-opened="emit('documentOpened', $event)" />
     </section>
     <section v-if="currentUser?.systemRole === 'SUPER_ADMIN'" class="knowledge-card" data-reveal>
       <KnowledgeHealth />

@@ -1564,7 +1564,9 @@ public class RagService {
                     source.score(),
                     source.headingPath(),
                     source.path(),
-                    source.pageNumber() > 0 ? source.pageNumber() : null
+                    source.pageNumber() > 0 ? source.pageNumber() : null,
+                    source.documentId(),
+                    source.category()
             ));
         }
         return ragSources.stream().distinct().toList();
