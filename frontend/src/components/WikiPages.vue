@@ -21,9 +21,11 @@ const props = defineProps({
   workspace: { type: Object, default: null },
   openPageId: { type: String, default: null },
   // 由 URL 状态传入，支持 ?tab=wiki&view=graph 直接落到图谱视图
-  initialView: { type: String, default: 'pages' }
+  initialView: { type: String, default: 'pages' },
+  // 「文档 → 笔记」AI 沉淀草稿：{title, contentMd, sourceType, sourceRef}，预填新建页
+  incomingDraft: { type: Object, default: null }
 })
-const emit = defineEmits(['wikiPageOpened', 'viewChange'])
+const emit = defineEmits(['wikiPageOpened', 'viewChange', 'wikiDraftConsumed'])
 
 // 视图：'pages'=页面（目录 + 文档），'graph'=图谱
 const view = ref(props.initialView === 'graph' ? 'graph' : 'pages')
@@ -214,17 +216,33 @@ async function selectPage(page) {
   }
 }
 
-function newPage() {
+function newPage(prefill = null) {
   readToken += 1
   selectedId.value = null
   selected.value = null
   isNew.value = true
-  draft.value = { title: '', slug: '', parentId: '', contentMd: '' }
+  draft.value = {
+    title: prefill?.title || '',
+    slug: '',
+    parentId: '',
+    contentMd: prefill?.contentMd || ''
+  }
   resetBaseline()
   previewMode.value = false
   error.value = ''
   notice.value = ''
 }
+
+// 「文档 → 笔记」AI 草稿到达：新建页并预填，用户确认后才落库
+const pendingSource = ref({ sourceType: null, sourceRef: null })
+watch(() => props.incomingDraft, (draftPayload) => {
+  if (!draftPayload) return
+  view.value = 'pages'
+  pendingSource.value = { sourceType: draftPayload.sourceType || null, sourceRef: draftPayload.sourceRef || null }
+  newPage(draftPayload)
+  emit('viewChange', 'pages')
+  emit('wikiDraftConsumed')
+})
 
 function triggerImport() {
   if (importInput.value) importInput.value.click()
@@ -309,7 +327,9 @@ async function save() {
     title: draft.value.title,
     slug: draft.value.slug || undefined,
     parentId: draft.value.parentId || undefined,
-    contentMd: draft.value.contentMd
+    contentMd: draft.value.contentMd,
+    sourceType: pendingSource.value.sourceType || undefined,
+    sourceRef: pendingSource.value.sourceRef || undefined
   }
   const savedContent = draft.value.contentMd
   try {

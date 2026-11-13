@@ -29,6 +29,8 @@ const knowledgeTab = ref('docs')
 // 全局搜索直达：目标 wiki 页 / 文档（子组件打开后清空，保证同一目标可重复跳转）
 const wikiOpenPageId = ref(null)
 const docsOpenDocumentId = ref(null)
+// 「文档 → 笔记」AI 草稿：交给 WikiPages 预填新建页
+const wikiIncomingDraft = ref(null)
 
 function onSearchNavigate(hit) {
   if (!hit) return
@@ -39,6 +41,12 @@ function onSearchNavigate(hit) {
     navigateTo('knowledge', 'docs')
     docsOpenDocumentId.value = hit.documentId
   }
+}
+
+function onWikiDraftReady(draft) {
+  if (!draft) return
+  navigateTo('knowledge', 'wiki')
+  wikiIncomingDraft.value = draft
 }
 // Wiki 子视图: 'pages'=页面列表/编辑器, 'graph'=知识图谱（与 Wiki 同页面，仅切换视图）
 const wikiView = ref('pages')
@@ -461,8 +469,8 @@ async function submitPasswordChange() {
             <button :class="{ active: knowledgeTab === 'docs' }" type="button" role="tab" :aria-selected="knowledgeTab === 'docs'" @click="selectKnowledgeTab('docs')">文档库</button>
             <button :class="{ active: knowledgeTab === 'wiki' }" type="button" role="tab" :aria-selected="knowledgeTab === 'wiki'" @click="selectKnowledgeTab('wiki')">知识笔记</button>
           </div>
-          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" :initial-document-id="docsOpenDocumentId" @manage-workspace="workspaceManagerOpen = true" @document-opened="docsOpenDocumentId = null" />
-          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" :open-page-id="wikiOpenPageId" @wiki-page-opened="wikiOpenPageId = null" @view-change="onWikiViewChange" />
+          <KnowledgeBase v-show="knowledgeTab === 'docs'" :key="`knowledge-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :current-user="currentUser" :initial-document-id="docsOpenDocumentId" @manage-workspace="workspaceManagerOpen = true" @document-opened="docsOpenDocumentId = null" @wiki-draft-ready="onWikiDraftReady" />
+          <WikiPages v-show="knowledgeTab === 'wiki'" :key="`wiki-${activeWorkspaceId}`" :workspace="workspaces.find(item => item.id === activeWorkspaceId)" :initial-view="wikiView" :open-page-id="wikiOpenPageId" :incoming-draft="wikiIncomingDraft" @wiki-page-opened="wikiOpenPageId = null" @wiki-draft-consumed="wikiIncomingDraft = null" @view-change="onWikiViewChange" />
         </div>
       </template>
       <UserProfile v-else-if="activeSection === 'profile'" :user="currentUser" :avatar-src="avatarSrc" @updated="updateCurrentUser" @avatar-updated="refreshAvatar" />

@@ -26,13 +26,37 @@ public class WikiPageController {
     private final WorkspaceService workspaceService;
     private final WikiImportTaskService importTaskService;
     private final WikiPageExportService exportService;
+    private final WikiDraftTaskService draftTaskService;
 
     public WikiPageController(WikiPageService wikiPageService, WorkspaceService workspaceService,
-                              WikiImportTaskService importTaskService, WikiPageExportService exportService) {
+                              WikiImportTaskService importTaskService, WikiPageExportService exportService,
+                              WikiDraftTaskService draftTaskService) {
         this.wikiPageService = wikiPageService;
         this.workspaceService = workspaceService;
         this.importTaskService = importTaskService;
         this.exportService = exportService;
+        this.draftTaskService = draftTaskService;
+    }
+
+    /** 文档 → 笔记 AI 沉淀：受理异步任务，前端轮询 GET /draft/{taskId}。 */
+    @PostMapping("/draft-from-document")
+    public java.util.Map<String, String> submitDraft(@RequestParam String workspaceId,
+                                                     @RequestBody java.util.Map<String, String> body,
+                                                     HttpServletRequest request) {
+        AppUser user = user(request);
+        workspaceService.access(user, workspaceId);
+        String taskId = draftTaskService.submit(user, workspaceId,
+                body == null ? null : body.get("documentId"));
+        return java.util.Map.of("taskId", taskId);
+    }
+
+    @GetMapping("/draft/{taskId}")
+    public WikiDraftTaskService.DraftTaskView draftTask(@PathVariable String taskId,
+                                                        @RequestParam String workspaceId,
+                                                        HttpServletRequest request) {
+        AppUser user = user(request);
+        workspaceService.access(user, workspaceId);
+        return draftTaskService.poll(user, taskId);
     }
 
     @PostMapping

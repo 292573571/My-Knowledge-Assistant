@@ -85,7 +85,9 @@ async function saveAsNote() {
       title: noteTitle.value,
       slug: '',
       parentId: '',
-      contentMd: noteContent.value
+      contentMd: noteContent.value,
+      sourceType: 'CHAT',
+      sourceRef: feedbackTargetId.value != null ? String(feedbackTargetId.value) : null
     })
     noteState.value = 'done'
   } catch (exception) {

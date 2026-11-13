@@ -9,7 +9,7 @@ const props = defineProps({
   initialDocumentId: { type: String, default: null }
 })
 
-const emit = defineEmits(['manage-workspace', 'documentOpened'])
+const emit = defineEmits(['manage-workspace', 'documentOpened', 'wikiDraftReady'])
 </script>
 
 <template>
@@ -33,7 +33,7 @@ const emit = defineEmits(['manage-workspace', 'documentOpened'])
       </div>
     </section>
     <section class="knowledge-card" data-reveal>
-      <DocumentPanel :workspace="workspace" :current-user="currentUser" :initial-document-id="initialDocumentId" @document-opened="emit('documentOpened', $event)" />
+      <DocumentPanel :workspace="workspace" :current-user="currentUser" :initial-document-id="initialDocumentId" @document-opened="emit('documentOpened', $event)" @wiki-draft-ready="emit('wikiDraftReady', $event)" />
     </section>
     <section v-if="currentUser?.systemRole === 'SUPER_ADMIN'" class="knowledge-card" data-reveal>
       <KnowledgeHealth />

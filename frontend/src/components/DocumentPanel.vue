@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatApiError } from '../api/apiError'
 import { changeDocumentVisibility, deleteDocument, fetchDocumentContent, fetchDocuments, fetchDocumentTaskBatches, fetchDocumentTasks, fetchDocumentTaskSource, retryDocumentTask, uploadWorkspaceDocument } from '../api/documentApi'
+import { fetchWikiDraftTask, requestWikiDraft } from '../api/wikiPageApi'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocumentContentDialog from './DocumentContentDialog.vue'
 import { useDialogFocus } from '../composables/useDialogFocus'
@@ -14,7 +15,7 @@ const props = defineProps({
   initialDocumentId: { type: String, default: null }
 })
 
-const emit = defineEmits(['documentOpened'])
+const emit = defineEmits(['documentOpened', 'wikiDraftReady'])
 
 const documents = ref([])
 const loading = ref(false)
@@ -495,6 +496,60 @@ async function openInitialDocument() {
   }
 }
 
+// 文档 → 知识笔记 AI 沉淀：受理后台任务并轮询，草稿交上层跳转 wiki 编辑器预填
+const wikiDraftBusyId = ref(null)
+const wikiDraftTaskId = ref(null)
+let wikiDraftPollTimer = null
+
+async function generateWikiNote(document) {
+  if (wikiDraftBusyId.value) return
+  wikiDraftBusyId.value = document.documentId
+  try {
+    const { taskId } = await requestWikiDraft(props.workspace?.id, document.documentId)
+    wikiDraftTaskId.value = taskId
+    wikiDraftPollTimer = window.setTimeout(() => pollWikiDraft(taskId, document), 1500)
+  } catch (exception) {
+    showError(`笔记生成任务提交失败：${formatApiError(exception)}`)
+    wikiDraftBusyId.value = null
+  }
+}
+
+async function pollWikiDraft(taskId, document) {
+  try {
+    const task = await fetchWikiDraftTask(props.workspace?.id, taskId)
+    if (!task) {
+      showError('笔记生成任务已过期，请重新生成。')
+      wikiDraftBusyId.value = null
+      return
+    }
+    if (task.status === 'RUNNING') {
+      wikiDraftPollTimer = window.setTimeout(() => pollWikiDraft(taskId, document), 2500)
+      return
+    }
+    if (task.status === 'FAILED') {
+      showError(`笔记生成失败：${task.error || '模型返回异常，请稍后重试。'}`)
+      return
+    }
+    emit('wikiDraftReady', {
+      title: task.title || `${displayFileName(document)} 笔记`,
+      contentMd: task.contentMd || '',
+      sourceType: 'DOCUMENT',
+      sourceRef: document.documentId
+    })
+  } catch (exception) {
+    showError(`笔记生成任务查询失败：${formatApiError(exception)}`)
+  } finally {
+    if (wikiDraftTaskId.value === taskId) {
+      wikiDraftBusyId.value = null
+      wikiDraftTaskId.value = null
+    }
+  }
+}
+
+onBeforeUnmount(() => {
+  if (wikiDraftPollTimer) window.clearTimeout(wikiDraftPollTimer)
+})
+
 watch(() => props.initialDocumentId, (id) => {
   if (id) void openInitialDocument()
 })
@@ -680,6 +735,12 @@ useDialogFocus(uploadDialogRef, closeUploadDialog)
             </select>
           </label>
           <span v-else class="document-visibility-static">{{ visibilityLabels[document.visibility] || '空间内可见' }}</span>
+          <button
+            type="button"
+            :disabled="wikiDraftBusyId === document.documentId"
+            :title="`用 AI 把「${displayFileName(document)}」提炼成知识笔记`"
+            @click.stop="generateWikiNote(document)"
+          >{{ wikiDraftBusyId === document.documentId ? '生成中…' : '生成笔记' }}</button>
           <button type="button" class="danger" :disabled="loading" @click.stop="handleDelete(document.documentId)">删除</button>
         </div>
       </div>

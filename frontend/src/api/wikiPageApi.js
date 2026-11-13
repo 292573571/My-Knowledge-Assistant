@@ -41,6 +41,20 @@ export function deleteWikiPage(id, workspaceId) {
   return request(`/api/wiki-pages/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, { method: 'DELETE' })
 }
 
+// 受理「文档 → 笔记」AI 沉淀任务：立即返回 { taskId }，前端轮询 draftWikiTask。
+export function requestWikiDraft(workspaceId, documentId) {
+  return request(`/api/wiki-pages/draft-from-document?workspaceId=${encodeURIComponent(workspaceId || '')}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentId })
+  }, '笔记生成任务提交失败。')
+}
+
+// 轮询笔记生成任务：RUNNING / SUCCEEDED({title,contentMd}) / FAILED({error}) / null(任务过期)
+export function fetchWikiDraftTask(workspaceId, taskId) {
+  return request(`/api/wiki-pages/draft/${encodeURIComponent(taskId)}?workspaceId=${encodeURIComponent(workspaceId || '')}`, {}, '笔记生成任务查询失败。')
+}
+
 // 受理 wiki 导入任务：立即返回 { taskId }，后台异步解析（大文件 OCR 可能耗时数分钟）。
 export function importWikiPageFile(workspaceId, file) {
   const formData = new FormData()

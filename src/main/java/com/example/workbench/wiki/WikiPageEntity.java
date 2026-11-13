@@ -59,6 +59,14 @@ public class WikiPageEntity {
     @Comment("更新时间")
     private Instant updatedAt;
 
+    @Column(name = "source_type", length = 16)
+    @Comment("笔记来源类型：MANUAL 手写 / DOCUMENT 文档沉淀 / CHAT 问答沉淀，空为历史数据")
+    private String sourceType;
+
+    @Column(name = "source_ref", length = 128)
+    @Comment("来源引用：DOCUMENT=documentId，CHAT=chat_messages.id")
+    private String sourceRef;
+
     protected WikiPageEntity() {
     }
 
@@ -129,5 +137,21 @@ public class WikiPageEntity {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceRef() {
+        return sourceRef;
+    }
+
+    public void setSourceRef(String sourceRef) {
+        this.sourceRef = sourceRef;
     }
 }

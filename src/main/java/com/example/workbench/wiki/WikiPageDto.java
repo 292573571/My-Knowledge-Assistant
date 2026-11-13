@@ -14,7 +14,9 @@ public record WikiPageDto(
         String contentMd,
         String ownerId,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String sourceType,
+        String sourceRef
 ) {
     public static WikiPageDto from(WikiPageEntity entity) {
         return new WikiPageDto(
@@ -26,7 +28,9 @@ public record WikiPageDto(
                 entity.getContentMd(),
                 entity.getOwnerId(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt()
+                entity.getUpdatedAt(),
+                entity.getSourceType(),
+                entity.getSourceRef()
         );
     }
 }

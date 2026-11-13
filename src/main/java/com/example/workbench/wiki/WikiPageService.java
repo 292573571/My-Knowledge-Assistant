@@ -7,6 +7,7 @@ import com.example.workbench.rag.ParsedDocument;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -46,6 +47,7 @@ public class WikiPageService {
                 now,
                 now
         );
+        applySource(entity, request);
         repository.save(entity);
         ingest(entity);
         return WikiPageDto.from(entity);
@@ -61,10 +63,24 @@ public class WikiPageService {
         }
         entity.setParentId(normalizeParentId(request.parentId()));
         entity.setContentMd(request.contentMd() == null ? "" : request.contentMd());
+        applySource(entity, request);
         entity.setUpdatedAt(Instant.now());
         repository.save(entity);
         ingest(entity);
         return WikiPageDto.from(entity);
+    }
+
+    /** 来源溯源：只接受白名单类型，空值保持原状（不抹掉已有来源）。 */
+    private void applySource(WikiPageEntity entity, WikiPageRequest request) {
+        String sourceType = request.sourceType() == null ? "" : request.sourceType().strip().toUpperCase();
+        if (sourceType.isEmpty()) {
+            return;
+        }
+        if (!Set.of("MANUAL", "DOCUMENT", "CHAT").contains(sourceType)) {
+            return;
+        }
+        entity.setSourceType(sourceType);
+        entity.setSourceRef(request.sourceRef() == null ? null : request.sourceRef().strip());
     }
 
     @Transactional
