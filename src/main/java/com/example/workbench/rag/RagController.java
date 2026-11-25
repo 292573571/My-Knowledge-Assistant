@@ -47,7 +47,8 @@ public class RagController {
     private final RagService ragService;
     private final AiConfig aiConfig;
     private final ObjectProvider<ChatClient> chatClientProvider;
-    private final ChromaVectorStoreAdapter vectorStore;
+    private final ScopedVectorStore vectorStore;
+    private final VectorEmbeddingBackfillService embeddingBackfillService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -61,7 +62,8 @@ public class RagController {
             RagService ragService,
             AiConfig aiConfig,
             ObjectProvider<ChatClient> chatClientProvider,
-            ChromaVectorStoreAdapter vectorStore,
+            ScopedVectorStore vectorStore,
+            VectorEmbeddingBackfillService embeddingBackfillService,
             AdminAuthorizationService adminAuthorizationService,
             WorkspaceService workspaceService,
             AuditService auditService,
@@ -75,6 +77,7 @@ public class RagController {
         this.aiConfig = aiConfig;
         this.chatClientProvider = chatClientProvider;
         this.vectorStore = vectorStore;
+        this.embeddingBackfillService = embeddingBackfillService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.workspaceService = workspaceService;
         this.auditService = auditService;
@@ -272,28 +275,49 @@ public class RagController {
     @GetMapping("/health")
     public WorkbenchStatus health() {
         List<DocumentIndexEntry> documents = documentIngestionService.listPublicIndexedDocuments();
-        boolean chromaConfigured = vectorStore.isChromaConfigured();
-        // 配置存在 ≠ 可用：Chroma 挂掉时 Bean 仍在，必须实测连通性，否则故障期间 health 依旧一脸健康。
-        boolean chromaReachable = chromaConfigured && vectorStore.chromaReachable();
+        // 配置存在 ≠ 可用：持久向量库挂掉时 Bean 仍在，必须实测连通性，否则故障期间 health 依旧一脸健康。
+        boolean storeConfigured = vectorStore.persistentStoreConfigured();
+        boolean storeReachable = storeConfigured && vectorStore.persistentStoreReachable();
 
         return new WorkbenchStatus(
                 aiConfig.provider(),
                 aiConfig.model(),
                 chatClientProvider.getIfAvailable() != null,
-                vectorStoreLabel(chromaConfigured, chromaReachable),
-                chromaConfigured,
-                chromaReachable,
+                vectorStoreLabel(vectorStore.providerName(), storeConfigured, storeReachable),
+                storeConfigured,
+                storeReachable,
                 documents.size(),
                 documents.stream().mapToInt(DocumentIndexEntry::chunkCount).sum()
         );
     }
 
-    /** 区分「未配置」「已配置且可用」「已配置但连不上」——故障时不能只显示 "Chroma"。 */
-    private String vectorStoreLabel(boolean chromaConfigured, boolean chromaReachable) {
-        if (!chromaConfigured) {
+    /** 区分「未配置」「已配置且可用」「已配置但连不上」——故障时不能只显示商标名。 */
+    private String vectorStoreLabel(String provider, boolean configured, boolean reachable) {
+        if (!configured) {
             return "内存回退";
         }
-        return chromaReachable ? "Chroma" : "Chroma(不可达)";
+        String label = "pgvector".equals(provider) ? "pgvector" : "Chroma";
+        return reachable ? label : label + "(不可达)";
+    }
+
+    /**
+     * 存量切片嵌入回填：为 embedding 为空的 document_chunks 行补算向量（无条件可用，
+     * 两步发版的休眠期即可执行）。分批调用规避嵌入接口限速；幂等，可重复执行直至 done=true。
+     */
+    @PostMapping("/admin/vector-store/backfill")
+    public Map<String, Object> backfillEmbeddings(
+            @RequestParam(defaultValue = "32") int batchSize,
+            HttpServletRequest request) {
+        requireAdmin(request);
+        long missingBefore = embeddingBackfillService.countMissingEmbeddings();
+        int processed = embeddingBackfillService.backfillMissingEmbeddings(
+                Math.min(Math.max(batchSize, 1), 128));
+        long missingAfter = embeddingBackfillService.countMissingEmbeddings();
+        return Map.of(
+                "missingBefore", missingBefore,
+                "processed", processed,
+                "missingAfter", missingAfter,
+                "done", missingAfter == 0);
     }
 
     @DeleteMapping("/documents/{documentId}")

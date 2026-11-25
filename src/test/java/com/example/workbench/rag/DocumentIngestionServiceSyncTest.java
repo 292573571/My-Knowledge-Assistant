@@ -112,7 +112,7 @@ class DocumentIngestionServiceSyncTest {
         Files.writeString(document, "# Persisted\n\nContent that was indexed before the process restarted.");
         service.syncDocsDirectory();
         DocumentIndexEntry entry = indexStore.list().get(0);
-        VectorStore restartedVectorStore = Mockito.mock(VectorStore.class);
+        ScopedVectorStore restartedVectorStore = Mockito.mock(ScopedVectorStore.class);
         DocumentIngestionService restartedService = new DocumentIngestionService(
                 restartedVectorStore,
                 indexStore,
@@ -155,20 +155,20 @@ class DocumentIngestionServiceSyncTest {
     }
 
     @Test
-    void recoversPreviewFromChromaWhenSourceFileIsMissing() throws Exception {
+    void recoversPreviewFromVectorStoreWhenSourceFileIsMissing() throws Exception {
         Path document = docsDirectory.resolve("recoverable.md");
         Files.writeString(document, "# Recoverable\n\nIndexed content survives source loss.");
         service.syncDocsDirectory();
         DocumentIndexEntry entry = indexStore.list().get(0);
         Files.delete(document);
 
-        ChromaVectorStoreAdapter chroma = Mockito.mock(ChromaVectorStoreAdapter.class);
-        Mockito.when(chroma.documentsByIds(Mockito.anyList())).thenReturn(List.of(
+        ScopedVectorStore vectorStore = Mockito.mock(ScopedVectorStore.class);
+        Mockito.when(vectorStore.documentsByIds(Mockito.anyList())).thenReturn(List.of(
                 recoveredChunk(entry, 0, "First indexed section ABC", 0, 25),
                 recoveredChunk(entry, 1, "ABC second indexed section", 22, 48)
         ));
         DocumentIngestionService recoveredService = new DocumentIngestionService(
-                chroma, indexStore, parserRouter(), new DocumentChunkerRouter(List.of(
+                vectorStore, indexStore, parserRouter(), new DocumentChunkerRouter(List.of(
                 new MarkdownSmartChunker(), new TextParagraphChunker(), new PdfPageChunker(),
                 new DocxBlockChunker(), new HtmlBlockChunker(), new ImageOcrChunker())), docsDirectory);
 
@@ -176,7 +176,7 @@ class DocumentIngestionServiceSyncTest {
 
         assertThat(response.content()).isEqualTo("First indexed section ABC second indexed section");
         assertThat(response.sourceAvailable()).isFalse();
-        verify(chroma).documentsByIds(java.util.stream.IntStream.range(0, entry.chunkCount())
+        verify(vectorStore).documentsByIds(java.util.stream.IntStream.range(0, entry.chunkCount())
                 .mapToObj(index -> entry.documentId() + "#chunk-" + index).toList());
     }
 
@@ -361,7 +361,7 @@ class DocumentIngestionServiceSyncTest {
 
     @Test
     void removesPreviouslyWrittenPdfBatchesWhenLaterVectorWriteFails() throws Exception {
-        VectorStore failingVectorStore = Mockito.mock(VectorStore.class);
+        ScopedVectorStore failingVectorStore = Mockito.mock(ScopedVectorStore.class);
         Mockito.doNothing().doThrow(new IllegalStateException("Failed to write documents to Chroma"))
                 .when(failingVectorStore).addAll(Mockito.anyList());
         DocumentTaskBatchArtifactStore artifactStore = Mockito.mock(DocumentTaskBatchArtifactStore.class);

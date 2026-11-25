@@ -17,11 +17,13 @@ import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 @Primary
 @Component
+@ConditionalOnProperty(name = "workbench.rag.vector-store", havingValue = "chroma", matchIfMissing = true)
 public class ChromaVectorStoreAdapter implements ScopedVectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(ChromaVectorStoreAdapter.class);
@@ -58,6 +60,21 @@ public class ChromaVectorStoreAdapter implements ScopedVectorStore {
     ) {
         this(chromaVectorStoreProvider, fallbackVectorStore, emptyProvider(ChromaApi.class),
                 emptyProvider(ChromaVectorStoreProperties.class), Optional.empty());
+    }
+
+    @Override
+    public String providerName() {
+        return "chroma";
+    }
+
+    @Override
+    public boolean persistentStoreConfigured() {
+        return isChromaConfigured();
+    }
+
+    @Override
+    public boolean persistentStoreReachable() {
+        return chromaReachable();
     }
 
     public boolean isChromaConfigured() {

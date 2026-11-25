@@ -28,13 +28,13 @@ public class DocumentVisibilityService {
     private final AdminAuthorizationService adminAuthorizationService;
     private final DocumentIndexRepository indexRepository;
     private final DocumentChunkRepository chunkRepository;
-    private final ChromaVectorStoreAdapter vectorStore;
+    private final ScopedVectorStore vectorStore;
 
     public DocumentVisibilityService(WorkspaceService workspaceService,
                                      AdminAuthorizationService adminAuthorizationService,
                                      DocumentIndexRepository indexRepository,
                                      DocumentChunkRepository chunkRepository,
-                                     ChromaVectorStoreAdapter vectorStore) {
+                                     ScopedVectorStore vectorStore) {
         this.workspaceService = workspaceService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.indexRepository = indexRepository;

@@ -38,7 +38,7 @@ public class DocumentIngestionService {
     private static final Path DEFAULT_DOCS_DIRECTORY = Path.of("docs");
 
     private final List<SourceDocument> documents = new ArrayList<>();
-    private final VectorStore vectorStore;
+    private final ScopedVectorStore vectorStore;
     private final DocumentIndexStore documentIndexStore;
     private final DocumentParserRouter documentParserRouter;
     private final DocumentChunkerRouter documentChunkerRouter;
@@ -69,7 +69,7 @@ public class DocumentIngestionService {
 
     @Autowired
     public DocumentIngestionService(
-            VectorStore vectorStore,
+            ScopedVectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
@@ -80,7 +80,7 @@ public class DocumentIngestionService {
     }
 
     DocumentIngestionService(
-            VectorStore vectorStore,
+            ScopedVectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
@@ -90,7 +90,7 @@ public class DocumentIngestionService {
     }
 
     DocumentIngestionService(
-            VectorStore vectorStore,
+            ScopedVectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
@@ -101,7 +101,7 @@ public class DocumentIngestionService {
     }
 
     DocumentIngestionService(
-            VectorStore vectorStore,
+            ScopedVectorStore vectorStore,
             DocumentIndexStore documentIndexStore,
             DocumentParserRouter documentParserRouter,
             DocumentChunkerRouter documentChunkerRouter,
@@ -668,10 +668,7 @@ public class DocumentIngestionService {
     }
 
     private DocumentContentResponse recoveredDocumentContent(DocumentIndexEntry entry) {
-        if (!(vectorStore instanceof ChromaVectorStoreAdapter chromaVectorStore)) {
-            throw new IllegalArgumentException("文档源文件和索引正文均不可用，请重新上传：" + entry.fileName());
-        }
-        List<SourceDocument> chunks = chromaVectorStore.documentsByIds(chunkIds(entry)).stream()
+        List<SourceDocument> chunks = vectorStore.documentsByIds(chunkIds(entry)).stream()
                 .filter(chunk -> entry.documentId().equals(chunk.documentId()))
                 .sorted(java.util.Comparator.comparingInt(SourceDocument::chunkIndex))
                 .toList();

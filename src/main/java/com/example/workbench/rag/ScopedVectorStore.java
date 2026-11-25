@@ -33,4 +33,32 @@ public interface ScopedVectorStore extends VectorStore {
      * @return 向量库中仍存在的文档分块
      */
     List<SourceDocument> documentsByIds(List<String> ids);
+
+    /**
+     * 活动向量存储提供商标识（chroma / pgvector / memory）。
+     */
+    default String providerName() {
+        return "memory";
+    }
+
+    /**
+     * 持久向量存储是否已配置（Bean 存在 ≠ 可用，可用性见 persistentStoreReachable）。
+     */
+    default boolean persistentStoreConfigured() {
+        return false;
+    }
+
+    /**
+     * 持久向量存储当前是否真实可用（实测连通性，而非仅看配置）。
+     */
+    default boolean persistentStoreReachable() {
+        return persistentStoreConfigured();
+    }
+
+    /**
+     * 仅刷新向量库侧的分块可见性元数据（visibility / owner / workspace），不重嵌入。
+     * 默认空实现：纯内存实现随 SourceDocument 全量写入，无需单独刷新。
+     */
+    default void refreshVisibilityMetadata(List<SourceDocument> documents) {
+    }
 }
