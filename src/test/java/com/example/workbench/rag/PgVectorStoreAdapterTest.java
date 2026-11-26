@@ -103,7 +103,7 @@ class PgVectorStoreAdapterTest {
         org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(entityManager).createNativeQuery(sql.capture());
         assertThat(sql.getValue()).contains("category <> 'LEARNING_RECORD'");
-        assertThat(sql.getValue()).contains("embedding <=> cast(:queryVector as public.vector)");
+        assertThat(sql.getValue()).contains("embedding OPERATOR(public.<=>) cast(:queryVector as public.vector)");
         assertThat(sql.getValue()).contains("embedding is not null");
     }
 
