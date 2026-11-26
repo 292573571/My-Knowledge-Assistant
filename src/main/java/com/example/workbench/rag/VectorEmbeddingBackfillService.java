@@ -70,7 +70,7 @@ public class VectorEmbeddingBackfillService {
 
     private void updateEmbedding(String id, float[] vector) {
         entityManager.createNativeQuery(
-                "update document_chunks set embedding = cast(:embedding as vector) where id = :id")
+                "update document_chunks set embedding = cast(:embedding as public.vector) where id = :id")
                 .setParameter("embedding", vectorLiteral(vector))
                 .setParameter("id", id)
                 .executeUpdate();

@@ -177,7 +177,7 @@ public class PgVectorStoreAdapter implements ScopedVectorStore {
         float[] queryVector = embeddingModel.embed(query);
 
         StringBuilder sql = new StringBuilder("select " + SOURCE_COLUMNS + ", "
-                + "(embedding <=> cast(:queryVector as vector)) as distance "
+                + "(embedding <=> cast(:queryVector as public.vector)) as distance "
                 + "from document_chunks where embedding is not null and (");
         sql.append("visibility = 'PUBLIC'");
         if (ownerUserId != null && !ownerUserId.isBlank()) {
@@ -215,7 +215,7 @@ public class PgVectorStoreAdapter implements ScopedVectorStore {
 
     private void updateEmbedding(String id, float[] vector) {
         entityManager.createNativeQuery(
-                "update document_chunks set embedding = cast(:embedding as vector) where id = :id")
+                "update document_chunks set embedding = cast(:embedding as public.vector) where id = :id")
                 .setParameter("embedding", vectorLiteral(vector))
                 .setParameter("id", id)
                 .executeUpdate();
