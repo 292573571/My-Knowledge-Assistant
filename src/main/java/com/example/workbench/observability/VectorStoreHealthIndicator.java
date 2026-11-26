@@ -7,9 +7,10 @@ import org.springframework.stereotype.Component;
 
 /**
  * 向量存储健康检查：按活动 provider（chroma / pgvector / memory）实测连通性，不触发向量计算。
- * Bean 名与 actuator readiness 健康组引用保持一致（management.endpoint.health.group.readiness.include）。
+ * Bean 名（vectorStoreHealth）与 actuator readiness 健康组引用保持一致。
+ * 注意不能叫 vectorStore —— 会与 SpringAiConfig.vectorStore 冲突（BeanDefinitionOverrideException）。
  */
-@Component("vectorStore")
+@Component("vectorStoreHealth")
 public class VectorStoreHealthIndicator implements HealthIndicator {
 
     private final ScopedVectorStore vectorStore;
